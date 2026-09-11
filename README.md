@@ -59,7 +59,7 @@ Project Eden v1.1.1 已加载
 Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 ```
 
-第二行是判断 preloader 有没有生效的唯一依据。完整说明见 **[部署.md](部署.md)**。
+第二行是判断 preloader 有没有生效的唯一依据。完整说明见 **[部署.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/%E9%83%A8%E7%BD%B2.md)**。
 
 ---
 
@@ -96,8 +96,8 @@ Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 
 完整说明（含每条配方的化学依据）：
 
-- 📘 **[中文：mod特性.md](mod特性.md)**
-- 📗 **[English: mod_feature.md](mod_feature.md)**
+- 📘 **[中文：mod特性.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md)**
+- 📗 **[English: mod_feature.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod_feature.md)**
 
 ---
 
@@ -210,8 +210,8 @@ JSON 配置，采用 **[GNU GPL v3.0](LICENSE)**。
 
 ## 参与开发
 
-- **[部署.md](部署.md)** —— 装给别人用怎么装、发新版怎么打包（含 preloader 的离线校验流程）
-- **[CLAUDE.md](CLAUDE.md)** —— 架构说明与踩过的坑。读 IL 胜过猜，这份文档里的每一条机制都是这么来的
+- **[部署.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/%E9%83%A8%E7%BD%B2.md)** —— 装给别人用怎么装、发新版怎么打包（含 preloader 的离线校验流程）
+- **[CLAUDE.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/CLAUDE.md)** —— 架构说明与踩过的坑。读 IL 胜过猜，这份文档里的每一条机制都是这么来的
 
 ```bash
 dotnet build                                   # 编译并部署插件到 profile

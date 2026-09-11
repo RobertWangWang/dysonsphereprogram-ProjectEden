@@ -129,7 +129,7 @@ def main():
 
     os.makedirs(STAGE)
 
-    for src, rel in [
+    files = [
         (manifest_path, u'manifest.json'),
         (os.path.join(ROOT, u'ProjectEden', u'icon.png'), u'icon.png'),
         (os.path.join(ROOT, u'ProjectEden', u'CHANGELOG.md'), u'CHANGELOG.md'),
@@ -141,12 +141,15 @@ def main():
         (PLUGIN, u'plugins/ProjectEden.dll'),
         (NEWTON, u'plugins/Newtonsoft.Json.dll'),
         (PRELOAD, u'patchers/ProjectEden.Preloader.dll'),
-    ]:
+    ]
+
+    for src, rel in files:
         dst = os.path.join(STAGE, rel.replace(u'/', os.sep))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
 
-    write_readme()
+    # README 自己也算包内文件（write_readme 单独写，没进上面那张表）
+    write_readme({rel for _src, rel in files} | {u'README.md'})
 
     if os.path.exists(zip_path):
         os.remove(zip_path)
@@ -171,14 +174,35 @@ def main():
     out.write(u'\n提醒：包里的 preloader 必须是 verify_preloader.ps1 -Config Release 校验过的那一个。\n')
 
 
-def write_readme():
-    u"""README 在仓库根目录，里面指向的开发文档不进包 —— 换成仓库链接，别留 404。"""
+def write_readme(shipped):
+    u"""README 原样进包，但先核一遍链接不会在包里 404。
+
+    <b>以前这里是「把 部署.md / CLAUDE.md 换成仓库链接」的定点替换，现在改成校验。</b>
+    源文件里的 .md 链接已经全部写成仓库 URL，那份替换表就一处也匹配不上了 ——
+    而 str.replace 匹配不上时<b>一声不吭</b>，于是"README 链接有人管着"就成了一句
+    没有任何东西在维护的话。往 README 里新加一条指向仓库内文件的相对链接，
+    旧代码同样一声不吭，包里那一条直接 404。
+
+    所以不替换了，改成：凡是相对链接，目标必须真的在包里，否则拒绝打包。
+    这样新增链接写错会当场响，而不是等玩家点出 404。
+    """
     readme = io.open(os.path.join(ROOT, u'README.md'), encoding='utf-8').read()
 
-    for a, b in [(u'[部署.md](部署.md)', u'[部署.md](%s/blob/main/%%E9%%83%%A8%%E7%%BD%%B2.md)' % REPO),
-                 (u'[CLAUDE.md](CLAUDE.md)', u'[CLAUDE.md](%s/blob/main/CLAUDE.md)' % REPO),
-                 (u'[NOTICE](NOTICE)', u'[NOTICE](NOTICE)')]:
-        readme = readme.replace(a, b)
+    bad = []
+
+    for text, target in re.findall(r'\[([^\]]*)\]\(([^)]+)\)', readme):
+        # 外链和页内锚点不在管辖范围
+        if target.startswith(u'http://') or target.startswith(u'https://') or target.startswith(u'#'):
+            continue
+
+        if target.split(u'#')[0] not in shipped:
+            bad.append(u'[%s](%s)' % (text, target))
+
+    if bad:
+        raise SystemExit(
+            u'README.md 里这些相对链接指向的文件不在包内，装出去点了是 404：\n  '
+            + u'\n  '.join(bad)
+            + u'\n  要么把它改成仓库 URL（%s/blob/main/…），要么把那个文件加进打包清单。' % REPO)
 
     io.open(os.path.join(STAGE, u'README.md'), 'w', encoding='utf-8').write(readme)
 
