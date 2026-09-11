@@ -40,12 +40,12 @@
 **2. 导入本体**：r2modman 左侧 `Settings` → `Import local mod` → 选发布包的 zip，
 然后从 r2modman 点 **`Start modded`** 启动（直接开 Steam 不会加载 mod）。
 
-手动安装就把 zip 里的 `BepInEx/` 整个合并进 profile，装完应该是这三个文件：
+手动安装的话，包里的 `plugins/` 和 `patchers/` 要分别落到 profile 的两个目录下：
 
 ```
-BepInEx/plugins/ProjectEden/ProjectEden.dll
-BepInEx/plugins/ProjectEden/Newtonsoft.Json.dll
-BepInEx/patchers/ProjectEden/ProjectEden.Preloader.dll
+plugins/ProjectEden.dll          →  BepInEx/plugins/ProjectEden/ProjectEden.dll
+plugins/Newtonsoft.Json.dll      →  BepInEx/plugins/ProjectEden/Newtonsoft.Json.dll
+patchers/ProjectEden.Preloader.dll  →  BepInEx/patchers/ProjectEden/ProjectEden.Preloader.dll
 ```
 
 > ⚠️ **`patchers/` 里那个不能漏，也不能放进 `plugins/`。** 放错位置**不会报错**：
