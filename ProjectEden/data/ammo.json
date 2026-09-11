@@ -1,0 +1,53 @@
+{
+  "//": "合金弹药：拿两种合金做子弹，组合决定伤害档位和产量。**配方不公开**——合成面板里只有一条『合金弹药』，具体哪一对给哪一档要自己试出来。",
+
+  "//how": "装配台窗口下方会出现一块面板，两行各选一种合金。逐建筑覆盖四个 int：requires[0] / requires[1]（哪两种合金）、products[0]（哪一档弹药）、productCounts[0]（产量）。四个都是『改值不改数组长度』，存档安全——长度一变就坏档。",
+
+  "//why-tiers": "伤害是 ItemProto.Ability，**按 proto 存**（TurretComponent.SetNewItem 里 bulletDamage = proto.Ability，Mecha.ammoDamage 也读它）。所以『伤害随组合变』只能靠一个伤害值一个物品，躲不掉。档位少一点（5 档）物品格位才吃得消；产量则是 productCounts[0]，连续，不占物品。",
+
+  "//turret": "弹药能不能进炮塔取决于 ItemProto.turretNeeds，那是预加载期建的静态表，LDBTool 没有替我们重跑——Plugin.RefreshTurretNeeds 补上了。没有那一步的话弹药注册得好好的、炮塔就是捡不起来，而且不报错。",
+
+  "//hand-fill": "已知限制：炮塔窗口的『一键装填』只有 3 个按钮控件（handFillAmmoIcon0/1/2），原版三种子弹已经占满，所以这 5 档不会出现在那里。传送带喂弹和 Shift 点击塞进炮塔都正常——那两条路是把整张表当过滤数组、按 Length 遍历的。",
+
+  "enabled": true,
+
+  "//ammoType": "1 = Bullet（机枪类）。2 激光 / 3 炮弹 / 4 等离子 / 5 导弹 / 6 电磁胶囊。",
+  "ammoType": 1,
+
+  "//anchor": "伤害和发数都**按倍率写，不写绝对值**——原版弹药的 Ability / HpMax 存在 resources.assets 的 proto 里，离线看不到、反编译也查不到，硬写就是猜。运行时取『AmmoType 相同、ID 最小』的那个原版弹药当锚点，乘出来的真值会打进开局日志。",
+  "anchorItemId": 0,
+
+  "recipeId": 6600,
+  "//recipeType": "4 = 组装（制造台）。弹药是装配活不是冶炼。",
+  "recipeType": 4,
+  "timeSpend": 120,
+  "//parts": "一炉吃两种合金各几份。两个槽的物品 ID 逐建筑可换，份数不变。",
+  "partsA": 2,
+  "partsB": 2,
+
+  "//candidates": "可以拿来做弹药的合金。留空则自动取 alloys.json 里全部七种。写 ref，别写死 ID。",
+  "candidates": [],
+
+  "//tiers": "五档。damage / rounds 是相对锚点的倍率；minScore 是这一档要求的『侵彻分』下限，由两种合金按混合律混出来的四维算得——见 //score。",
+  "tiers": [
+    { "key": "alloy-ammo-1", "itemId": 6612, "name": "合金弹药 I",   "damage": 1.0,  "rounds": 1.0,  "minScore": 0 },
+    { "key": "alloy-ammo-2", "itemId": 6613, "name": "合金弹药 II",  "damage": 1.35, "rounds": 1.1,  "minScore": 52 },
+    { "key": "alloy-ammo-3", "itemId": 6614, "name": "合金弹药 III", "damage": 1.8,  "rounds": 1.2,  "minScore": 60 },
+    { "key": "alloy-ammo-4", "itemId": 6615, "name": "合金弹药 IV",  "damage": 2.4,  "rounds": 1.3,  "minScore": 68 },
+    { "key": "alloy-ammo-5", "itemId": 6616, "name": "合金弹药 V",   "damage": 3.2,  "rounds": 1.45, "minScore": 76 }
+  ],
+
+  "//score": "侵彻分 = 硬度 × hardnessWeight + 耐蚀 × corrosionWeight。硬度是主项——现实里穿甲弹用碳化钨芯正是因为硬度决定侵彻；耐蚀当成一点『不易烧蚀』的加成。两种合金按 50:50 走混合律（硬度取幂平均、韧性取调和平均、其余线性），和合金本身用的是同一套。",
+  "hardnessWeight": 0.85,
+  "corrosionWeight": 0.15,
+
+  "//yield": "产量 = 基准 × (韧性 / toughnessAnchor) ^ toughnessExponent，夹在 yieldMin~yieldMax 之间。**脆的料成形时崩得多，一炉出的成品少**——所以『又硬又韧』的组合才是稀有解，而混合律恰好让单一纯金属做不到这一点。",
+  "baseYield": 12,
+  "toughnessAnchor": 30.0,
+  "toughnessExponent": 0.6,
+  "yieldMin": 0.5,
+  "yieldMax": 1.8,
+
+  "//discovery": "true 则未炼出过的档位在提示栏里把伤害和发数显示成 ???，炼出来过一次才揭晓。已发现的组合记在本 mod 的存档块里，面板上有一块『已发现』清单。",
+  "hideUndiscovered": true
+}

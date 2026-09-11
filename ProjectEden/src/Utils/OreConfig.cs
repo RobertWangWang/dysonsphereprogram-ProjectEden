@@ -1,0 +1,310 @@
+#pragma warning disable 649 // 字段由 JSON 反序列化赋值
+
+using System;
+
+namespace ProjectEden.Utils
+{
+    /// <summary>data/ores.json 的映射类型：自定义矿脉的总表。</summary>
+    [Serializable]
+    internal class OreConfig
+    {
+        /// <summary>总开关。关掉之后所有自定义矿脉和额外物品都不注册</summary>
+        public bool enabled;
+
+        /// <summary>不属于任何矿脉的额外物品，比如配方的副产物。先于矿脉注册，好让配方能引用</summary>
+        public ExtraItemEntry[] items;
+
+        /// <summary>逐个矿种的定义</summary>
+        public OreEntry[] ores;
+
+        /// <summary>
+        /// 不属于任何矿种的配方，比如「电解水」。
+        /// 和矿种下挂的配方是同一个结构，区别只是 <c>ref</c> 不能写
+        /// <c>ore</c> / <c>ingot</c>（没有「本矿种」可言），只能引 items 段的 key
+        /// 或别的矿种的 <c>key.ore</c> / <c>key.ingot</c>。
+        /// </summary>
+        public OreRecipeEntry[] recipes;
+
+        /// <summary>投放到气态巨星、由轨道采集器收集的气体</summary>
+        public GasEntry[] gases;
+    }
+
+    /// <summary>
+    /// 一个额外物品：本 mod 新增、但不是矿石也不是锭的东西（二氧化碳这类副产物）。
+    /// 图标同样由某个原版物品的图标改色而来，不需要美术资源。
+    /// </summary>
+    [Serializable]
+    internal class ExtraItemEntry
+    {
+        /// <summary>配方里用 <c>ref</c> 引用的名字，不进存档</summary>
+        public string key;
+
+        public bool enabled;
+
+        public string name;
+        public string description;
+
+        /// <summary>物品 ID。<b>进存档</b>，定下来别改</summary>
+        public int itemId;
+
+        /// <summary>合成面板格位的<b>起点</b>，被占用时自动往后找</summary>
+        public int gridIndex;
+
+        public int stackSize;
+
+        /// <summary>「制造于」那一栏的文字</summary>
+        public string produceFrom;
+
+        /// <summary>
+        /// 气体/液体。<b>决定能不能进储液罐</b>——不只是提示文字：原版空罐从皮带取货时，
+        /// 直接把流体白名单当过滤数组传进去（见 ProjectEdenPlugin.RefreshFluidList）。
+        /// 传送带和物流站则一视同仁，不受影响。
+        /// </summary>
+        public bool isFluid;
+
+        /// <summary>
+        /// 燃料类型，位掩码。<b>1 = 化学燃料</b>（火力发电厂、机甲反应堆能烧）；
+        /// 4 反物质 / 8 蓄电器 / 16 核燃料。填 0 表示不是燃料。
+        /// 发电建筑按 <c>prefabDesc.fuelMask &amp; FuelType</c> 判收不收。
+        /// </summary>
+        public int fuelType;
+
+        /// <summary>
+        /// 热值，单位<b>焦耳</b>。原版参照：煤矿 2.7e6、原油 4.05e6、可燃冰 4.8e6、氢 8e6。
+        /// 配了 fuelType 就必须配它，否则烧起来是 0 电。
+        /// </summary>
+        public long heatValue;
+
+        /// <summary>
+        /// 自制图标：assets/icons/&lt;icon&gt;.png（80×80，透明底）。
+        /// 填了就直接用这张，下面那组改色参数全部忽略。
+        /// </summary>
+        public string icon;
+
+        /// <summary>没配 icon 时，图标从哪个<b>原版物品</b>的图标改色而来</summary>
+        public int iconFrom;
+
+        public float iconHue;
+        public float iconSaturationScale;
+        public float iconMinSaturation;
+        public float iconValueScale;
+    }
+
+    /// <summary>
+    /// 一个矿种的<b>投放规则</b>：铺到哪些星球主题上、按普通矿脉位还是稀有槽、母星系刷不刷。
+    ///
+    /// 留空（矿种里不写 <c>placement</c>）就是老行为：<b>凡是产铁的主题都按 veinRarity 铺普通矿脉位</b>。
+    /// </summary>
+    [Serializable]
+    internal class PlacementEntry
+    {
+        /// <summary>
+        /// <c>normal</c>（默认）= 占普通矿脉位（<c>ThemeProto.VeinSpot</c>，密度按 veinRarity 乘铁矿）；
+        /// <c>rare</c> = 占<b>稀有槽</b>（<c>ThemeProto.RareVeins</c>，像金伯利矿那样按概率整颗星出现）。
+        /// </summary>
+        public string mode;
+
+        /// <summary>
+        /// 只铺到这些主题上，按 <c>ThemeProto.DisplayName</c> 做<b>包含匹配</b>（写「熔岩」能同时命中「熔岩」和「潮汐锁定熔岩」）。
+        /// 留空 = 不限主题（normal 模式下仍然只挑产铁的主题）。
+        ///
+        /// <b>主题表在 resources.assets 里，离线看不到</b>——开局日志会把实际的主题名全打一遍，
+        /// 照着改就行。匹配不到任何主题会报 ERROR，不会静默失效。
+        /// </summary>
+        public string[] themes;
+
+        /// <summary>
+        /// 母星系（<c>star.index == 0</c>）刷不刷。<b>false = 母星系一颗都没有</b>。
+        ///
+        /// 稀有槽本来就有「母星系专用概率」这一档（<c>RareSettings[i*4+1]</c>），
+        /// 所以这是原版就支持的事，填 0 即可；普通矿脉位没有这一档，
+        /// 要排除母星系得靠生成时拦截，见 OreBirthSystemPatches。
+        /// </summary>
+        public bool birthSystem;
+
+        /// <summary>rare 模式：非母星系里，一颗星球出现这种矿的概率。原版稀有矿大致 0.03 ~ 0.6</summary>
+        public float chance;
+
+        /// <summary>rare 模式：出现之后，每再追加一个矿脉位的概率（原版最多连滚 11 次）</summary>
+        public float extraChance;
+
+        /// <summary>rare 模式：矿脉的储量/浓度系数</summary>
+        public float richness;
+    }
+
+    /// <summary>
+    /// 一种投放到气态巨星的气体。
+    ///
+    /// <b>气体的生成和矿脉是同一个套路，都在 ThemeProto 上。</b>
+    /// 矿脉走 <c>VeinSpot / VeinCount / VeinOpacity</c>，气体走
+    /// <c>GasItems / GasSpeeds</c>；<c>PlanetGen.SetPlanetTheme</c> 里
+    /// <b>种类是原样照抄主题的，一点随机都没有</b>，随机只作用在速率上（×0.909~1.100），
+    /// 之后再乘全局的 <c>gasCoef</c> 和 <c>star.resourceCoef^0.3</c>。
+    ///
+    /// 只对<b>还没生成过的星球</b>生效，和矿脉一样。
+    /// </summary>
+    [Serializable]
+    internal class GasEntry
+    {
+        public bool enabled;
+
+        /// <summary>
+        /// 投放哪个物品。写 items 段某条的 key（或「矿种key.ore」这类全名）。
+        /// <b>不写死 ID</b>：新物品 ID 撞车时会顺延，写死的数字会指到别人家去。
+        /// </summary>
+        public string @ref;
+
+        /// <summary>
+        /// 速率，<b>相对于该主题里现有气体的最高速率</b>的倍数。
+        ///
+        /// 用倍数而不是绝对值，是因为各个气巨主题的基准速率写在
+        /// <c>resources.assets</c> 的 ThemeProto 里，离线看不到——
+        /// 硬写绝对值就是猜。开局日志会把算出来的真值打出来。
+        /// </summary>
+        public float speedRatio;
+    }
+
+    /// <summary>
+    /// 一个自定义矿种。
+    ///
+    /// <b>矿种编号必须从 15 起连续排。</b> 原版 1~14，EVeinType.Max = 15。
+    /// 中间不能留洞：UIPlanetDetail.OnPlanetDataSet 的矿种循环里，原版是
+    /// 先 <c>vp.MiningItem</c> 解引用、之后才判 <c>vp == null</c>，
+    /// 空号会当场空引用把星球面板打崩（见 CLAUDE.md，实测过）。
+    /// </summary>
+    [Serializable]
+    internal class OreEntry
+    {
+        /// <summary>日志用的短名，随便起，不进存档</summary>
+        public string key;
+
+        public bool enabled;
+
+        // ── 矿石物品 ─────────────────────────────────────────
+
+        public string oreName;
+        public string oreDescription;
+
+        /// <summary>矿石的物品 ID。<b>进存档</b>，定下来别改</summary>
+        public int oreItemId;
+
+        /// <summary>合成面板格位的<b>起点</b>，被占用时自动往后找</summary>
+        public int oreGridIndex;
+
+        /// <summary>
+        /// 矿石的自制图标：assets/icons/&lt;oreIcon&gt;.png（80×80，透明底）。
+        /// 填了就直接用这张，不再拿铁矿石的图标改色。
+        /// </summary>
+        public string oreIcon;
+
+        public int stackSize;
+
+        // ── 矿脉 ─────────────────────────────────────────────
+
+        public string veinName;
+
+        /// <summary>矿脉编号，同时是 VeinData.type。必须连续，见类注释</summary>
+        public int veinId;
+
+        /// <summary>专属模型 ID（克隆铁矿脉的模型再染色）。<b>进存档</b></summary>
+        public int veinModelId;
+
+        /// <summary>矿脉材质的染色系数，乘到每个颜色属性上。R/G/B 三个倍率</summary>
+        public float[] veinTint;
+
+        /// <summary>「矿脉分布」图表里色块的颜色，RGB 0~1</summary>
+        public float[] veinColor;
+
+        /// <summary>矿脉簇数量相对铁矿脉的倍率</summary>
+        /// <summary>投放规则：铺到哪些主题、普通位还是稀有槽、母星系刷不刷。留空 = 老行为（凡产铁的主题都铺）</summary>
+        public PlacementEntry placement;
+
+        public float veinRarity;
+
+        /// <summary>单簇储量相对铁矿脉的倍率</summary>
+        public float veinAmountScale;
+
+        // ── 图标染色（由铁的对应图标改色而来）─────────────────
+
+        public float iconHue;
+        public float iconSaturationScale;
+        public float iconMinSaturation;
+        public float iconValueScale;
+
+        // ── 锭 ───────────────────────────────────────────────
+
+        /// <summary>false 时只注册矿石，不注册锭（配方也就无从谈起）</summary>
+        public bool hasIngot;
+
+        public string ingotName;
+        public string ingotDescription;
+
+        /// <summary>「制造于」那一栏的文字。留空则按第一条配方的类型自动填</summary>
+        public string ingotProduceFrom;
+
+        public int ingotItemId;
+        public int ingotGridIndex;
+
+        /// <summary>
+        /// 锭的自制图标：assets/icons/&lt;ingotIcon&gt;.png（80×80，透明底）。
+        /// 填了就直接用这张，不再拿铁块的图标改色。矿石图标和矿脉图标不受影响。
+        /// </summary>
+        public string ingotIcon;
+
+        // ── 配方 ─────────────────────────────────────────────
+
+        /// <summary>可以有任意条，也可以一条都没有</summary>
+        public OreRecipeEntry[] recipes;
+    }
+
+    /// <summary>一条配方。原料和产物都可以混用原版物品与本 mod 的新物品。</summary>
+    [Serializable]
+    internal class OreRecipeEntry
+    {
+        public bool enabled;
+
+        /// <summary>配方名，同时是 LDBTool 记 ID 用的键——<b>改名等于换一条新配方</b></summary>
+        public string name;
+
+        public string description;
+
+        /// <summary>配方 ID。<b>进存档</b></summary>
+        public int recipeId;
+
+        /// <summary>ERecipeType：1 熔炉 / 2 化工 / 3 精炼 / 4 组装 / 5 粒子</summary>
+        public int type;
+
+        /// <summary>耗时，单位 tick（60 = 1 秒）</summary>
+        public int timeSpend;
+
+        /// <summary>合成面板格位的<b>起点</b>，被占用时自动往后找</summary>
+        public int gridIndex;
+
+        /// <summary>自制图标：assets/icons/&lt;icon&gt;.png。留空则跟随本矿种的锭图标</summary>
+        public string icon;
+
+        /// <summary>图标从哪个<b>原版物品</b>改色而来。填 0 且没配 icon 则用本矿种的锭图标</summary>
+        public int iconFrom;
+
+        public RecipeItemEntry[] items;
+        public RecipeItemEntry[] results;
+    }
+
+    /// <summary>
+    /// 配方里的一格原料或产物。
+    ///
+    /// <c>id</c> 是原版物品 ID；<c>ref</c> 是本 mod 物品的引用名，
+    /// 取值为 <c>ore</c>（本矿种的矿石）、<c>ingot</c>（本矿种的锭），
+    /// 或 ores.json 里 <c>items</c> 段某个条目的 <c>key</c>。
+    /// 用 <c>ref</c> 而不是写死 ID，是因为新物品的 ID 撞车时会自动顺延。
+    /// </summary>
+    [Serializable]
+    internal class RecipeItemEntry
+    {
+        public int id;
+
+        public string @ref;
+
+        public int count;
+    }
+}

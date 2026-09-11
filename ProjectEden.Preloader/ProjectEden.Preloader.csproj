@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <Import Project="$(MSBuildThisFileDirectory)..\DefaultPath.props"
+            Condition="Exists('$(MSBuildThisFileDirectory)..\DefaultPath.props')" />
+
+    <PropertyGroup>
+        <TargetFramework>net472</TargetFramework>
+        <AssemblyName>ProjectEden.Preloader</AssemblyName>
+        <Product>Project Eden Preloader</Product>
+        <Version>1.1.0</Version>
+
+        <LangVersion>latest</LangVersion>
+        <Nullable>disable</Nullable>
+
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <DebugType>portable</DebugType>
+
+        <GameDir Condition="'$(GameDir)' == ''">G:\SteamLibrary\steamapps\common\Dyson Sphere Program</GameDir>
+        <BepInExDir Condition="'$(BepInExDir)' == ''">$(APPDATA)\r2modmanPlus-local\DysonSphereProgram\profiles\ProjectEden\BepInEx</BepInExDir>
+
+        <PatchersDir>$(BepInExDir)\patchers\ProjectEden</PatchersDir>
+
+        <!-- **默认不部署。** preloader 一旦进了 patchers/ 就会改写整个 Assembly-CSharp，
+             而且出了错是 CLR 类型加载失败、指不到你的代码。所以先离线验证
+             （tools/verify_preloader.ps1 会拿它跑一份副本再回扫断言），
+             确认无误再用 -p:DeployPreloader=true 装上去。 -->
+        <DeployPreloader Condition="'$(DeployPreloader)' == ''">false</DeployPreloader>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- preloader 在 CLR 载入游戏程序集**之前**跑，所以**绝不能**引用 Assembly-CSharp。
+             它手上只有 Cecil 的元数据视图。 -->
+        <Reference Include="$(BepInExDir)\core\Mono.Cecil.dll" Private="false" />
+        <Reference Include="$(BepInExDir)\core\Mono.Cecil.Rocks.dll" Private="false" />
+        <Reference Include="$(BepInExDir)\core\BepInEx.dll" Private="false" />
+    </ItemGroup>
+
+    <Target Name="DeployPreloaderToProfile" AfterTargets="Build"
+            Condition="'$(DeployPreloader)' == 'true' And Exists('$(BepInExDir)')">
+        <MakeDir Directories="$(PatchersDir)" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PatchersDir)\" />
+        <Message Importance="high" Text="preloader 已部署到 $(PatchersDir)\" />
+    </Target>
+
+    <Target Name="PreloaderNotDeployed" AfterTargets="Build" Condition="'$(DeployPreloader)' != 'true'">
+        <Message Importance="high"
+                 Text="preloader 已编译但**未部署**（默认如此）。离线验证：tools\verify_preloader.ps1；装上去：dotnet build -p:DeployPreloader=true" />
+    </Target>
+
+</Project>

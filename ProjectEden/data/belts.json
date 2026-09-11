@@ -1,0 +1,21 @@
+{
+  "//": "传送带速度。这是**纯数据改动**——不碰结构体、不碰存档格式、不需要 preloader，和采矿机提速是同一个套路。",
+
+  "//how": "PrefabDesc.beltSpeed（Int32）直接赋给 BeltComponent.speed，全程没有夹取。每堆货在传送带缓冲区里占 kCargoLength = 10 格，60 tick/秒，所以 **物品/秒 = speed × 6**。拿原版验证：Mk.I speed 1 → 6/秒、Mk.II speed 2 → 12/秒、Mk.III speed 5 → 30/秒，三个全中。",
+
+  "//ceiling": "**上限比想象的低，而且是实测出来的。** 原版有个常量 kMaxCargoFlowSpeedPerSecond = 120（对应 speed 20），但**没有任何代码读它——它压根没被实现**，别信。实测 speed 20 会让 CargoPath.Update 抛 IndexOutOfRange：那里有个「从当前位置往回扫 V_14 格找空位」的循环（IL_03B8），**对 buffer 下标没有下界保护**，速度一大就在短路径的起点扫穿数组头。原版 speed 5 只往回扫 5 格，所以永远不触发。",
+
+  "//tuning": "现在给到 20（120/秒）。**能到这个值是因为 CargoPathBoundsPatches 给那个回扫循环补了下界检查**——没有那个补丁的话超过 5 就会崩。补丁只修了实测炸过的那一处；Update 里另外 9 处 ldelem.u1 没有逐个验证，所以再往上仍然要实测：改一档、进游戏、让长短传送带都跑满几分钟（上次是第 48476 帧才炸的，得等货走到路径起点附近），看日志有没有 IndexOutOfRange。",
+  "//safe": "自动集装机那边是安全的：PilerComponent 用速度当数组下标（cacheCdTickArray 只有 3 个元素），但取值前有 `if (speed > 2) speed = 3` 的夹取，原版本来就预料到速度会超过 3。喷涂器读速度只做乘法，也不查表。",
+
+  "//existing": "**已建成的传送带把速度烤进了存档**（BeltComponent.speed 和 CargoPath.chunks 都是持久化的），光改 prefabDesc 只对新建的生效，所以读档时会逐条改过来。注意**不能直接调原版的 CargoTraffic.UpgradeBeltComponent**——它在同一个函数里前面判了 planet.physics 的空、五条指令之后又直接解引用，遍历未加载的星球必然空引用崩溃（实测过）。这里只抄它的数据部分：BeltComponent.speed + CargoPath.InsertChunk（**货物真正按 chunks 里的值走**，漏了这步就是「数字变了货没变快」）+ 环形路径的 SyncBuckleSpeed。",
+
+  "enabled": true,
+
+  "//belts": "按物品 ID 逐条配。2001 低速 / 2002 高速 / 2003 极速。保持原版 1:2:5 的档次比例整体放大 4 倍，最高档 120/秒。",
+  "belts": [
+    { "itemId": 2001, "name": "低速传送带", "speed": 4,  "//": "24/秒（原版 6）" },
+    { "itemId": 2002, "name": "高速传送带", "speed": 8,  "//": "48/秒（原版 12）" },
+    { "itemId": 2003, "name": "极速传送带", "speed": 20, "//": "120/秒（原版 30）。这个值依赖 CargoPathBoundsPatches 的越界保护，见 //tuning" }
+  ]
+}

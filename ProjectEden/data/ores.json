@@ -1,0 +1,2074 @@
+{
+  "//": "自定义矿脉总表。加新矿种只要往 ores 里追加一条，加新配方只要往某个矿种的 recipes 里追加一条，都不用改代码。",
+  "//veinId": "矿脉编号，同时是 VeinData.type。**必须从 15 起连续排**：原版 1~14，EVeinType.Max = 15。中间留洞会把星球详情面板打崩——原版那个矿种循环是先 vp.MiningItem 解引用、之后才判 vp == null，走到空号当场空引用。注册阶段会核对连续性并报 ERROR。",
+  "//itemId": "物品/配方 ID 都会**进存档**，定下来别改。6500~6504 被巨型建筑占了，6510 起是矿物区。开局会现场核对是否被占用，撞了自动顺延并打 WARNING 告诉你钉回哪个值。",
+  "//gridIndex": "合成面板格位（分页 × 1000 + 行 × 100 + 列），只是**起点**，被占用会自动往右顺延。注意合成面板画的是配方不是物品，多出来的列靠合成器横向翻页露出（megabuildings.json 的 replicatorPages）。",
+  "//veinTint": "矿脉材质的染色系数（R/G/B 倍率），乘到材质的每个颜色属性上。小于 1 变暗，大于 1 提亮。铁矿脉本身是偏蓝的钢灰。",
+  "//icon": "两种来源，二选一。**自制图标**：填 icon / ingotIcon，值是 assets/icons/<名字>.png 的文件名（80×80 透明底，tools/make_icons.py 生成），走 IconPath + Resources.Load 前缀，改色参数全部忽略。**改色**：不填 icon，则由某个原版物品的图标改色而来——iconHue 是目标色相（度），iconSaturationScale 饱和度倍率，iconMinSaturation 给近似灰的像素一个饱和度下限（要做白色就填 0），iconValueScale 明度倍率。注意 items 段的 iconFrom 即使配了自制图标也别删：它同时当作新物品的模板，堆叠上限和提示栏字段都从它身上抄。",
+  "//items": "不属于任何矿脉的新物品，比如配方副产物。排在矿脉之前注册，好让配方能按 key 引用。",
+  "//isFluid": "决定能不能进储液罐，不只是提示文字——原版空罐从皮带取货时直接把流体白名单当过滤数组用。那张表在预加载期就建好了、早于 mod 物品入表，所以本 mod 会在 LDB 建好后重跑一次原版的建表方法（见 Plugin.cs 的 RefreshFluidList）。",
+  "//fuel": "fuelType 是位掩码，**1 = 化学燃料**（火力发电厂、机甲反应堆能烧），0 表示不是燃料；heatValue 是热值，单位焦耳，两个必须成对配。数值不是拍的：以**煤矿 2.7 MJ**（原版值，对应碳的燃烧焓 393.5 kJ/mol）为基准，按各自的摩尔燃烧焓等比换算——CO 283、甲醇 726、乙烯 1411 kJ/mol。想调平衡改 heatValue 就行。",
+  "//toplevel-recipes": "顶层的 recipes 段放不属于任何矿种的配方（比如电解水）。结构和矿种下挂的完全一样，区别只是 ref 不能写 ore / ingot——没有「本矿种」可言——只能引 items 段的 key，或者写「矿种key.ore」这样的全名。这类配方也没有锭图标可跟随，必须自己配 icon 或 iconFrom，否则合成面板上那一格是空白。",
+  "//recipes": "原料/产物两侧都写 { id } 或 { ref }：id 是原版物品 ID，ref 是本 mod 的新物品——ore（本矿种的矿石）、ingot（本矿种的锭）、items 段某条的 key，或别的矿种的 key 加 .ore / .ingot 后缀。用 ref 是因为新物品的 ID 撞车时会自动顺延，写死 ID 就指到别人家去了。",
+  "//type": "ERecipeType：1 熔炉 / 2 化工 / 3 精炼 / 4 组装 / 5 粒子；**9 = 电化学**（电化学厂）、**10 = 氧化还原**（氧化还原化工厂），都由 machines.json 定义，只有对应的机器做得了。原版占了 1~8 和 15，9~14 空着，本 mod 用掉 9 和 10。",
+  "//name": "配方名同时是 LDBTool 记 ID 用的键，**改名等于换一条新配方**，老存档里那条会变成孤儿。",
+  "enabled": true,
+  "items": [
+    {
+      "//": "碳热还原铝的尾气。目前没有下游用途，先当副产物存着。图标由『氢』的气瓶图改成灰调。",
+      "key": "co2",
+      "enabled": true,
+      "name": "二氧化碳",
+      "description": "碳热还原冶金的尾气。惰性、易压缩，暂时只能封存——直到有人想起来它还能拿去合成点什么。",
+      "itemId": 6514,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": true,
+      "icon": "carbon-dioxide",
+      "iconFrom": 1120,
+      "iconHue": 30.0,
+      "iconSaturationScale": 0.18,
+      "iconMinSaturation": 0.04,
+      "iconValueScale": 0.8
+    },
+    {
+      "//": "电解水的另一半产物。图标是自己画的（tools/make_icons.py），O=O 分子式。",
+      "key": "oxygen",
+      "enabled": true,
+      "name": "氧气",
+      "description": "电解水的阳极产物。助燃、强氧化性，暂时没有下游用途——先存着。",
+      "itemId": 6516,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "电化学厂",
+      "isFluid": true,
+      "icon": "oxygen",
+      "//iconFrom": "配了 icon 就不改色了，但这一项别删：它同时是新物品的模板，堆叠上限和提示栏字段从它身上抄。",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "C1 化工链的起点。图标是自己画的球棍分子式，C≡O。",
+      "key": "co",
+      "enabled": true,
+      "name": "一氧化碳",
+      "description": "煤与水蒸气反应得到的合成气组分。剧毒、可燃，更要紧的是它是个万能的碳砖——甲醇、烯烃、合成油都能从它搭起来。",
+      "itemId": 6517,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": true,
+      "//fuel": "CO + ½O₂ → CO₂，283 kJ/mol。按煤矿基准折 1.94 MJ——比煤强不了多少，一氧化碳本来就是差燃料，它的价值在当碳砖不在当柴烧。",
+      "fuelType": 1,
+      "heatValue": 1950000,
+      "icon": "carbon-monoxide",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "C1 化工链的枢纽：往下可以走氧化（甲醛）或脱水（烯烃）。",
+      "key": "methanol",
+      "enabled": true,
+      "name": "甲醇",
+      "description": "最简单的醇。合成气加氢的产物，也是整条 C1 路线的中转站——氧化成醛、脱水成烯，两条下游从这里分岔。",
+      "itemId": 6518,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": true,
+      "//fuel": "CH₃OH + 1.5 O₂ → CO₂ + 2 H₂O，726 kJ/mol，折 4.98 MJ。介于原油（4.05）和可燃冰（4.8）之上一点。",
+      "fuelType": 1,
+      "heatValue": 5000000,
+      "icon": "methanol",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "key": "formaldehyde",
+      "enabled": true,
+      "name": "甲醛",
+      "description": "甲醇部分氧化的产物，最简单的醛。活性极高，是树脂与粘合剂的骨架单元。",
+      "itemId": 6519,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": true,
+      "icon": "formaldehyde",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "MTO 的目标产物。烯烃是一类，这里取其中最有代表性的乙烯——图标画的是结构式，得落到具体分子上。",
+      "key": "ethylene",
+      "enabled": true,
+      "name": "乙烯",
+      "description": "最简单的烯烃，碳碳双键让它见谁跟谁反应。甲醇制烯烃（MTO）绕开了石油，直接从煤和水搭出聚合物的原料。",
+      "itemId": 6520,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "化工厂",
+      "isFluid": true,
+      "//fuel": "C₂H₄ + 3 O₂ → 2 CO₂ + 2 H₂O，1411 kJ/mol，折 9.68 MJ——比氢（8 MJ）还高。乙烯确实是能量密度很高的东西，烧了可惜，但配得上这个数。",
+      "fuelType": 1,
+      "heatValue": 9700000,
+      "icon": "ethylene",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "锂链的第一个中间体。**是固体不是流体**——按口径走常温常压下的相态，锂盐都是晶体。",
+      "key": "lithium-sulfate",
+      "enabled": true,
+      "name": "硫酸锂",
+      "description": "锂辉石经硫酸焙烧后浸出得到的可溶锂盐。锂从硅酸盐骨架里被换了出来，接下来只剩把它和硫酸根拆开。",
+      "itemId": 6562,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "化工厂",
+      "isFluid": false,
+      "icon": "lithium-sulfate",
+      "//iconFrom": "固体用石材当模板（原版固体材料），不是拿氢那个气瓶。",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "熔盐电解的原料。工业上电解的是 LiCl，但游戏里没有氯源——见 mod特性.md 第九节的说明。",
+      "key": "lithium-hydroxide",
+      "enabled": true,
+      "name": "氢氧化锂",
+      "description": "强碱性的白色晶体。既是锂电池正极材料的直接前体，也是熔盐电解制取金属锂的原料。",
+      "itemId": 6563,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "电化学厂",
+      "isFluid": false,
+      "icon": "lithium-hydroxide",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "锂离子电池的正极材料。图标画的是**晶体结构**不是分子式——它是离子晶体，没有「一个分子」可画，而分层正是它的要害：锂离子在 CoO₂ 层之间进出，这就是充放电的全部原理。",
+      "key": "lithium-cobalt-oxide",
+      "enabled": true,
+      "name": "钴酸锂",
+      "description": "层状氧化物，锂离子电池的经典正极。锂离子能在钴氧层之间可逆地进出，充放电上千次而结构不塌——这就是锂电池的全部秘密。",
+      "itemId": 6564,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": false,
+      "icon": "lithium-cobalt-oxide",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "气态巨星上采的惰性气体。**故意没有热值**——氮气的 N≡N 三键是化学里最稳的键之一，它不燃烧，这是它作为保护气的全部价值所在。照口径走真实化学。",
+      "key": "nitrogen",
+      "enabled": true,
+      "name": "氮气",
+      "description": "空气里最多的东西，也是最难反应的东西之一。N≡N 三键极其牢固，所以它既不燃烧也不助燃——正因如此才被拿来当保护气。",
+      "itemId": 6565,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "轨道采集器",
+      "isFluid": true,
+      "icon": "nitrogen",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "哈伯法的产物，把惰性的氮气变成能反应的形态。氮从 0 价还原到 −3 价。",
+      "key": "ammonia",
+      "enabled": true,
+      "name": "氨",
+      "description": "把空气里那份最难动的氮变成能用的形态。哈伯法一出现，人类第一次能凭空造出氮肥——也第一次能凭空造出炸药。",
+      "itemId": 6566,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": true,
+      "//fuel": "4 NH₃ + 3 O₂ → 2 N₂ + 6 H₂O，每摩尔 383 kJ。按煤矿基准折 2.6 MJ。氨确实烧得着（只是点火难），所以给热值。",
+      "fuelType": 1,
+      "heatValue": 2600000,
+      "icon": "ammonia",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "奥斯特瓦尔德法的中间体。**故意没有热值**——它是氧化剂不是燃料，和氧气同理。",
+      "key": "nitrogen-dioxide",
+      "enabled": true,
+      "name": "二氧化氮",
+      "description": "红棕色的刺鼻气体，氮上带着一个单电子，所以分子是弯的而不是直的。强氧化性，见水即成酸。",
+      "itemId": 6567,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": true,
+      "icon": "nitrogen-dioxide",
+      "iconFrom": 1120,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "**没有热值**：硝酸是强氧化剂，是助燃的那一方，不是燃料。",
+      "key": "nitric-acid",
+      "enabled": true,
+      "name": "硝酸",
+      "description": "三大强酸之一，也是最能氧化的那个。硝化反应的必需品——从化肥到炸药，凡是要往分子上挂硝基的都绕不开它。",
+      "itemId": 6568,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": true,
+      "icon": "nitric-acid",
+      "iconFrom": 1116,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "钨链的中间体。**必须存在**：白钨矿不能直接还原成金属钨。工业路线是先把钨从矿里以钨酸的形式换出来、煅烧成三氧化钨，再拿氢去还原——少了这一步，后面那步就不是真实反应了。",
+      "key": "tungsten-trioxide",
+      "enabled": true,
+      "name": "三氧化钨",
+      "description": "柠檬黄的粉末，钨冶金的通用中间体。它本身极稳定，要把钨从中夺出来，只有氢做得到。",
+      "itemId": 6588,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "化工厂",
+      "isFluid": false,
+      "icon": "tungsten-trioxide",
+      "//iconFrom": "固体用石材当模板，和其余固体中间体一致。",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "W + C → WC。**这一格正是钒那条规则的反面。** 碳还原不动五氧化二钒，因为碳会跟钒结合成碳化钒；钨完全一样，碳给不出金属钨，只给碳化钨。区别只在于这里的碳化物正是我们要的东西。",
+      "key": "tungsten-carbide",
+      "enabled": true,
+      "name": "碳化钨",
+      "description": "硬度仅次于金刚石的陶瓷，却能导电。极硬、极脆、熔点近 2900°C——单独用会崩，必须靠金属把它粘结起来才成器。",
+      "itemId": 6589,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "tungsten-carbide",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "硬质合金牌号 I。**配比 6:4（碳化钨:钴）落在这一档**。四个牌号是同一种材料的四个成分点，不是四种材料——所以图标同形，靠顶面刻印的点数区分。",
+      "key": "carbide",
+      "enabled": true,
+      "name": "硬质合金",
+      "description": "碳化钨颗粒由金属钴液相烧结粘结而成。钴越多越韧越钝，钴越少越硬越脆——它不是一种材料，是一条连续的成分线。配比在冶炼炉窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃稀有金属。",
+      "itemId": 6590,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "carbide",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "哈德菲尔德钢：Fe + 约 12% Mn + 约 1.2% C。**不是配平的方程**，合金是固溶体不是化合物，配比按质量分数来。",
+      "key": "manganese-steel",
+      "enabled": true,
+      "name": "锰钢",
+      "description": "高锰钢。含锰约 12%，平时并不算硬，一旦受到冲击表面立刻加工硬化——越砸越耐砸。配比在冶炼炉窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃稀有金属。",
+      "itemId": 6594,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "manganese-steel",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "**200 系不锈钢**：Fe + 约 18% Cr + 用锰代镍。现实里 200 系正是为了省镍才发明的，而游戏里没有镍——你表里『铁+铬+锰』这个配料直接对上了真实牌号。",
+      "key": "stainless-steel",
+      "enabled": true,
+      "name": "不锈钢",
+      "description": "铬在表面自发形成一层致密的钝化膜，划破了还会自己长回去——这才是它不锈的原因，不是铬本身不生锈。配比在冶炼炉窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃稀有金属。",
+      "itemId": 6595,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "stainless-steel",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "电镀：铬以离子形态在铜表面沉积成一层膜。**这是电化学过程，不是熔炼**，所以走电化学厂而不是冶炼厂——判据是反应类别。铬只覆盖表面，所以用量远小于铜。",
+      "key": "chrome-plated-copper",
+      "enabled": true,
+      "name": "镀铬铜",
+      "description": "铜芯导电、铬层耐蚀。电极和双极板要的正是这两样，而单独哪种金属都给不全。配比在电化学厂窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃铬。",
+      "itemId": 6596,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "电化学厂",
+      "isFluid": false,
+      "icon": "chrome-plated-copper",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "AISI 6150 一类：Fe + 约 1% Cr + 约 0.15% V + 碳。钒的作用是形成碳化钒钉扎晶界，用量极少但不可省。",
+      "key": "chrome-vanadium-steel",
+      "enabled": true,
+      "name": "铬钒工具钢",
+      "description": "铬提硬度和淬透性，钒把晶粒钉住不让它长大——晶粒越细越不容易崩口。扳手和批头上印的 Cr-V 就是它。配比在冶炼炉窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃稀有金属。",
+      "itemId": 6597,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "chrome-vanadium-steel",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "司太立/维他灵合金：Co 基 + 约 30% Cr。钴基体提供高温强度，铬提供钝化膜。",
+      "key": "cobalt-chrome",
+      "enabled": true,
+      "name": "钴铬合金",
+      "description": "又硬又耐蚀，而且在高温下不软。涡轮叶片和人工关节用的是同一类材料。配比在冶炼炉窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃稀有金属。",
+      "itemId": 6598,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "cobalt-chrome",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "钛的 β 相合金：钒是典型的 β 稳定元素，Ti-15V 一类的牌号靠它在室温下保住 β 相。",
+      "key": "vanadium-titanium",
+      "enabled": true,
+      "name": "钒钛合金",
+      "description": "钛的轻和耐蚀，加上钒带来的强度。代价是难加工——熔点高、还容易和坩埚反应。配比在冶炼炉窗口下方的面板里调——四维属性随配比变化，好配比换来更高产量、更短耗时，代价是每炉多吃稀有金属。",
+      "itemId": 6599,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "vanadium-titanium",
+      "iconFrom": 1108,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    }
+  ],
+  "ores": [
+    {
+      "key": "cobalt",
+      "enabled": true,
+      "oreName": "钴矿石",
+      "oreDescription": "水钴矿，钴的氧化物矿石。以煤为还原剂碳热还原即得金属钴。",
+      "oreItemId": 6510,
+      "oreGridIndex": 1601,
+      "oreIcon": "cobalt-ore",
+      "stackSize": 300,
+      "veinName": "钴矿脉",
+      "veinId": 15,
+      "veinModelId": 722,
+      "veinTint": [
+        0.42,
+        0.58,
+        1.0
+      ],
+      "veinColor": [
+        0.129,
+        0.278,
+        0.671
+      ],
+      "//veinRarity": "rare 模式下这个值不参与计算（那是普通矿脉位的密度倍率），保留只为改回 normal 时有个基准。",
+      "veinRarity": 0.35,
+      "veinAmountScale": 1.0,
+      "//placement": "硬质合金的门票，值得跨星系去找——所以占**稀有槽**而不是普通矿脉位：整颗星球要么有要么没有，像金伯利矿那样。放在熔岩/火山灰上，和硫酸海同星球正好配套。母星系不刷（RareSettings 的母星系那一档填 0，原版就支持）。",
+      "placement": {
+        "mode": "rare",
+        "themes": [
+          "熔岩",
+          "火山灰"
+        ],
+        "birthSystem": false,
+        "chance": 0.25,
+        "extraChance": 0.4,
+        "richness": 0.6
+      },
+      "//iconHue": "这四个值现在**只影响矿脉图标**（那张 480×480 的矿簇图，仍然由铁矿脉改色而来）。矿石和锤的物品图标已经改成自画的 PNG（oreIcon / ingotIcon），改这里对它们不起作用——要改颜色去 tools/make_icons.py。",
+      "iconHue": 226.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.22,
+      "iconValueScale": 0.94,
+      "hasIngot": true,
+      "ingotName": "钴块",
+      "ingotDescription": "银灰泛蓝的铁磁性金属。高温合金与硬质合金的关键组元。",
+      "ingotItemId": 6511,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "cobalt-ingot",
+      "recipes": [
+        {
+          "enabled": true,
+          "name": "钴块 · 碳热还原",
+          "description": "以煤为还原剂还原水钴矿。",
+          "recipeId": 6520,
+          "//type-10": "氧化还原。和碳热还原铝同一类反应，一起归到氧化还原化工厂。",
+          "type": 10,
+          "timeSpend": 90,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "id": 1006,
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "2 CoO + 2 CO → 2 Co + 2 CO₂。高炉那套经典还原，CO 是冶金里最标准的气体还原剂。",
+          "enabled": true,
+          "name": "钴块 · 一氧化碳还原",
+          "description": "通入一氧化碳还原钴矿。气固反应比固固接触充分得多，不用把矿和煤磨到一起。",
+          "recipeId": 6546,
+          "type": 10,
+          "timeSpend": 90,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "ref": "co",
+              "count": 2
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "ref": "co2",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "2 CoO + HCHO → 2 Co + CO₂ + H₂O。甲醛的碳从 0 价升到 +4，一份能还原两份矿。",
+          "enabled": true,
+          "name": "钴块 · 甲醛还原",
+          "description": "以甲醛作还原剂。醛基活性高，比一氧化碳更容易夺氧，一份能多还原一倍的矿。",
+          "recipeId": 6547,
+          "type": 10,
+          "timeSpend": 90,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "ref": "formaldehyde",
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "ref": "co2",
+              "count": 1
+            },
+            {
+              "id": 1000,
+              "count": 1
+            }
+          ]
+        },
+        {
+          "//": "3 CoO + CH₃OH → 3 Co + CO₂ + 2 H₂O。甲醇的碳是 −2 价，升到 +4 共让出 6 个电子，一份还原三份矿。",
+          "enabled": true,
+          "name": "钴块 · 甲醇还原",
+          "description": "以甲醇作还原剂。碳和氢一起参与夺氧，一份甲醇能还原三份矿，是几条路线里最省还原剂的。",
+          "recipeId": 6548,
+          "type": 10,
+          "timeSpend": 120,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 3
+            },
+            {
+              "ref": "methanol",
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 3
+            },
+            {
+              "ref": "co2",
+              "count": 1
+            },
+            {
+              "id": 1000,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "6 CoO + C₂H₄ → 6 Co + 2 CO₂ + 2 H₂O。乙烯完全没被氧化过，一份让出 12 个电子，还原能力是这四个里最强的。",
+          "enabled": true,
+          "name": "钴块 · 乙烯还原",
+          "description": "以乙烯作还原剂。两个碳都还没被氧化过，一份能吃掉六份矿的氧——单位还原剂的产出最高，代价是乙烯本身不便宜。",
+          "recipeId": 6549,
+          "type": 10,
+          "timeSpend": 240,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 6
+            },
+            {
+              "ref": "ethylene",
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 6
+            },
+            {
+              "ref": "co2",
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "3 CoO + 2 NH₃ → 3 Co + N₂ + 3 H₂O。氨在这里当还原剂：受热分解出的氢去夺氧，氮原样放回。",
+          "//real": "还原性气氛（氨分解气）是粉末冶金里的常规手段，现实中确实用来还原钴、镍这类容易还原的氧化物。对锰、铬不成立——道理和一氧化碳一样，氢也推不动它们。",
+          "//clean": "唯一一条尾气里没有碳的钴还原路线：产物只有氮气和水，二氧化碳一份都不排。",
+          "enabled": true,
+          "name": "钴块 · 氨还原",
+          "description": "在氨分解气里还原钴矿。氢夺走氧、氮原样吐回来——这是几条钴路线里唯一不排碳的。",
+          "recipeId": 6592,
+          "type": 10,
+          "timeSpend": 150,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 3
+            },
+            {
+              "ref": "ammonia",
+              "count": 2
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 3
+            },
+            {
+              "ref": "nitrogen",
+              "count": 1
+            },
+            {
+              "id": 1000,
+              "count": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "aluminum",
+      "enabled": true,
+      "oreName": "氧化铝矿石",
+      "oreDescription": "铝土矿，主要成分为三氧化二铝（Al₂O₃）。碳热还原或电解均可炼出金属铝。",
+      "oreItemId": 6512,
+      "oreGridIndex": 1601,
+      "stackSize": 300,
+      "veinName": "铝矿脉",
+      "veinId": 16,
+      "veinModelId": 721,
+      "//veinTint": "提亮并压掉铁矿脉的蓝调，做出偏白的灰。R/G 抬得比 B 多，蓝就退下去了。",
+      "veinTint": [
+        1.45,
+        1.4,
+        1.2
+      ],
+      "veinColor": [
+        0.86,
+        0.88,
+        0.9
+      ],
+      "veinRarity": 0.3,
+      "veinAmountScale": 1.0,
+      "//icon": "饱和度压到很低就是白；色相在这种饱和度下几乎不起作用，明度抬一点更亮。",
+      "iconHue": 210.0,
+      "iconSaturationScale": 0.12,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.2,
+      "hasIngot": true,
+      "ingotName": "铝块",
+      "ingotDescription": "银白色轻金属，密度只有铁的三分之一，导电性仅次于铜银。",
+      "ingotItemId": 6513,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "aluminum-ingot",
+      "recipes": [
+        {
+          "//": "2 Al₂O₃ + 3 C → 4 Al + 3 CO₂。配比照化学方程式来。",
+          "enabled": true,
+          "name": "铝块 · 碳热还原",
+          "description": "以煤为还原剂碳热还原铝土矿。工艺简单、吃煤，尾气是二氧化碳。",
+          "recipeId": 6521,
+          "//type-10": "氧化还原。碳把铝从 Al³⁺ 还原成单质、自己被氧化成 CO₂，本来就是一个氧化还原反应，所以从冶炼炉（类型 1）挪到了 machines.json 里的氧化还原化工厂。",
+          "type": 10,
+          "timeSpend": 180,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "id": 1006,
+              "count": 3
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 4
+            },
+            {
+              "ref": "co2",
+              "count": 3
+            }
+          ]
+        },
+        {
+          "//": "Al₂O₃ + 3 H₂ → 2 Al + 3 H₂O。原版没有电解厂，用化工类型跑在化工厂里。",
+          "enabled": true,
+          "name": "铝块 · 电解",
+          "description": "在熔盐电解槽中以氢为还原剂电解氧化铝。不排碳，代价是吃氢，副产水。",
+          "recipeId": 6522,
+          "//type-9": "电化学。原版没有这个类型，由 machines.json 里的电化学厂定义——只有它能做。",
+          "type": 9,
+          "timeSpend": 120,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 1
+            },
+            {
+              "id": 1120,
+              "count": 3
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 3
+            }
+          ]
+        },
+        {
+          "//": "2 Al₂O₃ + 3 C₂H₄ → 4 Al + 6 CO + 6 H₂。烃热还原：乙烯先裂解成单质碳和氢，真正还原氧化铝的是那个碳。",
+          "//why-only-ethylene": "四个还原剂里只有乙烯能还铝。Al₂O₃ 在埃林厄姆图上位置极低，CO / 甲醇 / 甲醛都还不动它——CO 本身就是碳热还原铝的**产物**，拿它当还原剂等于把反应倒着跑；甲醇和甲醛的碳已经带着氧，裂解给出的是 CO 而不是单质碳。乙烯的两个碳完全没被氧化过，裂解出的是 C + H₂，所以它能接上碳热还原那条路。",
+          "enabled": true,
+          "name": "铝块 · 烃热还原",
+          "description": "乙烯在高温下先裂解成碳和氢，碳把氧化铝还原成金属铝。碳只被夺走一个氧，出来的是一氧化碳而不是二氧化碳，连同氢一起就是合成气——还原剂的骨架又回到了生产线上。",
+          "recipeId": 6550,
+          "type": 10,
+          "timeSpend": 180,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "ref": "ethylene",
+              "count": 3
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 4
+            },
+            {
+              "ref": "co",
+              "count": 6
+            },
+            {
+              "id": 1120,
+              "count": 6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "gypsum",
+      "enabled": true,
+      "oreName": "石膏矿",
+      "oreDescription": "二水硫酸钙（CaSO₄·2H₂O）。以煤为还原剂高温分解，硫以二氧化硫逸出，钙留在渣里。",
+      "oreItemId": 6515,
+      "oreGridIndex": 1601,
+      "stackSize": 300,
+      "veinName": "石膏矿脉",
+      "veinId": 17,
+      "veinModelId": 720,
+      "//veinTint": "偏暖的米白：R 抬得最多、B 压住，和铝矿脉那种冷白区分开。",
+      "veinTint": [
+        1.55,
+        1.38,
+        1.05
+      ],
+      "veinColor": [
+        0.91,
+        0.87,
+        0.72
+      ],
+      "veinRarity": 0.25,
+      "veinAmountScale": 1.0,
+      "//icon": "暖米色。饱和度留得比铝高，不然两个矿石在合成面板上分不出来。",
+      "iconHue": 42.0,
+      "iconSaturationScale": 0.38,
+      "iconMinSaturation": 0.08,
+      "iconValueScale": 1.15,
+      "//hasIngot": "石膏不出锭，直接进化工厂做硫酸；配方产物全是原版物品。",
+      "hasIngot": false,
+      "recipes": [
+        {
+          "//": "缪勒-库内法：CaSO₄ + C 高温分解出 SO₂，催化氧化吸收成硫酸，钙质残渣当石材。",
+          "enabled": true,
+          "name": "硫酸 · 石膏法",
+          "description": "以煤为还原剂高温分解石膏，硫以二氧化硫逸出后经催化氧化与吸收得硫酸，钙则留在渣里成为石材。",
+          "recipeId": 6523,
+          "type": 2,
+          "timeSpend": 360,
+          "gridIndex": 1601,
+          "//iconFrom": "没有锭可跟随，用主产物硫酸的图标。",
+          "iconFrom": 1116,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 6
+            },
+            {
+              "id": 1006,
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 4
+            }
+          ],
+          "results": [
+            {
+              "id": 1116,
+              "count": 4
+            },
+            {
+              "id": 1108,
+              "count": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "//": "锂。整条链照现实的硬岩提锂工艺来：锂辉石 →（硫酸焙烧）硫酸锂 →（电解）氢氧化锂 →（熔盐电解）金属锂。",
+      "key": "lithium",
+      "enabled": true,
+      "oreName": "锂辉石",
+      "oreDescription": "含锂的铝硅酸盐矿物（LiAlSi₂O₆），硬岩提锂的主矿源。锂被锁在硅酸盐骨架里，得先用硫酸把它换出来。",
+      "oreItemId": 6560,
+      "oreGridIndex": 1601,
+      "stackSize": 300,
+      "veinName": "锂矿脉",
+      "veinId": 18,
+      "veinModelId": 716,
+      "//veinTint": "抬红抬蓝、压绿，做出锂辉石（紫锂辉石）那种淡紫。和钴的深蓝、铝的冷白、石膏的暖米白都分得开。",
+      "veinTint": [
+        1.35,
+        1.0,
+        1.45
+      ],
+      "veinColor": [
+        0.76,
+        0.58,
+        0.88
+      ],
+      "//veinRarity": "比前三种都稀。注意四种矿的 rarity 之和会决定在 GalacticScale 星系里有多少铁矿脉被改写成新矿——见 mod特性.md 第九节。",
+      "veinRarity": 0.18,
+      "veinAmountScale": 1.0,
+      "iconHue": 285.0,
+      "iconSaturationScale": 0.5,
+      "iconMinSaturation": 0.12,
+      "iconValueScale": 1.15,
+      "hasIngot": true,
+      "ingotName": "锂",
+      "ingotDescription": "密度最小的金属，软到能用小刀切开。极其活泼，在空气里很快失去光泽——正是这种活泼让它成了电池的首选。",
+      "ingotItemId": 6561,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "lithium-ingot",
+      "recipes": [
+        {
+          "//": "2 LiAlSi₂O₆ + H₂SO₄ → Li₂SO₄ + 2 HAlSi₂O₆。硫酸焙烧法，硬岩提锂的主流工艺。残渣（铝硅酸盐）用石材代表。",
+          "enabled": true,
+          "name": "硫酸锂 · 硫酸焙烧",
+          "description": "锂辉石先高温相变再与硫酸焙烧，锂以硫酸锂的形式被置换出来，剩下的铝硅酸盐骨架成了废渣。",
+          "recipeId": 6560,
+          "type": 2,
+          "timeSpend": 240,
+          "gridIndex": 1601,
+          "icon": "lithium-sulfate",
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "id": 1116,
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "lithium-sulfate",
+              "count": 1
+            },
+            {
+              "id": 1108,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "Li₂SO₄ + 2 H₂O → 2 LiOH + H₂SO₄。双极膜电渗析，现实中的现代工艺。**硫酸原样再生**，上一步用掉的又回来了。",
+          "enabled": true,
+          "name": "氢氧化锂 · 电解",
+          "description": "在双极膜电解槽里把硫酸锂拆开：锂侧出氢氧化锂，酸侧出硫酸。硫酸是循环用的，整条链只需要一份启动量。",
+          "recipeId": 6561,
+          "type": 9,
+          "timeSpend": 180,
+          "gridIndex": 1601,
+          "icon": "lithium-hydroxide",
+          "items": [
+            {
+              "ref": "lithium-sulfate",
+              "count": 1
+            },
+            {
+              "id": 1000,
+              "count": 2
+            }
+          ],
+          "results": [
+            {
+              "ref": "lithium-hydroxide",
+              "count": 2
+            },
+            {
+              "id": 1116,
+              "count": 1
+            }
+          ]
+        },
+        {
+          "//": "4 LiOH → 4 Li + 2 H₂O + O₂。熔盐电解：阴极 Li⁺ + e⁻ → Li，阳极 4 OH⁻ → O₂ + 2 H₂O + 4 e⁻。",
+          "//why-electrolysis": "锂和铝一样电正性太强，**任何碳基还原剂都还原不动**，电解是唯一的路。工业上电解的是熔融 LiCl，但游戏里没有氯源，所以改电解熔融氢氧化锂——同样是熔盐电解，本质没变。",
+          "enabled": true,
+          "name": "锂 · 熔盐电解",
+          "description": "熔融氢氧化锂通直流电，阴极析出金属锂、阳极放氧。锂太活泼，除了电解没有别的办法把它从化合物里拿出来。",
+          "recipeId": 6562,
+          "type": 9,
+          "timeSpend": 240,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "lithium-hydroxide",
+              "count": 4
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 4
+            },
+            {
+              "id": 1000,
+              "count": 2
+            },
+            {
+              "ref": "oxygen",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "//": "锰。**基础矿，广布**——锰钢是采矿机钻头的材料，中前期就要用，不能门槛化。所以走普通矿脉位、密度和铁矿脉同级（×1），铺在荒漠系主题上。",
+      "key": "manganese",
+      "enabled": true,
+      "oreName": "锰矿石",
+      "oreDescription": "软锰矿，主要成分二氧化锰（MnO₂）。黑得发乌，碳热还原即得金属锰——冶金里最不起眼也最离不开的那一种。",
+      "oreItemId": 6580,
+      "oreGridIndex": 1601,
+      "oreIcon": "manganese-ore",
+      "stackSize": 300,
+      "veinName": "锰矿脉",
+      "veinId": 19,
+      "veinModelId": 713,
+      "//veinTint": "压暗压紫，做出软锰矿那种发乌的黑。",
+      "veinTint": [
+        0.72,
+        0.58,
+        0.85
+      ],
+      "veinColor": [
+        0.28,
+        0.22,
+        0.34
+      ],
+      "veinRarity": 1.0,
+      "veinAmountScale": 1.0,
+      "//placement": "荒漠系广布。themes 按主题显示名做包含匹配，写不对开局日志会报 ERROR 并把完整主题表打出来。",
+      "placement": {
+        "mode": "normal",
+        "themes": [
+          "贫瘠荒漠",
+          "戈壁",
+          "干旱荒漠"
+        ],
+        "birthSystem": true
+      },
+      "//iconHue": "这四个值现在**只影响矿脉图标**（那张 480×480 的矿簇图，仍然由铁矿脉改色而来）。矿石和锤的物品图标已经改成自画的 PNG（oreIcon / ingotIcon），改这里对它们不起作用——要改颜色去 tools/make_icons.py。",
+      "iconHue": 290.0,
+      "iconSaturationScale": 0.35,
+      "iconMinSaturation": 0.05,
+      "iconValueScale": 0.75,
+      "hasIngot": true,
+      "ingotName": "锰块",
+      "ingotDescription": "银白偏灰的硬脆金属。极少单独使用，但掺进钢里能同时提高硬度和韧性——锰钢是所有需要抗磨损的地方的默认答案。",
+      "ingotItemId": 6581,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "manganese-ingot",
+      "recipes": [
+        {
+          "//": "MnO₂ + C → Mn + CO₂。碳热还原，配平的。碳把锰从 +4 价还原成单质、自己被氧化成 CO₂，是氧化还原。",
+          "enabled": true,
+          "name": "锰块 · 碳热还原",
+          "description": "以煤为还原剂还原软锰矿。锰的氧化物比铁的难还原一些，但远没到铝那种地步。",
+          "recipeId": 6580,
+          "type": 10,
+          "timeSpend": 120,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "id": 1006,
+              "count": 2
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "ref": "co2",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "3 MnO₂ + C₂H₄ → 3 Mn + 2 CO₂ + 2 H₂O。乙烯先裂解成单质碳和氢，真正夺氧的是那个碳。",
+          "//why-only-ethylene": "有机还原剂里**只有乙烯还得动锰**。MnO 在埃林厄姆图上比 FeO 低不少，一氧化碳只能把 MnO₂ 还原到 MnO、再往下就推不动了；甲醇和甲醛裂解给出的也是 CO，同理。乙烯的两个碳完全没被氧化过，裂解出的是单质碳，走的是高温碳热还原那条路。判据和铝那边是同一把尺子，只是锰没铝那么极端。",
+          "enabled": true,
+          "name": "锰块 · 烃热还原",
+          "description": "乙烯高温裂解出碳，碳把锰从氧化物里还原出来。比煤多一步，好处是顺带把氢变成了水而不是白白排掉。",
+          "recipeId": 6590,
+          "type": 10,
+          "timeSpend": 180,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 3
+            },
+            {
+              "ref": "ethylene",
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 3
+            },
+            {
+              "ref": "co2",
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "//": "铬。基础偏后——不锈钢撑起化工/氧化还原设备。放在熔岩/火山灰，和硫酸海同星球配套。",
+      "key": "chromium",
+      "enabled": true,
+      "oreName": "铬铁矿",
+      "oreDescription": "铁与铬的复合氧化物（FeCr₂O₄）。黑褐色、带弱磁性，是地球上唯一有工业价值的铬矿——所有的不锈钢都从这里开始。",
+      "oreItemId": 6582,
+      "oreGridIndex": 1601,
+      "oreIcon": "chromite-ore",
+      "stackSize": 300,
+      "veinName": "铬矿脉",
+      "veinId": 20,
+      "veinModelId": 712,
+      "//veinTint": "压暗偏褐，做出铬铁矿那种黑褐色。",
+      "veinTint": [
+        0.95,
+        0.7,
+        0.5
+      ],
+      "veinColor": [
+        0.32,
+        0.24,
+        0.18
+      ],
+      "veinRarity": 1.5,
+      "veinAmountScale": 1.0,
+      "//placement": "熔岩/火山灰。密度 1.5 倍铁矿——单点比铁多，但只在这两类主题上有，整体仍然比锰难找。",
+      "placement": {
+        "mode": "normal",
+        "themes": [
+          "熔岩",
+          "火山灰"
+        ],
+        "birthSystem": true
+      },
+      "//iconHue": "这四个值现在**只影响矿脉图标**（那张 480×480 的矿簇图，仍然由铁矿脉改色而来）。矿石和锤的物品图标已经改成自画的 PNG（oreIcon / ingotIcon），改这里对它们不起作用——要改颜色去 tools/make_icons.py。",
+      "iconHue": 25.0,
+      "iconSaturationScale": 0.45,
+      "iconMinSaturation": 0.08,
+      "iconValueScale": 0.7,
+      "hasIngot": true,
+      "ingotName": "铬块",
+      "ingotDescription": "极硬、极亮、极耐腐蚀。掺进钢里就是不锈钢——表面那层氧化膜厚不过几个原子，却能挡住酸。",
+      "ingotItemId": 6583,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "chromium-ingot",
+      "recipes": [
+        {
+          "//": "FeCr₂O₄ + 4 C → Fe + 2 Cr + 4 CO。铬铁法，配平的。**顺带产铁和一氧化碳**——后者正好接进 C1 化工链。",
+          "enabled": true,
+          "name": "铬块 · 铬铁法",
+          "description": "以煤在电弧炉里还原铬铁矿。铁和铬一起被还原出来，尾气是一氧化碳而不是二氧化碳——碳只被夺走一个氧。",
+          "recipeId": 6581,
+          "type": 10,
+          "timeSpend": 180,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 1
+            },
+            {
+              "id": 1006,
+              "count": 4
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "id": 1101,
+              "count": 1
+            },
+            {
+              "ref": "co",
+              "count": 4
+            }
+          ]
+        },
+        {
+          "//": "FeCr₂O₄ + C₂H₄ → Fe + 2 Cr + 2 CO + 2 H₂O。同样是乙烯裂解出的单质碳在夺氧。",
+          "//why-only-ethylene": "和锰一样：Cr₂O₃ 用一氧化碳还不动（铬铁法用的是焦炭不是煤气），所以 CO / 甲醇 / 甲醛 三条都不成立，只有裂解给出单质碳的乙烯行。",
+          "enabled": true,
+          "name": "铬块 · 烃热还原",
+          "description": "以乙烯裂解出的碳还原铬铁矿。铁和铬一起出来，碳只被夺走一个氧，尾气仍是一氧化碳。",
+          "recipeId": 6591,
+          "type": 10,
+          "timeSpend": 210,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 1
+            },
+            {
+              "ref": "ethylene",
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "id": 1101,
+              "count": 1
+            },
+            {
+              "ref": "co",
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "//": "钒。**稀有矿**，破表材料的前置。占稀有槽 + 母星系不刷，而且概率比钴低一档。另配一条不需要矿脉的合成后路，免得倒霉种子把整条线锁死。",
+      "key": "vanadium",
+      "enabled": true,
+      "oreName": "钒钛磁铁矿",
+      "oreDescription": "钒、钛、铁共生的黑色磁铁矿。钒在其中只占百分之几，却是它唯一值得开采的理由——没有钒，就没有能扛住高温高压的合金。",
+      "oreItemId": 6584,
+      "oreGridIndex": 1601,
+      "oreIcon": "vanadium-ore",
+      "stackSize": 300,
+      "veinName": "钒矿脉",
+      "veinId": 21,
+      "veinModelId": 711,
+      "//veinTint": "压暗偏蓝，做出钒钛磁铁矿那种带蓝调的黑。",
+      "veinTint": [
+        0.55,
+        0.75,
+        1.3
+      ],
+      "veinColor": [
+        0.18,
+        0.24,
+        0.36
+      ],
+      "veinRarity": 4.0,
+      "veinAmountScale": 1.2,
+      "//placement": "稀有槽，概率只有钴的四分之一左右。**不绑恒星光谱型**——绑 O 型星会连带决定那颗星球的温度、可开发性和供电条件，不可控；这里照金伯利矿的路子走纯概率保底。",
+      "placement": {
+        "mode": "rare",
+        "themes": [
+          "熔岩",
+          "火山灰",
+          "冰原",
+          "干旱荒漠"
+        ],
+        "birthSystem": false,
+        "chance": 0.06,
+        "extraChance": 0.25,
+        "richness": 0.5
+      },
+      "//iconHue": "这四个值现在**只影响矿脉图标**（那张 480×480 的矿簇图，仍然由铁矿脉改色而来）。矿石和锤的物品图标已经改成自画的 PNG（oreIcon / ingotIcon），改这里对它们不起作用——要改颜色去 tools/make_icons.py。",
+      "iconHue": 210.0,
+      "iconSaturationScale": 0.5,
+      "iconMinSaturation": 0.08,
+      "iconValueScale": 0.65,
+      "hasIngot": true,
+      "ingotName": "钒块",
+      "ingotDescription": "银白泛蓝的稀有金属。少量掺入就能让钢在高温下不软、在冲击下不裂——所有要求「别坏」的地方都指望它。",
+      "ingotItemId": 6585,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "vanadium-ingot",
+      "recipes": [
+        {
+          "//": "3 V₂O₅ + 10 Al → 6 V + 5 Al₂O₃。铝热法，配平的。**碳还原不动五氧化二钒**（会生成碳化钒），工业上正是用铝或钙做还原剂。",
+          "//loop": "消耗铝、产出氧化铝——氧化铝正好是铝矿石本身，可以直接回炼铝那条线，还原剂的骨架不浪费。",
+          "enabled": true,
+          "name": "钒块 · 铝热法",
+          "description": "以金属铝还原钒的氧化物。铝夺氧的能力比碳强得多，这正是碳还原不动的那些氧化物的通用解法。",
+          "recipeId": 6582,
+          "type": 10,
+          "timeSpend": 240,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "ore",
+              "count": 3
+            },
+            {
+              "ref": "aluminum.ingot",
+              "count": 10
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 6
+            },
+            {
+              "ref": "aluminum.ore",
+              "count": 5
+            }
+          ]
+        },
+        {
+          "//": "合成后路：不需要矿脉，产量低。**这一条不是配平的方程**——钒在石油残渣里是痕量杂质，没有固定化学计量。工艺本身是真的（残渣焙烧+浸出提钒，现实中相当一部分钒就是这么来的），配比按「低产保底」定，不按方程配。",
+          "//why": "钒是破表材料的前置。倒霉种子附近一颗钒星都没有的话，整条线会被锁死——所以留这条后路，参照原版有机晶体也有合成路径。",
+          "enabled": true,
+          "name": "钒块 · 残渣提取",
+          "description": "从精炼油的重质残渣里焙烧浸出。钒在其中是百万分之几的杂质，攒够一块要烧掉极多的油——但至少不用等一颗钒星。",
+          "recipeId": 6583,
+          "//type": "焙烧那一步是把钒氧化到 +5 价再浸出，属于氧化还原，和其余三条一起归到氧化还原化工厂。",
+          "type": 10,
+          "timeSpend": 600,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "id": 1114,
+              "count": 40
+            },
+            {
+              "id": 1116,
+              "count": 4
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 1
+            },
+            {
+              "ref": "co2",
+              "count": 8
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "//": "钨。**硬质合金的唯一来源**，也是全表最深的一条链：矿 → 三氧化钨 → 钨块 → 碳化钨。",
+      "//why-scheelite": "选白钨矿（CaWO₄）而不是更常见的黑钨矿（(Fe,Mn)WO₄），是为了让分解那步的副产物落回已有物品：CaWO₄ + H₂SO₄ → H₂WO₄ + CaSO₄，**CaSO₄ 就是石膏矿**。黑钨矿的副产物是硫酸亚铁／硫酸锰，两个都得为它新开物品。",
+      "key": "tungsten",
+      "enabled": true,
+      "oreName": "白钨矿",
+      "oreDescription": "钨酸钙（CaWO₄），半透明的浅黄晶体，紫外光下发亮蓝色荧光。钨在地壳里的丰度只有百万分之一，能成矿全靠它在花岗岩与石灰岩的接触带上富集。",
+      "oreItemId": 6586,
+      "oreGridIndex": 1601,
+      "oreIcon": "scheelite-ore",
+      "stackSize": 300,
+      "veinName": "白钨矿脉",
+      "veinId": 22,
+      "veinModelId": 710,
+      "//veinTint": "偏蜜的暖黄。石膏矿脉是奶白，这条要更黄更沉——两条浅色矿脉摆在同一张星球面板上得分得开。",
+      "veinTint": [
+        1.6,
+        1.3,
+        0.6
+      ],
+      "veinColor": [
+        0.95,
+        0.82,
+        0.42
+      ],
+      "//veinRarity": "rare 模式下这个值不参与计算，保留只为改回 normal 时有个基准。",
+      "veinRarity": 4.0,
+      "veinAmountScale": 1.0,
+      "//placement": "稀有槽，概率略高于钒。**钨没有合成后路**——钒有残渣提钒兜底，钨一颗星都找不到就等于硬质合金整条线不存在，所以底噪要给得比钒厚一点。母星系不刷。",
+      "//themes": "主题名仍未和游戏内的表核对过，和其余几种矿一样，等启动日志里的『星球主题表』确认。",
+      "placement": {
+        "mode": "rare",
+        "themes": [
+          "熔岩",
+          "火山灰",
+          "戈壁"
+        ],
+        "birthSystem": false,
+        "chance": 0.09,
+        "extraChance": 0.3,
+        "richness": 0.5
+      },
+      "//iconHue": "这四个值只影响矿脉图标；矿石和锭的物品图标是自画的 PNG，要改颜色去 tools/make_icons.py。",
+      "iconHue": 45.0,
+      "iconSaturationScale": 0.75,
+      "iconMinSaturation": 0.15,
+      "iconValueScale": 1.15,
+      "hasIngot": true,
+      "ingotName": "钨块",
+      "ingotDescription": "熔点 3422°C，所有金属里最高；密度和黄金相当，室温下却脆得像玻璃。它的价值不在好用，在于别的东西撑不到那个温度。",
+      "ingotItemId": 6587,
+      "ingotGridIndex": 1601,
+      "ingotIcon": "tungsten-ingot",
+      "recipes": [
+        {
+          "//": "CaWO₄ + H₂SO₄ → WO₃ + CaSO₄ + H₂O。配平的：左边 Ca1 W1 S1 H2 O8，右边一样。现实里分两步（先沉淀钨酸 H₂WO₄，再煅烧脱水成 WO₃），游戏里合成一格。",
+          "//type-2": "钨自始至终都是 +6 价，钙也没变价——**这不是氧化还原反应**，所以留在原版化工厂，不进氧化还原化工厂。判据是反应类别，不是哪台机器方便。",
+          "//loop": "硫酸进、石膏出，石膏又能烧回硫酸——但**只是部分回收，不是闭环**：一轮出石膏×2，而补回硫酸×2 要石膏×3（石膏×6 → 硫酸×4），每轮仍净欠石膏×1，外加煤和水。别按永动机来配比。",
+          "enabled": true,
+          "name": "三氧化钨 · 酸解",
+          "description": "用硫酸把钨从钨酸钙里换出来，沉淀成钨酸后煅烧成三氧化钨。钙以石膏的形式留在渣里。",
+          "recipeId": 6584,
+          "type": 2,
+          "timeSpend": 180,
+          "gridIndex": 1601,
+          "icon": "tungsten-trioxide",
+          "items": [
+            {
+              "ref": "ore",
+              "count": 2
+            },
+            {
+              "id": 1116,
+              "count": 2
+            }
+          ],
+          "results": [
+            {
+              "ref": "tungsten-trioxide",
+              "count": 2
+            },
+            {
+              "ref": "gypsum.ore",
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 2
+            }
+          ]
+        },
+        {
+          "//": "WO₃ + 3 H₂ → W + 3 H₂O。配平的，按 2 倍写。",
+          "//why-hydrogen": "**碳还原不出金属钨**：碳会跟钨结合成碳化钨，和碳还原不动五氧化二钒是同一条规则（见 CLAUDE.md 的还原剂表）。工业上钨粉就是三氧化钨在 700~900°C 的氢气流里还原出来的，没有第二条路。",
+          "enabled": true,
+          "name": "钨块 · 氢还原",
+          "description": "在氢气流中还原三氧化钨，得到钨粉。钨是极少数只能靠氢冶炼的金属——碳一插手，得到的就是碳化物而不是金属。",
+          "recipeId": 6585,
+          "type": 10,
+          "timeSpend": 240,
+          "gridIndex": 1601,
+          "items": [
+            {
+              "ref": "tungsten-trioxide",
+              "count": 2
+            },
+            {
+              "id": 1120,
+              "count": 6
+            }
+          ],
+          "results": [
+            {
+              "ref": "ingot",
+              "count": 2
+            },
+            {
+              "id": 1000,
+              "count": 6
+            }
+          ]
+        },
+        {
+          "//": "W + C → WC。配平的。1400~1600°C 下的固相渗碳，是炉子里的反应，所以走冶炼炉（类型 1）而不是化工类。",
+          "enabled": true,
+          "name": "碳化钨 · 渗碳",
+          "description": "钨粉与炭黑在高温下渗碳。这是碳唯一能对钨做成的事——也正是它炼不出金属钨的原因。",
+          "recipeId": 6586,
+          "type": 1,
+          "timeSpend": 120,
+          "gridIndex": 1601,
+          "icon": "tungsten-carbide",
+          "items": [
+            {
+              "ref": "ingot",
+              "count": 1
+            },
+            {
+              "id": 1006,
+              "count": 1
+            }
+          ],
+          "results": [
+            {
+              "ref": "tungsten-carbide",
+              "count": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "recipes": [
+    {
+      "//": "2 H₂O → 2 H₂ + O₂。配平的。走电化学类型，只有电化学厂做得了。",
+      "enabled": true,
+      "name": "氧气 · 电解水",
+      "description": "在电解槽中通直流电分解水，阴极出氢、阳极出氧。是获取清洁氢的基础工艺，代价是电。",
+      "recipeId": 6524,
+      "type": 9,
+      "timeSpend": 120,
+      "gridIndex": 1601,
+      "icon": "water-electrolysis",
+      "items": [
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ],
+      "results": [
+        {
+          "id": 1120,
+          "count": 2
+        },
+        {
+          "ref": "oxygen",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "//": "C + H₂O → CO + H₂。水煤气反应。碳被氧化、水里的氢被还原，是氧化还原类型。",
+      "//why": "一氧化碳必须有个来源，否则下面五条配方全是死的。煤 + 水这条既独立又能量产，不用等铝产线的尾气。",
+      "enabled": true,
+      "name": "一氧化碳 · 水煤气",
+      "description": "赤热的碳与水蒸气反应，得到一氧化碳与氢的混合气。工业上叫合成气，是煤化工整条路线的入口。",
+      "recipeId": 6540,
+      "type": 10,
+      "timeSpend": 120,
+      "gridIndex": 1601,
+      "icon": "carbon-monoxide",
+      "items": [
+        {
+          "id": 1006,
+          "count": 2
+        },
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ],
+      "results": [
+        {
+          "ref": "co",
+          "count": 2
+        },
+        {
+          "id": 1120,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "CO + 2 H₂ → CH₃OH。合成气路线，配比照方程式来。",
+      "enabled": true,
+      "name": "甲醇 · 合成气",
+      "description": "合成气在铜基催化剂上加压加氢。碳被还原、氢被氧化，一步做到甲醇。",
+      "recipeId": 6541,
+      "type": 10,
+      "timeSpend": 120,
+      "gridIndex": 1601,
+      "icon": "methanol",
+      "items": [
+        {
+          "ref": "co",
+          "count": 2
+        },
+        {
+          "id": 1120,
+          "count": 4
+        }
+      ],
+      "results": [
+        {
+          "ref": "methanol",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "CO₂ + 3 H₂ → CH₃OH + H₂O。碳捕集路线：把碳热还原铝的尾气回收利用。",
+      "enabled": true,
+      "name": "甲醇 · 二氧化碳加氢",
+      "description": "直接拿二氧化碳加氢。比合成气路线多吃一份氢、多排一份水，好处是把碳热还原冶金的尾气接回了生产线。",
+      "recipeId": 6542,
+      "type": 10,
+      "timeSpend": 150,
+      "gridIndex": 1601,
+      "icon": "methanol",
+      "items": [
+        {
+          "ref": "co2",
+          "count": 2
+        },
+        {
+          "id": 1120,
+          "count": 6
+        }
+      ],
+      "results": [
+        {
+          "ref": "methanol",
+          "count": 2
+        },
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "2 CH₃OH + O₂ → 2 HCHO + 2 H₂O。氧气在这里第一次有了下游用途。",
+      "enabled": true,
+      "name": "甲醛 · 甲醇氧化",
+      "description": "甲醇在银催化剂上部分氧化脱氢。控制得住就停在醛，控制不住就一路烧到二氧化碳。",
+      "recipeId": 6543,
+      "type": 10,
+      "timeSpend": 90,
+      "gridIndex": 1601,
+      "icon": "formaldehyde",
+      "items": [
+        {
+          "ref": "methanol",
+          "count": 2
+        },
+        {
+          "ref": "oxygen",
+          "count": 1
+        }
+      ],
+      "results": [
+        {
+          "ref": "formaldehyde",
+          "count": 2
+        },
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "2 CH₃OH → C₂H₄ + 2 H₂O。MTO。这条是**脱水**不是氧化还原，所以走原版化工厂（类型 2）。",
+      "enabled": true,
+      "name": "乙烯 · 甲醇制烯烃",
+      "description": "甲醇在分子筛上脱水成烯。碳的价态从头到尾没变，只是把水赶了出去——所以这一步归化工厂，不归氧化还原化工厂。",
+      "recipeId": 6544,
+      "type": 2,
+      "timeSpend": 180,
+      "gridIndex": 1601,
+      "icon": "ethylene",
+      "items": [
+        {
+          "ref": "methanol",
+          "count": 2
+        }
+      ],
+      "results": [
+        {
+          "ref": "ethylene",
+          "count": 1
+        },
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "n CO + 2n H₂ → (CH₂)n + n H₂O，取 n = 4。把精炼油变成可以从煤合成的东西。",
+      "enabled": true,
+      "name": "精炼油 · 费托合成",
+      "description": "合成气在铁钴催化剂上聚合成链状烃。二战和禁运年代的救命工艺——只要有煤和水，就能造出油。",
+      "recipeId": 6545,
+      "type": 10,
+      "timeSpend": 240,
+      "gridIndex": 1601,
+      "iconFrom": 1114,
+      "items": [
+        {
+          "ref": "co",
+          "count": 4
+        },
+        {
+          "id": 1120,
+          "count": 8
+        }
+      ],
+      "results": [
+        {
+          "id": 1114,
+          "count": 4
+        },
+        {
+          "id": 1000,
+          "count": 4
+        }
+      ]
+    },
+    {
+      "//": "4 LiOH + 4 Co + 3 O₂ → 4 LiCoO₂ + 2 H₂O。钴从 0 价氧化到 +3，是氧化还原，所以走类型 10。",
+      "//real": "工业上用氢氧化锂或碳酸锂配钴的氧化物高温固相烧结。这里直接用金属钴——省掉一步氧化钴，配平不受影响。",
+      "enabled": true,
+      "name": "钴酸锂 · 高温烧结",
+      "description": "氢氧化锂与钴在氧气氛中高温固相合成层状氧化物。锂和钴这两种矿在这里第一次汇到一起。",
+      "recipeId": 6570,
+      "type": 10,
+      "timeSpend": 240,
+      "gridIndex": 1601,
+      "icon": "lithium-cobalt-oxide",
+      "items": [
+        {
+          "ref": "lithium-hydroxide",
+          "count": 4
+        },
+        {
+          "ref": "cobalt.ingot",
+          "count": 4
+        },
+        {
+          "ref": "oxygen",
+          "count": 3
+        }
+      ],
+      "results": [
+        {
+          "ref": "lithium-cobalt-oxide",
+          "count": 4
+        },
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "N₂ + 3 H₂ → 2 NH₃。哈伯法。氮从 0 价还原到 −3 价，是氧化还原。",
+      "//why-hard": "氮气的 N≡N 三键是化学里最稳的键之一，所以这一步在现实里要几百个大气压加铁催化剂——它是整条链的难点，不是终点。",
+      "enabled": true,
+      "name": "氨 · 哈伯法",
+      "description": "高压下让氮气与氢在铁催化剂上化合。氮气那道三键极难拆开，正因如此这一步在二十世纪初被视为不可能。",
+      "recipeId": 6571,
+      "type": 10,
+      "timeSpend": 180,
+      "gridIndex": 1601,
+      "icon": "ammonia",
+      "items": [
+        {
+          "ref": "nitrogen",
+          "count": 1
+        },
+        {
+          "id": 1120,
+          "count": 3
+        }
+      ],
+      "results": [
+        {
+          "ref": "ammonia",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "4 NH₃ + 7 O₂ → 4 NO₂ + 6 H₂O。奥斯特瓦尔德法的前两步（氨→NO→NO₂）合成一条——工业上它们本来就在同一台设备里连着发生。",
+      "enabled": true,
+      "name": "二氧化氮 · 氨催化氧化",
+      "description": "氨在铂网上被氧气烧掉，氮一路氧化到二氧化氮。反应剧烈放热，靠的就是氨里那个 −3 价的氮有多想被氧化。",
+      "recipeId": 6572,
+      "type": 10,
+      "timeSpend": 120,
+      "gridIndex": 1601,
+      "icon": "nitrogen-dioxide",
+      "items": [
+        {
+          "ref": "ammonia",
+          "count": 4
+        },
+        {
+          "ref": "oxygen",
+          "count": 7
+        }
+      ],
+      "results": [
+        {
+          "ref": "nitrogen-dioxide",
+          "count": 4
+        },
+        {
+          "id": 1000,
+          "count": 6
+        }
+      ]
+    },
+    {
+      "//": "4 NO₂ + O₂ + 2 H₂O → 4 HNO₃。吸收塔。补氧的写法，避免了课本上那条会剩一份 NO 的 3 NO₂ + H₂O 版本——工业上正是通入过量空气来把 NO 一起转掉。",
+      "enabled": true,
+      "name": "硝酸 · 水吸收",
+      "description": "二氧化氮在吸收塔里被水吸收，同时补入空气把中间产物一并氧化。氮走到 +5 价，到头了。",
+      "recipeId": 6573,
+      "type": 10,
+      "timeSpend": 150,
+      "gridIndex": 1601,
+      "icon": "nitric-acid",
+      "items": [
+        {
+          "ref": "nitrogen-dioxide",
+          "count": 4
+        },
+        {
+          "ref": "oxygen",
+          "count": 1
+        },
+        {
+          "id": 1000,
+          "count": 2
+        }
+      ],
+      "results": [
+        {
+          "ref": "nitric-acid",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "//": "WC + Co 液相烧结。**只有这一条配方**，四个牌号共用它——产物由每台建筑自己的配比滑动条在运行时决定（见 alloys.json）。所以另外三个牌号在合成面板上没有格子，这是有意的。",
+      "//type-1": "1400°C 左右钴熔成液相、把碳化钨颗粒粘结起来，是炉子里的反应，走冶炼炉。",
+      "//counts": "**总份数固定为 100**，配比只在这 100 份之间挪，粒度 1%。requireCounts 是整数，这就是滑动条能有的最细粒度。默认 88:12 对应牌号 IV 的最优配比。",
+      "enabled": true,
+      "name": "硬质合金 · 液相烧结",
+      "description": "碳化钨与钴粉压坯后高温烧结。钴的比例决定牌号：钴越少越硬越脆，钴越多越韧越钝。",
+      "recipeId": 6587,
+      "type": 1,
+      "timeSpend": 1800,
+      "gridIndex": 1601,
+      "icon": "carbide",
+      "items": [
+        {
+          "ref": "tungsten-carbide",
+          "count": 88
+        },
+        {
+          "ref": "cobalt.ingot",
+          "count": 12
+        }
+      ],
+      "results": [
+        {
+          "ref": "carbide",
+          "count": 50
+        }
+      ]
+    },
+    {
+      "//": "哈德菲尔德钢：Fe + 约 12% Mn + 约 1.2% C。**不是配平的方程**，合金是固溶体不是化合物，配比按质量分数来。",
+      "enabled": true,
+      "name": "锰钢 · 熔炼",
+      "description": "高锰钢。含锰约 12%，平时并不算硬，一旦受到冲击表面立刻加工硬化——越砸越耐砸。",
+      "recipeId": 6588,
+      "type": 1,
+      "timeSpend": 1200,
+      "gridIndex": 1601,
+      "icon": "manganese-steel",
+      "//parts": "总份数 50，可调的两味是 铁块 / 锰块；其余原料份数固定，不参与配比。配方声明的是标称成分（锰块 6 份）。",
+      "items": [
+        {
+          "id": 1101,
+          "count": 38
+        },
+        {
+          "ref": "manganese.ingot",
+          "count": 6
+        },
+        {
+          "id": 1006,
+          "count": 6
+        }
+      ],
+      "results": [
+        {
+          "ref": "manganese-steel",
+          "count": 40
+        }
+      ]
+    },
+    {
+      "//": "**200 系不锈钢**：Fe + 约 18% Cr + 用锰代镍。现实里 200 系正是为了省镍才发明的，而游戏里没有镍——你表里『铁+铬+锰』这个配料直接对上了真实牌号。",
+      "enabled": true,
+      "name": "不锈钢 · 熔炼",
+      "description": "铬在表面自发形成一层致密的钝化膜，划破了还会自己长回去——这才是它不锈的原因，不是铬本身不生锈。",
+      "recipeId": 6589,
+      "type": 1,
+      "timeSpend": 1500,
+      "gridIndex": 1601,
+      "icon": "stainless-steel",
+      "//parts": "总份数 50，可调的两味是 铁块 / 铬块；其余原料份数固定，不参与配比。配方声明的是标称成分（铬块 9 份）。",
+      "items": [
+        {
+          "id": 1101,
+          "count": 36
+        },
+        {
+          "ref": "chromium.ingot",
+          "count": 9
+        },
+        {
+          "ref": "manganese.ingot",
+          "count": 5
+        }
+      ],
+      "results": [
+        {
+          "ref": "stainless-steel",
+          "count": 50
+        }
+      ]
+    },
+    {
+      "//": "电镀：铬以离子形态在铜表面沉积成一层膜。**这是电化学过程，不是熔炼**，所以走电化学厂而不是冶炼厂——判据是反应类别。铬只覆盖表面，所以用量远小于铜。",
+      "enabled": true,
+      "name": "镀铬铜 · 电镀",
+      "description": "铜芯导电、铬层耐蚀。电极和双极板要的正是这两样，而单独哪种金属都给不全。",
+      "recipeId": 6593,
+      "type": 9,
+      "timeSpend": 1800,
+      "gridIndex": 1601,
+      "icon": "chrome-plated-copper",
+      "//parts": "总份数 50，可调的两味是 铜块 / 铬块；其余原料份数固定，不参与配比。配方声明的是标称成分（铬块 5 份）。",
+      "items": [
+        {
+          "id": 1104,
+          "count": 45
+        },
+        {
+          "ref": "chromium.ingot",
+          "count": 5
+        }
+      ],
+      "results": [
+        {
+          "ref": "chrome-plated-copper",
+          "count": 40
+        }
+      ]
+    },
+    {
+      "//": "AISI 6150 一类：Fe + 约 1% Cr + 约 0.15% V + 碳。钒的作用是形成碳化钒钉扎晶界，用量极少但不可省。",
+      "enabled": true,
+      "name": "铬钒工具钢 · 熔炼",
+      "description": "铬提硬度和淬透性，钒把晶粒钉住不让它长大——晶粒越细越不容易崩口。扳手和批头上印的 Cr-V 就是它。",
+      "recipeId": 6594,
+      "type": 1,
+      "timeSpend": 1800,
+      "gridIndex": 1601,
+      "icon": "chrome-vanadium-steel",
+      "//parts": "总份数 50，可调的两味是 铁块 / 铬块；其余原料份数固定，不参与配比。配方声明的是标称成分（铬块 6 份）。",
+      "items": [
+        {
+          "id": 1101,
+          "count": 39
+        },
+        {
+          "ref": "chromium.ingot",
+          "count": 6
+        },
+        {
+          "ref": "vanadium.ingot",
+          "count": 5
+        },
+        {
+          "id": 1006,
+          "count": 5
+        }
+      ],
+      "results": [
+        {
+          "ref": "chrome-vanadium-steel",
+          "count": 40
+        }
+      ]
+    },
+    {
+      "//": "司太立/维他灵合金：Co 基 + 约 30% Cr。钴基体提供高温强度，铬提供钝化膜。",
+      "enabled": true,
+      "name": "钴铬合金 · 熔炼",
+      "description": "又硬又耐蚀，而且在高温下不软。涡轮叶片和人工关节用的是同一类材料。",
+      "recipeId": 6595,
+      "type": 1,
+      "timeSpend": 2100,
+      "gridIndex": 1601,
+      "icon": "cobalt-chrome",
+      "//parts": "总份数 50，可调的两味是 钴块 / 铬块；其余原料份数固定，不参与配比。配方声明的是标称成分（铬块 20 份）。",
+      "items": [
+        {
+          "ref": "cobalt.ingot",
+          "count": 30
+        },
+        {
+          "ref": "chromium.ingot",
+          "count": 20
+        }
+      ],
+      "results": [
+        {
+          "ref": "cobalt-chrome",
+          "count": 50
+        }
+      ]
+    },
+    {
+      "//": "钛的 β 相合金：钒是典型的 β 稳定元素，Ti-15V 一类的牌号靠它在室温下保住 β 相。",
+      "enabled": true,
+      "name": "钒钛合金 · 熔炼",
+      "description": "钛的轻和耐蚀，加上钒带来的强度。代价是难加工——熔点高、还容易和坩埚反应。",
+      "recipeId": 6596,
+      "type": 1,
+      "timeSpend": 2400,
+      "gridIndex": 1601,
+      "icon": "vanadium-titanium",
+      "//parts": "总份数 50，可调的两味是 钛块 / 钒块；其余原料份数固定，不参与配比。配方声明的是标称成分（钒块 8 份）。",
+      "items": [
+        {
+          "id": 1106,
+          "count": 42
+        },
+        {
+          "ref": "vanadium.ingot",
+          "count": 8
+        }
+      ],
+      "results": [
+        {
+          "ref": "vanadium-titanium",
+          "count": 50
+        }
+      ]
+    }
+  ],
+  "//gases": "投放到气态巨星、由轨道采集器收集的气体。和矿脉是同一个套路，都写 ThemeProto——矿脉走 VeinSpot/VeinCount/VeinOpacity，气体走 GasItems/GasSpeeds。PlanetGen.SetPlanetTheme 里**种类是原样照抄主题的，一点随机都没有**，随机只作用在速率上（×0.909~1.100），之后再乘全局 gasCoef 和 star.resourceCoef^0.3。只对**还没生成过的星球**生效。注册后会自动把轨道采集器的储物格提到刚好够用——不提的话超出原上限的气体拿不到槽位、永远采不到。",
+  "gases": [
+    {
+      "enabled": true,
+      "//ref": "引 items 段的 key，不写死 ID。",
+      "ref": "nitrogen",
+      "//speedRatio": "速率 = 该主题现有气体的**最高**速率 × 这个倍数。用倍数是因为各气巨主题的基准速率写在 resources.assets 里，离线看不到，硬写绝对值就是猜。开局日志会打出算出来的真值。氮气取 0.6：比主力气体（氢）少，但作为常见气体不至于稀缺。",
+      "speedRatio": 0.6
+    }
+  ]
+}

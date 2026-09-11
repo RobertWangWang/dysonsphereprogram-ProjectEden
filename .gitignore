@@ -1,0 +1,19 @@
+# 构建产物
+bin/
+obj/
+dist/
+
+# 本机路径配置：每台机器不一样，照 DefaultPath.props.example 自己复制一份
+DefaultPath.props
+
+# IDE
+.idea/
+.vs/
+*.user
+*.suo
+
+# 工具产物
+tools/out/
+
+# 会话残留，不是项目文件
+ProjectEden/session.txt

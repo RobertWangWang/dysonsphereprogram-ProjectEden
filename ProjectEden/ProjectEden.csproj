@@ -1,0 +1,105 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- 机器相关路径全部放在解决方案根目录的 DefaultPath.props（借鉴 ProjectGenesis）。
+         新克隆时把 DefaultPath.props.example 复制为 DefaultPath.props 并改成自己的路径。 -->
+    <Import Project="$(MSBuildThisFileDirectory)..\DefaultPath.props"
+            Condition="Exists('$(MSBuildThisFileDirectory)..\DefaultPath.props')" />
+
+    <PropertyGroup>
+        <!-- DSP 是 Unity 2022.3 + Mono，绝不能是 net8.0。
+             游戏程序集按 netstandard2.1 编译，所以 netstandard2.0 引用不了（CS1705）。
+             选 net472：profile 里 LDBTool / CommonAPI / DSPModSave / InstantDelivery 全是它，运行时已验证。 -->
+        <TargetFramework>net472</TargetFramework>
+        <AssemblyName>ProjectEden</AssemblyName>
+        <Product>Project Eden</Product>
+        <Version>1.1.0</Version>
+
+        <LangVersion>latest</LangVersion>
+        <Nullable>disable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <DebugType>portable</DebugType>
+
+        <!-- DefaultPath.props 缺失时的兜底值，保证开箱能编译；也可用 -p:GameDir=... 覆盖 -->
+        <GameDir Condition="'$(GameDir)' == ''">G:\SteamLibrary\steamapps\common\Dyson Sphere Program</GameDir>
+        <BepInExDir Condition="'$(BepInExDir)' == ''">$(APPDATA)\r2modmanPlus-local\DysonSphereProgram\profiles\ProjectEden\BepInEx</BepInExDir>
+        <DebugModDir Condition="'$(DebugModDir)' == ''">ProjectEden</DebugModDir>
+
+        <ManagedDir>$(GameDir)\DSPGAME_Data\Managed</ManagedDir>
+        <PluginsDir>$(BepInExDir)\plugins</PluginsDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- 打开 Assembly-CSharp 的 private / internal 成员 -->
+        <PackageReference Include="Krafs.Publicizer" Version="2.*" PrivateAssets="all" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- BepInEx 5.4.17：直接引用 profile 里的实际 DLL，版本天然对齐 -->
+        <Reference Include="$(BepInExDir)\core\BepInEx.dll" Private="false" />
+        <Reference Include="$(BepInExDir)\core\0Harmony.dll" Private="false" />
+
+        <!-- 内容库：同样引用 profile 里实际在跑的版本，不走 NuGet，避免版本漂移 -->
+        <Reference Include="$(PluginsDir)\xiaoye97-LDBTool\LDBTool.dll" Private="false" />
+        <Reference Include="$(PluginsDir)\CommonAPI-CommonAPI\CommonAPI.dll" Private="false" />
+        <Reference Include="$(PluginsDir)\CommonAPI-DSPModSave\DSPModSave.dll" Private="false" />
+
+        <!-- Unity 2022.3.62：引用游戏自带的程序集，不用 UnityEngine.Modules NuGet 包 -->
+        <Reference Include="$(ManagedDir)\UnityEngine*.dll" Private="false" />
+
+        <!-- JSON 解析：Unity 自带的 JsonUtility 填不了嵌套的自定义类数组（buildings 会是 null），
+             改用 Newtonsoft，与 ProjectGenesis 一致。需要随插件一起部署。 -->
+        <Reference Include="$(MSBuildThisFileDirectory)lib\Newtonsoft.Json.dll" Private="true" />
+
+        <!-- 游戏逻辑本体 -->
+        <Reference Include="$(ManagedDir)\Assembly-CSharp.dll" Private="false" />
+        <Publicize Include="Assembly-CSharp" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- 数值定义走 JSON 嵌入资源（借鉴 ProjectGenesis），改数值不用碰 C# -->
+        <EmbeddedResource Include="data\*.json" />
+        <!-- 自制图标同样嵌进 DLL，由 TextureResourcesPatches 拦截 Resources.Load 提供 -->
+        <EmbeddedResource Include="assets\icons\*.png" />
+    </ItemGroup>
+
+    <!-- 编译后自动部署到 r2modman profile 的 plugins 目录 -->
+    <Target Name="DeployToProfile" AfterTargets="Build" Condition="Exists('$(BepInExDir)')">
+        <MakeDir Directories="$(PluginsDir)\$(DebugModDir)" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PluginsDir)\$(DebugModDir)\" />
+        <Copy SourceFiles="$(MSBuildThisFileDirectory)lib\Newtonsoft.Json.dll" DestinationFolder="$(PluginsDir)\$(DebugModDir)\" />
+        <Message Importance="high" Text="已部署到 $(PluginsDir)\$(DebugModDir)\" />
+    </Target>
+
+    <!-- Release 构建时打出可以直接导入 r2modman / 上传 Thunderstore 的 zip。
+         只在 Release 下跑，日常 Debug 构建不受影响。
+
+         布局按 DSP 生态的**实际约定**：DLL 直接放在 zip 根目录、和 manifest 平级，
+         而不是通用 Thunderstore 文档里写的 plugins/ 子目录——profile 里已装的
+         LDBTool / CommonAPI / UXAssist 全是这个样子，r2modman 会把整包摊进
+         BepInEx/plugins/<包名>/。
+
+         Newtonsoft.Json.dll 必须一起进包：插件运行时要它，少了就加载失败。 -->
+    <Target Name="PackageForRelease" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+        <PropertyGroup>
+            <DistDir>$(MSBuildThisFileDirectory)..\dist</DistDir>
+            <PkgDir>$(DistDir)\$(AssemblyName)</PkgDir>
+            <PkgZip>$(DistDir)\$(AssemblyName)-$(Version).zip</PkgZip>
+        </PropertyGroup>
+
+        <RemoveDir Directories="$(PkgDir)" />
+        <MakeDir Directories="$(PkgDir)" />
+
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PkgDir)\" />
+        <Copy SourceFiles="$(MSBuildThisFileDirectory)lib\Newtonsoft.Json.dll" DestinationFolder="$(PkgDir)\" />
+        <Copy SourceFiles="$(MSBuildThisFileDirectory)manifest.json;$(MSBuildThisFileDirectory)icon.png;$(MSBuildThisFileDirectory)README.md;$(MSBuildThisFileDirectory)CHANGELOG.md"
+              DestinationFolder="$(PkgDir)\" />
+
+        <Delete Files="$(PkgZip)" />
+        <ZipDirectory SourceDirectory="$(PkgDir)" DestinationFile="$(PkgZip)" Overwrite="true" />
+
+        <Message Importance="high" Text="已打包：$(PkgZip)" />
+    </Target>
+
+</Project>

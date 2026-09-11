@@ -1,0 +1,56 @@
+using System.Collections.Generic;
+using BepInEx.Logging;
+using Mono.Cecil;
+
+namespace ProjectEden.Preloader
+{
+    /// <summary>
+    /// BepInEx 的 patcher 入口：CLR 装载游戏程序集<b>之前</b>跑，拿到的是 Cecil 的元数据视图。
+    ///
+    /// 整个接口就两个成员（<see cref="TargetDLLs"/> + <see cref="Patch"/>），BepInEx 靠签名发现，
+    /// 所以这个类不需要继承任何东西，也没有 <c>[BepInPlugin]</c>。
+    ///
+    /// <b>这里的日志比平时更重要。</b> preloader 跑的时候没有 <c>LDB</c>、没有游戏状态、没有活类型，
+    /// 本仓库平时那套排查手段（读 IL、报匹配数、匹配为零就响）一样都用不上；
+    /// 出错的典型表现是游戏根本起不来，报一个指不到你代码的 CLR 类型加载异常。
+    /// 所以无论成功失败都把计数打全，失败时把每一条 Blocker 单独打出来。
+    /// </summary>
+    public static class Patcher
+    {
+        private static readonly ManualLogSource Log =
+            Logger.CreateLogSource("ProjectEden.Preloader");
+
+        public static IEnumerable<string> TargetDLLs { get; } = new[] { "Assembly-CSharp.dll" };
+
+        public static void Patch(AssemblyDefinition assembly)
+        {
+            CargoIncWidener.Report r = CargoIncWidener.Apply(assembly.MainModule);
+
+            foreach (string n in r.Notes) Log.LogInfo(n);
+
+            if (!r.Applied)
+            {
+                Log.LogError(
+                    $"Cargo.inc 加宽**未执行**，共 {r.Blockers.Count} 条阻塞项（程序集保持原样，游戏照常跑）：");
+
+                foreach (string b in r.Blockers) Log.LogError("  " + b);
+
+                Log.LogError(
+                    "传送带集装超过 63 层时，增产点数仍然只能按一个字节结算——" +
+                    "运行时的 CargoIncClampPatches 会把它夹在 255，是确定的降级，不是失真。");
+
+                return;
+            }
+
+            if (r.Propagated.Count > 0)
+                Log.LogInfo(
+                    $"数据流传播另外认出 {r.Propagated.Count} 个字节参数（名字上看不出来）：" +
+                    string.Join("、", r.Propagated.ToArray()));
+
+            Log.LogWarning(
+                $"Cargo.inc 已加宽为 Int16：签名 {r.WidenedParams} 处、局部变量 {r.WidenedLocals} 个、" +
+                $"间接读写 {r.FixedIndirect} 处、截断指令 {r.FixedConv} 处，覆盖 {r.CallSites} 个调用点。" +
+                "存档从此绑定本 mod。");
+        }
+    }
+}

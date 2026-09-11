@@ -1,0 +1,221 @@
+{
+  "//": "金属的四维属性。**只是提示栏上的展示数据**，目前不驱动任何玩法逻辑——它是合金配方的数据底座，先把数摆出来。",
+  "//how": "原版物品提示栏的属性行由 ItemProto.DescFields（一串字段号）驱动，每个字段号在 ItemProto.GetPropName / GetPropValue 的 switch 里对应一行。两个 switch 都有兜底分支（分别返回 `??` 和 `-`），所以加自定义字段号只要 postfix 接管，不用 transpiler——和『制造于』那套是同一个路子。",
+  "//fieldIdBase": "自定义字段号的起点。原版的 switch 占了 **0~73**，74 起是空的。这些号**不进存档**（只在运行时拼提示栏文本），撞了也只是显示串行，改一下重开即可。",
+  "fieldIdBase": 74,
+  "//rows": "行数没有上限：属性行是拼进 UIItemTip 的**单个** propsText 控件，不是定长数组（和悬停信息框的 icons 不一样）。",
+  "enabled": true,
+  "//properties": "属性定义，顺序即显示顺序。加一维就在这里追一条，再给每个金属补上对应的值。",
+  "properties": [
+    {
+      "key": "hardness",
+      "name": "硬度"
+    },
+    {
+      "key": "toughness",
+      "name": "韧性"
+    },
+    {
+      "key": "corrosion",
+      "name": "耐蚀"
+    },
+    {
+      "key": "conductivity",
+      "name": "导电"
+    }
+  ],
+  "//metals": "原版金属写 itemId，本 mod 的金属写 ref（矿种 key 加 .ingot）。**本 mod 的物品不要写死 ID**——ID 撞车时会自动顺延，写死的数字会指到别人家去。",
+  "metals": [
+    {
+      "itemId": 1101,
+      "name": "铁块",
+      "values": {
+        "hardness": 20,
+        "toughness": 60,
+        "corrosion": 10,
+        "conductivity": 20
+      }
+    },
+    {
+      "itemId": 1104,
+      "name": "铜块",
+      "values": {
+        "hardness": 12,
+        "toughness": 70,
+        "corrosion": 40,
+        "conductivity": 95
+      }
+    },
+    {
+      "itemId": 1106,
+      "name": "钛块",
+      "values": {
+        "hardness": 35,
+        "toughness": 55,
+        "corrosion": 85,
+        "conductivity": 15
+      }
+    },
+    {
+      "ref": "chromium.ingot",
+      "name": "铬块",
+      "values": {
+        "hardness": 55,
+        "toughness": 15,
+        "corrosion": 95,
+        "conductivity": 10
+      }
+    },
+    {
+      "ref": "vanadium.ingot",
+      "name": "钒块",
+      "values": {
+        "hardness": 45,
+        "toughness": 30,
+        "corrosion": 65,
+        "conductivity": 10
+      }
+    },
+    {
+      "ref": "cobalt.ingot",
+      "name": "钴块",
+      "values": {
+        "hardness": 40,
+        "toughness": 50,
+        "corrosion": 60,
+        "conductivity": 25
+      }
+    },
+    {
+      "ref": "manganese.ingot",
+      "name": "锰块",
+      "values": {
+        "hardness": 30,
+        "toughness": 45,
+        "corrosion": 20,
+        "conductivity": 15
+      }
+    },
+    {
+      "//": "硬度 50：钨的维氏硬度约 350~450 HV，低于铬的 1060 HV——**铬才是最硬的纯金属**，别被『钨很硬』的印象带跑。韧性 20：韧脆转变温度在室温以上。耐蚀 80：耐绝大多数酸。导电 30：约 31% IACS。",
+      "ref": "tungsten.ingot",
+      "name": "钨块",
+      "values": {
+        "hardness": 50,
+        "toughness": 20,
+        "corrosion": 80,
+        "conductivity": 30
+      }
+    },
+    {
+      "//": "**不是金属，但用同一套轴**——合金属性要按成分算，它这一行就得有。硬度 95：约 2600 HV。韧性 10：断裂韧度极低，脆到必须靠金属粘结才能成器，这正是硬质合金存在的理由。导电 12：约 8% IACS，碳化物里少见的导电体。",
+      "ref": "tungsten-carbide",
+      "name": "碳化钨",
+      "values": {
+        "hardness": 95,
+        "toughness": 10,
+        "corrosion": 85,
+        "conductivity": 12
+      }
+    },
+    {
+      "//": "硬质合金。这一行是**基准配比**下混合出来的四维值（hardness 90、toughness 11、corrosion 82、conductivity 14）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "carbide",
+      "name": "硬质合金",
+      "values": {
+        "hardness": 90,
+        "toughness": 11,
+        "corrosion": 82,
+        "conductivity": 14
+      }
+    },
+    {
+      "//": "**你表里的『碳钢』就是原版的钢材**——不用新开物品，原版配方铁块×3→钢材×1 本来就是碳钢。故意<b>没有</b>再加一条『铁+煤』的配方：那会绕开原版 3:1 的铁耗，等于三倍增益。**注意它目前不支持动态配比**，原版物品没法有牌号族。",
+      "itemId": 1103,
+      "name": "钢材",
+      "values": {
+        "hardness": 45,
+        "toughness": 55,
+        "corrosion": 10,
+        "conductivity": 15
+      }
+    },
+    {
+      "//": "原版就有这个物品，属性挂上去即可。三项都不错且不偏科，代价写在 cost 上。**注意它目前不支持动态配比**，原版物品没法有牌号族。",
+      "itemId": 1107,
+      "name": "钛合金",
+      "values": {
+        "hardness": 55,
+        "toughness": 60,
+        "corrosion": 90,
+        "conductivity": 12
+      }
+    },
+    {
+      "//": "锰钢。这一行是**基准配比**下混合出来的四维值（hardness 50、toughness 80、corrosion 15、conductivity 10）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "manganese-steel",
+      "name": "锰钢",
+      "values": {
+        "hardness": 50,
+        "toughness": 80,
+        "corrosion": 15,
+        "conductivity": 10
+      }
+    },
+    {
+      "//": "不锈钢。这一行是**基准配比**下混合出来的四维值（hardness 50、toughness 50、corrosion 90、conductivity 10）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "stainless-steel",
+      "name": "不锈钢",
+      "values": {
+        "hardness": 50,
+        "toughness": 50,
+        "corrosion": 90,
+        "conductivity": 10
+      }
+    },
+    {
+      "//": "镀铬铜。这一行是**基准配比**下混合出来的四维值（hardness 25、toughness 60、corrosion 75、conductivity 80）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "chrome-plated-copper",
+      "name": "镀铬铜",
+      "values": {
+        "hardness": 25,
+        "toughness": 60,
+        "corrosion": 75,
+        "conductivity": 80
+      }
+    },
+    {
+      "//": "铬钒工具钢。这一行是**基准配比**下混合出来的四维值（hardness 80、toughness 30、corrosion 60、conductivity 10）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "chrome-vanadium-steel",
+      "name": "铬钒工具钢",
+      "values": {
+        "hardness": 80,
+        "toughness": 30,
+        "corrosion": 60,
+        "conductivity": 10
+      }
+    },
+    {
+      "//": "钴铬合金。这一行是**基准配比**下混合出来的四维值（hardness 65、toughness 55、corrosion 95、conductivity 15）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "cobalt-chrome",
+      "name": "钴铬合金",
+      "values": {
+        "hardness": 65,
+        "toughness": 55,
+        "corrosion": 95,
+        "conductivity": 15
+      }
+    },
+    {
+      "//": "钒钛合金。这一行是**基准配比**下混合出来的四维值（hardness 70、toughness 50、corrosion 88、conductivity 10）。一种合金只有一个物品、一行固定属性——DSP 没有按堆/按件的元数据槽位，属性存在 ItemProto 上。逐台建筑的真实四维值在配比面板上实时显示。",
+      "ref": "vanadium-titanium",
+      "name": "钒钛合金",
+      "values": {
+        "hardness": 70,
+        "toughness": 50,
+        "corrosion": 88,
+        "conductivity": 10
+      }
+    }
+  ]
+}

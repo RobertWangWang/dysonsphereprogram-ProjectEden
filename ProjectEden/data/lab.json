@@ -1,0 +1,33 @@
+{
+  "//": "矩阵研究站。只改生产模式（造矩阵）的速度和内部存储，研究速度不在这里——那个走 GameHistoryData.techSpeed，是另一条路。",
+
+  "//assembleSpeed": "矩阵制造速度，来自 PrefabDesc.labAssembleSpeed，10000 = 1 倍速。建造时拷进 LabComponent.speed 并存档，所以已建成的由 MatrixLabPatches 在运行时补。生产模式每 tick 只累加一次 time 且到点即停，引擎硬上限就是每 tick 一个配方周期（60 周期/秒），所以只要大到「一个 tick 填满 timeSpend」就到顶了。最慢的引力矩阵 24 秒 = 1440 tick，主轨需要 1440 万、增产额外轨需要 1.44 亿；取 1 亿时 extraSpeed 到 2.5 亿，既够用又离 Int32 的 21.4 亿有一个数量级余量。填 0 保持原版。",
+  "assembleSpeed": 100000000,
+
+  "//assembleStorage": "生产模式每个原料格的存量上限（个）。原版是 timeSpend > 5400000 ? 6 : 3*ceil(speedOverride/10000)+3——超过 9 秒的配方（信息 / 引力 / 宇宙矩阵）硬编码只囤 6 个。served[] 是明文个数的 Int32，PlanetFactory.InsertInto 不查上限，真正的闸门是 UpdateNeedsAssemble 算出来的 needs[]，所以这里用后置重算接管。填 0 保持原版。",
+  "assembleStorage": 10000000,
+
+  "//assembleOutputStorage": "生产模式每个产物格的堆积上限（个）。原版是 InternalUpdateAssemble 里 `produced[i] + productCounts[i] > 10 * ceil(speedOverride/10000)` 就提前 return，和采矿机的 productCount/50 是同一个形状。填 0 保持原版。",
+  "assembleOutputStorage": 10000000,
+
+  "//researchStorage": "研究模式每种矩阵的存量上限（个），原版 10。注意 matrixServed[] 存的是「个数 × 3600」的 Int32（PlanetFactory.InsertInto 里 matrixServed[idx] += 3600 * itemCount），再算上向上层搬料时的二次累加要按 2 倍峰值算，所以硬上限是 298261 个——这一格物理上放不下一千万，填大了会被代码按 250000 处理。填 0 保持原版。",
+  "researchStorage": 250000,
+
+  "//logisticSupply": "让矩阵研究站直接从本行星的物流站取料，不用铺传送带和分拣器。没有给研究站真的装 StationComponent：研究站是要堆叠的，那样每一层都会长出一个独立的站和一批无人机，而且 prefabDesc 只对新建生效。虚拟供料对老存档里的研究站立即生效，代价是看不到无人机实体在飞。只从标了「供应」的储物格取货，Demand 格不动。",
+  "logisticSupply": true,
+
+  "//supplyIntervalTicks": "取料间隔 tick 数。生产模式满速时每 tick 吃 60 份配方，所以 supplyAssembleBatches 要明显大于 间隔 × 60，否则两次取料之间会断料。默认 10 配 2000，相当于 33 tick 的缓冲。",
+  "supplyIntervalTicks": 10,
+
+  "//supplyAssembleBatches": "生产模式囤多少份配方的原料。这是取料目标，不是容量上限（上限看 assembleStorage）——直接填到一千万会把整个物流网吸进一台研究站。",
+  "supplyAssembleBatches": 2000,
+
+  "//supplyMatrixItems": "研究模式每种矩阵囤多少个（按件数写，内部自动换算成 ×3600 的放大值）。同样只是取料目标，上限看 researchStorage。",
+  "supplyMatrixItems": 1000,
+
+  "//logisticOutput": "取料的反方向：把生产模式造好的矩阵直接送进本行星的物流站，不用铺分拣器。只做取料的话产物会堆在 produced[] 里，堆到 assembleOutputStorage 就停产。出货只往标了「本地需求」的格位送：那是玩家明说「请把这个东西送到这里」的标记，和取货只认「本地供应」格严格对称。要外运就按原版老套路配「本地需求 + 星际供应」。一个 Demand 格都没有的话产物会堆在机内，和原版不接分拣器一样。研究模式没有产物，不参与。",
+  "logisticOutput": true,
+
+  "//outputReserveItems": "出货时每个产物格里留多少个不送走。默认 0（全送走）。想让分拣器/传送带也能从研究站取到货就填个几百，虚拟出货和实体取货可以并存。",
+  "outputReserveItems": 0
+}

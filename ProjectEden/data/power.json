@@ -1,0 +1,11 @@
+{
+  "//": "电力节点的供电范围。卫星配电站默认 2212——进游戏后看日志里打印的建筑名确认，认错了改这里就行。",
+
+  "//coverRadius": "供电范围，单位米。OnNodeAdded / OnConsumerAdded 会先把坐标投影到半径 realRadius+0.2 的球面再比三维距离，所以单位就是米，覆盖整颗星球需要 ≥ 2 × 星球半径。普通行星半径 200，填 2000 足够覆盖任何可建造的星球。链路是 PrefabDesc.powerCoverRadius → PowerNodeComponent.coverRadius（进存档）→ OnNodeAdded 平方后缓存进 PowerNetworkStructures.Node.coverRadius2 并在那时挂接用电建筑，所以已建成的节点要走一遍拆建才能生效，由 PowerCoveragePatches 在读档后做。填 0 保持原版。",
+  "coverRadius": 2000,
+
+  "//connectDistance": "节点之间的连接距离，单位米。0 = 保持原版，建议就留 0：一起放开会让所有节点两两相连，line_arragement_for_add_node 的连线量按平方增长，节点一多就是性能问题。供电覆盖本身不需要它。",
+  "connectDistance": 0,
+
+  "itemIds": [2212]
+}

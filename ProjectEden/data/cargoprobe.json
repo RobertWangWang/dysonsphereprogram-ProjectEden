@@ -1,0 +1,13 @@
+{
+  "//": "着色器 inc 探针的开关。**单独一个文件，不跟 stations.json 合并**，这是故意的：JsonHelper 的磁盘覆盖是整文件生效的，把一个开发用开关塞进 stations.json，就等于为了翻一个布尔值去影子掉整份物流配置（集装层数、格子容量、充能功率全在里面），以后对内嵌 stations.json 的每一次修改都会被静默忽略——CLAUDE.md 里记着的 LDBTool CustomID.cfg 同款陷阱。这个文件影子掉的只有它自己。",
+
+  "//how": "改这里：BepInEx/config/ProjectEden/cargoprobe.json（不存在就新建，内容照抄本文件）。改完重开游戏即可，不用重新编译。用完把那个文件删掉就回到默认关闭。",
+
+  "//what": "回答一个离线查不出来的问题：编译好的货物着色器拿 Cargo.inc 干什么（传送带上喷过增产剂的那个外观）。CargoContainer.Draw 只往材质挂了 _Buffer / _MainTex / _IndexBuffer，而 fastIncArrowTable 那张箭头表只有界面在读、从没上过 GPU，所以着色器关于增产的全部信息就是那一个字节——着色器又是编译资产，读不出源码，只能做实验。",
+
+  "//run": "打开后**什么键都不用按**：走到一条有货的传送带前，让摄像机对着它、货物占住一部分屏幕就行。探针每 5 秒试一次，阳性对照一通过就跑完整实验并把结论打进日志（搜「着色器 inc 探针」），成功一次之后就不再跑。**不要用暂停**——FactoryModel.OnCameraPostRender 的第一条指令就是 isPaused 就 return，暂停时货物根本不上屏。实验期间用 Time.timeScale=0 冻结工厂（tick 挂在 FixedUpdate 上），渲染照常；跑完原样写回。",
+
+  "//scope": "这个结论只影响方案一（inc 改存每件速率）。方案二（加宽 Int16 + 32 字节重打包）不需要它——重打包时把 min(255, 真值) 写进渲染副本，着色器拿到的字节和今天逐位相同。",
+
+  "enabled": false
+}

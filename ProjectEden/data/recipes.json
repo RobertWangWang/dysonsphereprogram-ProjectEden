@@ -1,0 +1,22 @@
+{
+  "//": "额外配方。做法是把原版配方原样克隆一份、只改名字和 ERecipeType，让别的机器也能做同一件事——DSP 的配方选择器按单一类型过滤（UIRecipePicker.RefreshIcons 比 recipe.Type，UIAssemblerWindow 传 prefabDesc.assemblerRecipeType），一台机器只认一种类型，所以想让化工类机器干精炼的活，加一条化工类型的同内容配方比改选择器省事得多。",
+
+  "//cloneFrom": "源配方不写死 ID，而是按「cloneFromType 类型里产出 cloneFromResult 的那条」现找，找不到会 loud-fail 并打印原因。图标、描述、耗时、增产属性全部沿用源配方，不需要额外美术资源。",
+  "//type": "ERecipeType：1 熔炉 / 2 化工 / 3 精炼 / 4 组装 / 5 粒子。",
+  "//grid": "合成面板格位，沿用巨型建筑分页的编号规则（分页号 × 1000 + 行 × 100 + 列）。巨型建筑本身占第 1 行，所以这里从第 2 行开始，避免把原版配方顶掉。",
+
+  "recipes": [
+    {
+      "//": "让巨型化工厂（燔石化工厂，Chemical）能把原油裂解成精炼油。源配方是精炼类里产出精炼油的那条，也就是等离子精炼：原油 ×2 → 精炼油 ×2 + 氢 ×1。",
+      "id": 6510,
+      "name": "原油X射线裂解",
+      "description": "以X射线轰击原油分子，使其裂解为精炼油与氢。产出与等离子精炼相同，但可在化工设备中进行。",
+      "type": 2,
+      "cloneFromType": 3,
+      "cloneFromResult": 1114,
+      "timeSpend": 0,
+      "gridRow": 2,
+      "gridCol": 1
+    }
+  ]
+}

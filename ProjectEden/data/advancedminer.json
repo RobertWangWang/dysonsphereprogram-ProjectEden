@@ -1,0 +1,62 @@
+{
+  "//": "大型采矿机改造。物品 2316。",
+  "minerItemId": 2316,
+  "//boostWaterPumps": "抽水类设备（抽水站 2306、大抽水机等）是否同样提速、免消耗、放大缓存。按 MinerComponent.type == Water 判定，不必逐个列 ID。功率不受影响：它们保留各自的原版功率，只是不再随速度平方缩放。",
+  "boostWaterPumps": true,
+  "//boostOilExtractors": "把原油萃取站（MinerComponent.type == Oil）一并纳入提速、免矿物消耗与缓存放大。原油分支的算式是 time += power × speedDamper × speed × miningSpeed × (油井储量 × VeinData.oilSpeedMultiplier)，乘数不是矿脉数而是「原油速率」，所以防溢出倒推 speed 时按 MiningMultiplier 区分；按 1 估算会把 speed 抬过头、time 溢出 Int32 反而被钳死。免消耗（forceMiningCostRate=0）对原油尤其重要：油井储量既是产量乘数又会被开采消耗，一旦衰减速率就跟着掉。机内缓存上限由下面的 capacity 统一控制。",
+  "boostOilExtractors": true,
+  "//stationCapacity": "站点仓储上限，即面板上的『上限』。来自 PrefabDesc.stationMaxItemCount，原版 10000。只对新建的采矿机生效，已建好的沿用存档里的值。",
+  "stationCapacity": 10000000,
+  "//workEnergyPerTick": "工作功率，单位焦/tick。60 tick = 1 秒，所以 375000 = 22.5 MW。固定值，不随开采速度浮动。填 0 则保持原版。",
+  "workEnergyPerTick": 375000,
+  "//capacity": "采矿机送进站点之前的机内缓存上限。原版 50。开启 overrideSpeedDamper 后节流已绕开，这里必须放大，否则每 tick 入口处的 productCount < capacity 判断会挡住采矿。",
+  "capacity": 10000000,
+  "//overrideSpeedDamper": "把 speedDamper 固定为 1。原版按 productCount/50 节流，productCount 到 50 就降到 2% 速度——高速采矿时单 tick 产量远超 50，不绕开的话倍率完全无效。",
+  "overrideSpeedDamper": true,
+  "//remapProduct": "是否把采到的矿石换成冶炼产物。站点仓位由 StationComponent.UpdateVeinCollection 按采矿机产物建立，本 mod 在其之前同步替换，保证两边一致。",
+  "remapProduct": true,
+  "//forceMiningCostRate": "矿物消耗倍率。0 = 矿脉完全不消耗，即矿物利用率的上限。填 -1 改为按满级科技推算。",
+  "forceMiningCostRate": 0,
+  "//maxOutMinerSpeed": "按防溢出限幅倒推每台采矿机能吃满的 speed，逐台按其矿脉数计算。关闭则只用满级科技倍率（1001 倍），那通常只用掉限幅空间的一小部分。",
+  "maxOutMinerSpeed": true,
+  "//maxMiningTechLevel": "矿物利用科技按此等级算满级。最后一级是可无限研究的，不设上限会溢出。",
+  "maxMiningTechLevel": 10000,
+  "//removeBuildDistanceLimit": "取消大型采矿机的建造间距限制。原版 CheckBuildConditions 的间距循环里：limit = desc.isVeinCollector ? 625 : 225（25 米 / 15 米的平方），星际站换成 841；命中后 condition = 对方是采矿机 ? MK2MinerTooClose : TowerTooClose。注意原版本来就允许两台采矿机重叠（循环开头有 if (desc.isVeinCollector && station.isVeinCollector) continue），这里放开的是采矿机与其他物流站之间的间距。",
+  "removeBuildDistanceLimit": true,
+  "//allowMinerOverlap": "允许大型采矿机重叠放置。诊断实测拦住重叠的是 EBuildCondition.Collide（34）而不是间距判定。原版 BuildTool_Click.CheckBuildConditions 里：先判通用碰撞，不中再走 else if (desc.veinMiner && Physics.CheckBox(..., layer 2048, ...)) 这条采矿机专属的。这里两头都处理：转译掉那个 CheckBox（它在整个方法里只出现一次，必然在 veinMiner 分支内，所以不会误伤通用碰撞），并在后置里清掉采矿机自己的 Collide。副作用：采矿机也能叠进别的建筑——通用碰撞那个循环没把撞到了谁记在 BuildPreview 上，光看 condition 分不出来。",
+  "allowMinerOverlap": true,
+  "//allowMinerOnOil": "让大型采矿机能采集原油涌泉。原版在 CheckBuildConditions 收集矿脉的两个循环里都有 if (veinPool[id].type == EVeinType.Oil) continue，把油井排除掉，所以盖上去只会得到 NeedResource。这是唯一的卡点：建成之后 InitVeinArray 不按类型过滤，station.collectionIds[0] 直接取 veinPool[veins[0]].productId（油井就是 1007 原油），Vein 分支也只循环 veins[] 读 productId。做法是把比较常量 7 换成返回 -1 的调用，让判定永不成立；第三处 bne.un 是原油萃取站「必须是油井」的判定，不能碰。两处循环指令特征相同，所以普通采矿机也会一并放开。",
+  "allowMinerOnOil": true,
+  "//maxTimeIncrementPerTick": "MinerComponent 每 tick 往 int 型的 time 上累加 speed*miningSpeed*veinCount，超过 int 上限会掉进原版兜底反被钳死，这里预留余量。",
+  "maxTimeIncrementPerTick": 2000000000.0,
+  "//productMap": "采到的矿石换成冶炼产物。**铁矿、石矿、煤矿故意不换**：铁矿以矿石形态喂的下游太多，石矿分成石材和玻璃两路，煤矿既是燃料又是石墨/能量矩阵/化工链的原料——这三种一旦在源头就被冶炼掉，下游反而拿不到原料。ore / product 可以不写：ore 填 0 就按 veinType 查 VeinProto.MiningItem，product 填 0 就去找「只吃这一种矿」的那条原版配方取它的第一个产物——稀有矿的物品 ID 不好记，用矿脉类型写更不容易出错。veinType：1 铁 2 铜 3 硅 4 钛 5 石 6 煤 7 原油 8 可燃冰 9 金伯利 10 分形硅石 11 有机晶体 12 光栅石 13 刺笋结晶 14 单极磁石。推不出来会打 WARNING 并跳过，不会静默失效。",
+  "productMap": [
+    {
+      "ore": 1002,
+      "product": 1104,
+      "comment": "铜矿 → 铜块"
+    },
+    {
+      "ore": 1003,
+      "product": 1105,
+      "comment": "硅石 → 高纯硅块"
+    },
+    {
+      "ore": 1004,
+      "product": 1106,
+      "comment": "钛石 → 钛块"
+    },
+    {
+      "veinType": 8,
+      "comment": "可燃冰 → 石墨烯（按矿脉类型 + 唯一原料配方推）"
+    },
+    {
+      "veinType": 10,
+      "comment": "分形硅石 → 晶格硅（同上）"
+    },
+    {
+      "veinType": 13,
+      "comment": "刺笋结晶 → 碳纳米管（同上）"
+    }
+  ]
+}

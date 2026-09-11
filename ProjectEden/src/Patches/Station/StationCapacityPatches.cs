@@ -1,0 +1,269 @@
+#pragma warning disable 649 // StationsConfig 的字段由 JSON 反序列化赋值
+
+using System;
+using System.Collections.Generic;
+using HarmonyLib;
+using ProjectEden.Utils;
+
+namespace ProjectEden.Patches
+{
+    /// <summary>
+    /// 把物流站单个储物格的容量放大，并改写最大充能功率。
+    ///
+    /// 容量来自 PrefabDesc.stationMaxItemCount，StationComponent.Init 用它初始化每个仓位的 max，
+    /// 而 max 是存进存档的——所以改 prefabDesc 只对之后新建的站点生效，
+    /// 已经建好的必须在运行时补齐。两头都做。
+    ///
+    /// 最大充能功率（给运输机 / 运输船充电的速度）走的是同一个套路，只是链路长一点：
+    ///     PrefabDesc.workEnergyPerTick
+    ///       → StationComponent.Init 写进 PowerConsumerComponent.workEnergyPerTick（<b>进存档</b>）
+    ///       → PlanetTransport.GameTick 调 SetPCState，按 1.05 - energy/energyMax 的比例算出 requiredEnergy
+    ///       → 回写 StationComponent.energyPerTick，也就是每 tick 实际充进去的能量
+    /// 所以只改 prefabDesc 对已建成的站点没有任何效果，必须一并改 consumerPool 里的值。
+    ///
+    /// 作用范围：配置里列出的站点（行星内 / 星际物流运输站）加上本 mod 的巨型建筑。
+    /// 充能功率只认 chargePower 里显式列出的站点——巨型建筑的 workEnergyPerTick 同时是制造台的
+    /// 工作功耗，动它会连带改掉生产耗电，所以默认不碰。
+    /// 大型采矿机由 AdvancedMinerPatches 单独处理，不在这里重复。
+    /// </summary>
+    [HarmonyPatch]
+    internal static class StationCapacityPatches
+    {
+        private static StationsConfig Config => ProjectEdenPlugin.StationsConfig;
+
+        /// <summary>需要放大容量的建筑 protoId。</summary>
+        private static readonly HashSet<int> TargetProtoIds = new HashSet<int>();
+
+        /// <summary>需要改写最大充能功率的建筑 protoId → 原版值与目标值。</summary>
+        private static readonly Dictionary<int, ChargeTarget> ChargePowerByProto = new Dictionary<int, ChargeTarget>();
+
+        /// <summary>一个站点原版的充能功率，以及我们希望它至少达到的值。</summary>
+        private struct ChargeTarget
+        {
+            public long vanilla;
+            public long target;
+        }
+
+        /// <summary>proto 就绪后调用：改 prefabDesc，并整理出运行时要认的 protoId 集合。</summary>
+        internal static void ApplyPrefabCapacity()
+        {
+            TargetProtoIds.Clear();
+            ChargePowerByProto.Clear();
+
+            if (Config == null) return;
+
+            ApplyChargePower();
+
+            if (Config.slotCapacity <= 0) return;
+
+            if (Config.itemIds != null)
+                foreach (int itemId in Config.itemIds)
+                    Apply(itemId);
+
+            // 巨型建筑本身也是物流站，一并放大
+            MegaBuildingsConfig mega = MegaBuildingRegistry.Config;
+
+            if (mega?.buildings != null && mega.stationEnabled)
+                foreach (MegaBuildingEntry entry in mega.buildings)
+                    Apply(entry.itemId);
+
+            // machines.json 里 kind 为 station 的新建筑同理：它们就是物流站，
+            // 储量 / 格数 / 充能功率跟着这里走，不用在那边重复配一遍
+            foreach (int itemId in MachineRegistry.StationItemIds) Apply(itemId);
+
+            // 气体采集器不写死 ID，按 isCollectStation 认，和 GasCollectorPatches 一个口径
+            foreach (ItemProto item in LDB.items.dataArray)
+            {
+                if (item == null) continue;
+
+                ModelProto model = LDB.models.Select(item.ModelIndex);
+
+                if (model?.prefabDesc == null || !model.prefabDesc.isCollectStation) continue;
+
+                Apply(item.ID);
+            }
+        }
+
+        /// <summary>
+        /// 改写最大充能功率。只动 chargePower 里显式列出的站点，
+        /// 免得把巨型建筑的制造功耗也一起改了。
+        /// </summary>
+        private static void ApplyChargePower()
+        {
+            if (Config.chargePower == null) return;
+
+            foreach (StationChargeEntry entry in Config.chargePower)
+            {
+                if (entry == null || entry.energyPerTick <= 0) continue;
+
+                ItemProto item = LDB.items.Select(entry.itemId);
+                ModelProto model = item != null ? LDB.models.Select(item.ModelIndex) : null;
+
+                if (model?.prefabDesc == null || !model.prefabDesc.isStation)
+                {
+                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是物流站或没有 prefabDesc，最大充能功率未改");
+                    continue;
+                }
+
+                long before = model.prefabDesc.workEnergyPerTick;
+
+                model.prefabDesc.workEnergyPerTick = entry.energyPerTick;
+
+                // 记下原版值：运行时只补「还停在原版值」的站点，玩家自己拖过的一律不动
+                ChargePowerByProto[entry.itemId] = new ChargeTarget { vanilla = before, target = entry.energyPerTick };
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"{item.name} 最大充能功率：{before * 60 / 1e9:0.###} GW → {entry.energyPerTick * 60 / 1e9:0.###} GW");
+            }
+        }
+
+        private static void Apply(int itemId)
+        {
+            ItemProto item = LDB.items.Select(itemId);
+            ModelProto model = item != null ? LDB.models.Select(item.ModelIndex) : null;
+
+            if (model?.prefabDesc == null || (!model.prefabDesc.isStation && !model.prefabDesc.isCollectStation))
+            {
+                ProjectEdenPlugin.Log.LogWarning($"物品 {itemId} 不是物流站或没有 prefabDesc，储物格容量未改");
+                return;
+            }
+
+            int before = model.prefabDesc.stationMaxItemCount;
+            int beforeKinds = model.prefabDesc.stationMaxItemKinds;
+
+            model.prefabDesc.stationMaxItemCount = Config.slotCapacity;
+
+            // 巨型建筑的格数由 megabuildings.json 单独控制，这里只改配置列出的物流站
+            bool isMega = MegaBuildingRegistry.Config?.buildings != null
+                       && System.Array.Exists(MegaBuildingRegistry.Config.buildings, b => b.itemId == itemId);
+
+            // 气体采集器的格数必须和行星的气体种类对得上：StationComponent.Init 的采集器分支
+            // 按 collectionIds.Length 铺格位、拿 stationMaxItemKinds 封顶，改成 30 只会多出
+            // 一堆空格，还会把 StationExpandPatches 的 30 格面板套到采集器头上。只放大容量。
+            bool isCollector = model.prefabDesc.isCollectStation;
+
+            if (!isMega && !isCollector && Config.stationMaxItemKinds > 0)
+                model.prefabDesc.stationMaxItemKinds = Config.stationMaxItemKinds;
+
+            TargetProtoIds.Add(itemId);
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"{item.name} 储物格：{beforeKinds} → {model.prefabDesc.stationMaxItemKinds} 格，" +
+                $"单格容量 {before} → {Config.slotCapacity}");
+        }
+
+        /// <summary>
+        /// 已建成站点的补齐。挂 PlanetTransport.GameTick——单线程与多线程两条路径
+        /// 最终都会调到它，所以只需要这一处。
+        ///
+        /// 每 tick 只做整数比较，值已经对了就不写，开销可以忽略。
+        /// 充能功率是后置修正：本 tick 的 SetPCState 已经跑过了，改完下一 tick 才生效。
+        /// </summary>
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
+        private static void PlanetTransport_GameTick(PlanetTransport __instance)
+        {
+            if (Config == null) return;
+
+            bool fixCapacity = Config.slotCapacity > 0 && TargetProtoIds.Count > 0;
+            bool fixCharge = ChargePowerByProto.Count > 0;
+
+            if (!fixCapacity && !fixCharge) return;
+
+            PlanetFactory factory = __instance.factory;
+
+            if (factory == null || __instance.stationPool == null) return;
+
+            EntityData[] entityPool = factory.entityPool;
+            PowerConsumerComponent[] consumerPool = factory.powerSystem?.consumerPool;
+            int capacity = Config.slotCapacity;
+
+            for (var i = 1; i < __instance.stationCursor; i++)
+            {
+                StationComponent station = __instance.stationPool[i];
+
+                if (station == null || station.id != i || station.storage == null) continue;
+
+                int entityId = station.entityId;
+
+                if (entityId <= 0 || entityId >= entityPool.Length) continue;
+
+                int protoId = entityPool[entityId].protoId;
+
+                if (fixCapacity && TargetProtoIds.Contains(protoId))
+                    for (var s = 0; s < station.storage.Length; s++)
+                        if (station.storage[s].max != capacity)
+                            station.storage[s].max = capacity;
+
+                if (!fixCharge || consumerPool == null) continue;
+                if (!ChargePowerByProto.TryGetValue(protoId, out ChargeTarget charge)) continue;
+
+                int pcId = station.pcId;
+
+                if (pcId <= 0 || pcId >= consumerPool.Length) continue;
+
+                // 只把「还停在原版值」的老站点抬上来，抬过一次之后 current 就高于原版值，
+                // 这里再也不会命中。玩家用面板滑条设的值因此能保住——
+                // 那个滑条（UIStationWindow.OnMaxChargePowerSliderValueChange）写的正是这个字段，
+                // 无条件覆写会让它一松手就缩回去。
+                if (consumerPool[pcId].workEnergyPerTick <= charge.vanilla)
+                    consumerPool[pcId].workEnergyPerTick = charge.target;
+            }
+        }
+    }
+
+    [Serializable]
+    internal class StationsConfig
+    {
+        public int slotCapacity;
+
+        /// <summary>储物格数量。超过 6 需要 StationExpandPatches 一并接管。</summary>
+        public int stationMaxItemKinds;
+
+        public int[] itemIds;
+
+        /// <summary>行星内物流运输机的单次运载量</summary>
+        public int droneCarries;
+
+        /// <summary>星际物流运输船的单次运载量</summary>
+        public int shipCarries;
+
+        /// <summary>分拣器堆叠输入层数（解锁函数 41），原版基础值 2</summary>
+        public int inserterStackInput;
+
+        /// <summary>分拣器堆叠输出层数（解锁函数 39），原版基础值 1</summary>
+        public int inserterStackOutput;
+
+        /// <summary>物流塔集装层数（解锁函数 29），原版基础值 1</summary>
+        public int stationPilerLevel;
+
+        /// <summary>要改写最大充能功率的站点，逐个列出</summary>
+        public StationChargeEntry[] chargePower;
+
+        /// <summary>气体采集器的采集倍率（PrefabDesc.stationCollectSpeed）。0 = 保持原版</summary>
+        public int collectorSpeed;
+
+        /// <summary>气体采集器每 tick 每种气体的采集量上限。0 = 用 slotCapacity</summary>
+        public float collectorMaxPerTick;
+
+        /// <summary>
+        /// 「货物账本」探针。<b>只观察，不改任何游戏逻辑</b>，用来验证
+        /// 「与 cargoPool 平行、按 cargoId 索引的数组」这套骨架跟不跟得住——
+        /// 扩容、ID 回收、读档、并行四处都会被检出来。见 CargoLedgerProbe。
+        /// </summary>
+        public bool cargoLedgerProbe;
+
+        /// <summary>探针的自检间隔（秒）。0 = 10 秒</summary>
+        public int cargoLedgerLogSeconds;
+    }
+
+    /// <summary>单个站点的最大充能功率设定。</summary>
+    [Serializable]
+    internal class StationChargeEntry
+    {
+        public int itemId;
+
+        /// <summary>每 tick 焦耳数。60 tick = 1 秒，所以 500000000 = 30 GW。</summary>
+        public long energyPerTick;
+    }
+}

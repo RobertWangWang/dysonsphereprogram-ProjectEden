@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+    <PropertyGroup Label="DefaultPath">
+        <!-- 游戏安装目录，结尾不要加反斜杠 -->
+        <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Dyson Sphere Program</GameDir>
+        <!-- 调试用的 r2modman profile 的 BepInEx 目录，结尾不要加反斜杠 -->
+        <BepInExDir>C:\Users\你的用户名\AppData\Roaming\r2modmanPlus-local\DysonSphereProgram\profiles\你的profile\BepInEx</BepInExDir>
+        <!-- 部署到 plugins 下的子目录名 -->
+        <DebugModDir>ProjectEden</DebugModDir>
+    </PropertyGroup>
+</Project>

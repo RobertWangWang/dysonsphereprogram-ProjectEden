@@ -1,0 +1,303 @@
+{
+  "//": "克隆原版建筑做出来的新生产设备。往 machines 里追一条就是一台新机器，不用改代码。",
+
+  "//kind-accumulator": "accumulator = 蓄电器。克隆原版蓄电器，只放大容量与充放电功率。**参数全是倍率不是绝对值**——这几个值存在源建筑的 PrefabDesc 里，而 PrefabDesc 是从 resources.assets 的预制体读出来的，离线看不到、反编译也查不到，硬写绝对值就是凭记忆猜。开局日志会把乘出来的真值（GJ / MW）打出来。",
+  "//kind": "assembler（默认）= 认一种配方类型的制造设备；station = 物流站。物流站型只要克隆一台**星际**物流运输站就同时有行星内运输机和星际运输船——两者是 StationComponent 的两半，由 isStellarStation 决定要不要分配运输船，克隆时原样继承，一行逻辑都不用写。",
+  "//recipeType": "这台机器认哪种配方类型，同时也是「新配方类型」的定义处。原版 ERecipeType 占了 1~8（熔炉/化工/精炼/组装/粒子/交换/photon/分馏）和 15（研究），**9~14 是空的**。ERecipeType 是 int 枚举，(ERecipeType)9 不需要有名字也合法，不用写 preloader；AssemblerComponent.SetRecipe 也完全不校验类型，类型只在配方选择器那一层起作用。",
+  "//copyFromItemId": "从哪个原版建筑整台克隆：物品模板、模型、材质、碰撞体、传送带槽位、速度、功耗全部继承，只换名字、颜色和配方类型。2309 = 化工厂。",
+  "//id": "itemId / modelId / recipeId 都会**进存档**，定下来别改。开局会现场核对是否被占用，撞了自动顺延并打 WARNING 告诉你钉回哪个值。",
+  "//buildIndex": "建造栏位置 = 分类 × 100 + 槽位。留 0 则跟着源建筑的分类走、在同一类里自动找空槽（不会换分类——换了等于挪到别的建造标签下面去了）。化工厂是 508。",
+  "//tint": "模型材质的染色（RGB 0~1）。直接写进 _Color，和巨型建筑那套一样。",
+  "//icon": "图标由源建筑的图标改色而来，不需要美术资源。iconHue 目标色相（度），iconSaturationScale 饱和度倍率，iconMinSaturation 给近似灰的像素一个饱和度下限，iconValueScale 明度倍率。",
+
+  "enabled": true,
+
+  "machines": [
+    {
+      "key": "electrochem",
+      "enabled": true,
+
+      "displayName": "电化学厂",
+      "description": "在熔盐或水溶液中以电流驱动氧化还原反应。与化工厂共用一套结构，但槽体通了电极，能做化工厂做不了的电化学配方。",
+
+      "copyFromItemId": 2309,
+
+      "itemId": 6530,
+      "modelId": 719,
+
+      "//recipeType-9": "电化学。目前只有『电解铝』走这条。",
+      "recipeType": 9,
+      "recipeTypeName": "电化学",
+      "machineTypeName": "电化学设备",
+
+      "gridIndex": 0,
+      "buildIndex": 0,
+
+      "//tint-blue": "化工厂本体偏青绿，压绿抬蓝做成电解槽那种冷蓝。",
+      "tint": [0.55, 0.78, 1.0],
+
+      "iconHue": 205.0,
+      "iconSaturationScale": 1.25,
+      "iconMinSaturation": 0.2,
+      "iconValueScale": 1.0,
+
+      "recipeId": 6530,
+      "recipeTimeSpend": 180,
+      "recipeGridIndex": 0,
+      "recipeItems": [
+        { "id": 2309, "count": 1 },
+        { "id": 1203, "count": 8 },
+        { "id": 1301, "count": 8 }
+      ]
+    },
+    {
+      "key": "redox",
+      "enabled": true,
+
+      "displayName": "氧化还原化工厂",
+      "description": "把氧化与还原两个半反应拆到同一台设备的两侧槽体里分别控温控压。和化工厂同源，但配了独立的氧化剂/还原剂供给回路，能跑化工厂做不了的氧化还原配方。",
+
+      "copyFromItemId": 2309,
+
+      "itemId": 6532,
+      "//modelId": "720 被石膏矿脉占了（矿脉先注册）。上限是 727——ResolveModelId 从 LDB.models.dataArray.Length + 64 - 1 往下扫，巨型建筑 723~727、矿脉 716~722、机器 717~719 都是这么排下来的。",
+      "modelId": 717,
+
+      "//recipeType-10": "氧化还原。9 已经给电化学了，原版空着的还剩 10~14。新建的类型一开始没有任何配方，配方选择器会是空的——往 ores.json / recipes.json 里写一条 type 10 的配方它才有活干。",
+      "recipeType": 10,
+      "recipeTypeName": "氧化还原",
+      "machineTypeName": "氧化还原设备",
+
+      "gridIndex": 0,
+      "buildIndex": 0,
+
+      "//tint-violet": "化工厂本体偏青绿，电化学厂已经占了冷蓝，这台抬红抬蓝做成紫罗兰，三台一眼分得开。",
+      "tint": [0.85, 0.6, 1.0],
+
+      "iconHue": 285.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.2,
+      "iconValueScale": 1.0,
+
+      "recipeId": 6532,
+      "recipeTimeSpend": 180,
+      "recipeGridIndex": 0,
+      "recipeItems": [
+        { "id": 2309, "count": 1 },
+        { "id": 1203, "count": 10 },
+        { "id": 1301, "count": 10 }
+      ]
+    },
+    {
+      "//": "把两种物流无人机放在一台建筑里。克隆星际物流运输站（2104），isStation / isStellarStation 原样继承，所以行星内运输机和星际运输船都在。配送运输机（物流配送器那种）是另一个组件，暂未合入。",
+      "key": "logistics-hub",
+      "enabled": true,
+      "kind": "station",
+
+      "displayName": "综合物流枢纽",
+      "description": "同时停泊行星内物流运输机与星际物流运输船的大型枢纽。机库与泊位都做了扩容，一座顶数座。",
+
+      "copyFromItemId": 2104,
+
+      "itemId": 6531,
+      "modelId": 718,
+
+      "gridIndex": 0,
+      "buildIndex": 0,
+
+      "//tint": "星际站本体偏冷灰，抬暖压蓝做成琥珀色，和原版两种物流站一眼分得开。",
+      "tint": [1.0, 0.82, 0.45],
+
+      "iconHue": 35.0,
+      "iconSaturationScale": 1.35,
+      "iconMinSaturation": 0.18,
+      "iconValueScale": 1.05,
+
+      "//station": "储量 / 格数 / 充能功率留 0，交给 stations.json 那套统一处理——注册时会把本建筑的物品 ID 报过去。",
+      "station": {
+        "maxDroneCount": 200,
+        "//maxShipCount": "不能超过 64：idleShipIndices 是 UInt64 位图，按 1L << (index & 63) 索引。",
+        "maxShipCount": 50,
+        "maxItemCount": 0,
+        "maxItemKinds": 0,
+        "maxEnergyAcc": 0,
+        "workEnergyPerTick": 0,
+
+        "//courierCount": "第三种无人机：配送运输机（往机甲送货/回收）。> 0 就给这台建筑挂上 DispenserComponent，并自带一个不露面的缓冲仓当货源——配送器只认 StorageComponent，而物流站槽位是 StationStore[]，两者类型不同读不到对方，所以由 HubCourierPatches 每 tick 把缓冲仓和 30 个槽位对齐。填 0 则完全不挂。",
+        "courierCount": 20,
+        "courierEnergyAcc": 0,
+        "//playerDeliveryMode": "对机甲的配送模式：0 关 / 1 只回收 / 2 收发都做 / 3 只供应。**必须配**——DispenserComponent.Init 不给 playerMode 赋值，默认 0（关闭），配送运输机会一动不动；而枢纽点开的是物流站面板，没有配送器面板可调。",
+        "playerDeliveryMode": 2,
+        "//storageDeliveryMode": "对周围储物仓的配送：0 关 / 1 供应 / 2 需求。枢纽自己就是物流网的一部分，一般填 0。",
+        "storageDeliveryMode": 0,
+        "//autoDeliveryList": "自动把枢纽里有的货补进伊卡洛斯的「配送需求清单」。**不开的话配送运输机不会动**——原版配送器只对清单里配过的物品干活，清单空着就全员待命。只填空格，绝不改玩家自己配好的条目；也只在玩家当前所在的星球上做。",
+        "autoDeliveryList": true,
+        "//deliveryKeepStacks": "自动填清单时每种货给几组的需求量，同时也是回收线：机甲身上保持这么多，多出来的自动送回枢纽。",
+        "deliveryKeepStacks": 1,
+        "//courierDebugLog": "每 10 秒往日志里打一行枢纽状态（槽位/缓冲仓/配送清单/运输机/配对/当前服务的货）。配送不动时用它定位是哪一段断的，平时关着。",
+        "courierDebugLog": false,
+        "//buffer": "缓冲仓格数，够装下槽位里的货物种类就行，多了没用。",
+        "bufferCols": 6,
+        "bufferRows": 5
+      },
+
+      "recipeId": 6531,
+      "recipeTimeSpend": 300,
+      "recipeGridIndex": 0,
+      "recipeItems": [
+        { "id": 2104, "count": 1 },
+        { "id": 1204, "count": 20 },
+        { "id": 1301, "count": 20 }
+      ]
+    },
+    {
+      "//": "锂离子电池版的蓄电器。正极钴酸锂、负极石墨——现实里锂电池就是这两样，所以配方里这两项是硬要求。",
+      "key": "lithium-accumulator",
+      "enabled": true,
+      "kind": "accumulator",
+
+      "displayName": "锂电池蓄电器",
+      "description": "以钴酸锂为正极、石墨为负极的锂离子储能阵列。锂离子在两极之间往返，充得快、存得多——同样的体积里塞进数倍的电，还能几分钟内吃满。",
+
+      "//copyFromItemId": "2206 = 蓄电器。isAccumulator、subId、模型、碰撞体全部原样继承。",
+      "copyFromItemId": 2206,
+
+      "itemId": 6533,
+      "//modelId": "上限 727，716~727 已被矿脉和其它新建筑占了，往下取 715。",
+      "modelId": 715,
+
+      "gridIndex": 0,
+      "buildIndex": 0,
+
+      "//tint": "原版蓄电器偏冷蓝灰，抬红抬蓝做成锂那一系的紫，和锂矿脉、锂锭连成一色。",
+      "tint": [0.78, 0.62, 1.0],
+
+      "iconHue": 275.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.18,
+      "iconValueScale": 1.05,
+
+      "//accumulator": "倍率乘在源建筑的真值上。充电倍率给得比放电高——重点是**吃电快**；容量倍率就是能量密度。",
+      "accumulator": {
+        "capacityMultiplier": 6.0,
+        "inputMultiplier": 10.0,
+        "outputMultiplier": 4.0,
+
+        "//fullVariant": "「满」版本。它不是新建筑，是同一台建筑的另一张脸——和空版**共用同一个模型**（原版 2206/2207 的 ModelIndex 都是 46），区别只有三处：BuildIndex = 0（不占建造栏槽位，只能从物品栏放下去）、自己的格位、以及 FuelType + HeatValue（满的那个是机甲燃料）。空↔满的转换由能量枢纽做，配对写在**枢纽**身上，见下面那条。",
+        "fullVariant": {
+          "itemId": 6534,
+          "displayName": "锂电池蓄电器（满）",
+          "description": "充满电的锂离子储能阵列。既能直接放回电网放电，也能塞进机甲当燃料——单块的能量是原版满蓄电器的六倍。",
+          "//copyFromItemId": "2207 = 蓄电器（满）。图标从它改色，原图本来就画着「充满」，染过来就是本 mod 配色的满电池，不用画新图。",
+          "copyFromItemId": 2207,
+          "gridIndex": 0,
+          "//fuelType": "0 = 继承源物品（原版是 8，蓄电器那一类燃料）。",
+          "fuelType": 0,
+          "//heatValue": "留 0 就按 capacityMultiplier 从源物品的热值推：容量放大六倍，一块满电池能放出的能量就是六倍（2.7 GJ → 16.2 GJ）。不用手写数字。",
+          "heatValue": 0,
+          "//reactorInc": "机甲反应堆的**功率**加成。Mecha.GenerateEnergy 里 ratio = ItemProto.ReactorInc + 1，再乘到 reactorPowerGen 上，所以 1.5 = 功率 +150%（×2.5）。原版参照：蓄电器（满）1.0（×2）、氢燃料棒 1.0、氘核燃料棒 2.0（×3）、原油 −0.5（×0.5）。注意它只改**功率**不改**总能量**——放得更快，但同一块电池放的次数更少。",
+          "reactorInc": 1.5
+        }
+      },
+
+      "recipeId": 6533,
+      "recipeTimeSpend": 300,
+      "recipeGridIndex": 0,
+      "//recipeItems": "钴酸锂用 ref 引，不写死 ID——新物品 ID 撞车时会自动顺延，写死的数字会一声不吭地指到别人家去。1109 = 高能石墨（负极），2206 = 蓄电器本体。",
+      "recipeItems": [
+        { "id": 2206, "count": 1 },
+        { "ref": "lithium-cobalt-oxide", "count": 8 },
+        { "id": 1109, "count": 8 }
+      ]
+    },
+    {
+      "//": "给锂电池蓄电器配套的能量枢纽。**一台枢纽只服务一对空/满**——PowerExchangerComponent 的 emptyId/fullId 直接来自 PrefabDesc，整个组件从头到尾只认这两个 ID，所以想让新蓄电器能充满，办法不是给原版枢纽打补丁，而是再克隆一台指向新的一对。原版建模这件事的方式就是如此。",
+      "key": "lithium-exchanger",
+      "enabled": true,
+      "kind": "exchanger",
+
+      "displayName": "锂电池能量枢纽",
+      "description": "为锂离子储能阵列配套的充放电站。把空的锂电池蓄电器充满，或者把满的放回电网——吞吐是原版枢纽的六倍。",
+
+      "//copyFromItemId": "2209 = 能量枢纽。",
+      "copyFromItemId": 2209,
+
+      "itemId": 6535,
+      "//modelId": "上限 727，715~727 已被占，往下取 714。",
+      "modelId": 714,
+
+      "gridIndex": 0,
+      "buildIndex": 0,
+
+      "tint": [0.78, 0.62, 1.0],
+
+      "iconHue": 275.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.18,
+      "iconValueScale": 1.05,
+
+      "//exchanger": "pairMachineKey 指向上面那台蓄电器的 key。**注册按数组顺序走，蓄电器那条必须排在本条之前**，否则解析不到会报 ERROR 并退回服务原版那一对。",
+      "exchanger": {
+        "pairMachineKey": "lithium-accumulator",
+        "energyMultiplier": 6.0,
+        "poolMultiplier": 6.0
+      },
+
+      "recipeId": 6535,
+      "recipeTimeSpend": 480,
+      "recipeGridIndex": 0,
+      "recipeItems": [
+        { "id": 2209, "count": 1 },
+        { "ref": "lithium-cobalt-oxide", "count": 20 },
+        { "id": 1205, "count": 20 }
+      ]
+    },
+    {
+      "//": "一千台风力涡轮机压进一个塔阵。发电量正好是一千台之和——PowerSystem.NewGeneratorComponent 把 PrefabDesc 的 genEnergyPerTick 原样抄进 PowerGeneratorComponent，风力那一支的每 tick 上限是 EnergyCap_Wind 里的 (long)(windStrength * genEnergyPerTick)，全程没有任何钳位，所以倍率写多少就是多少。",
+      "key": "wind-cluster",
+      "enabled": true,
+      "kind": "generator",
+
+      "displayName": "风力发电机集群",
+      "description": "把一千台风力涡轮机整编进同一座塔阵，共用一套变流与并网设备。单机功率不变，胜在密度——一格地皮顶过去一千格，风大的星球上尤其划算。和单台一样看星球风力吃饭，没有大气的星球上照样是一动不动的摆设。",
+
+      "//copyFromItemId": "2203 = 风力涡轮机。整台克隆：模型、材质、碰撞体、电网接入距离全部继承，本 mod 只把发电功率乘上去。这个 ID 不是凭记忆写的——ACH_ThereIsNoWind.OnBuild 里硬编码的就是 2203（在 ionHeight <= 0 的星球上造风力涡轮机解锁成就）。",
+      "copyFromItemId": 2203,
+
+      "itemId": 6536,
+      "//modelId": "上限 727。710~727 已被矿脉与其它新建筑排满，往下取 709。",
+      "modelId": 709,
+
+      "//megaTab": "放进本 mod 自己的「巨型建筑」分页与同名建造分类。页号由 CommonAPI 运行时分配、分类号在 megabuildings.json 里配，两个都写不进这里，所以只给行列和槽位。前五格是五座巨型建筑，本条排第 6。",
+      "megaTab": true,
+      "gridRow": 1,
+      "gridCol": 6,
+      "buildSlot": 6,
+
+      "//tint": "风力涡轮机本体是白灰色，染成青绿——和五座巨型建筑（橙/蓝/紫/…）以及原版发电建筑都分得开。",
+      "tint": [0.42, 0.95, 0.72],
+
+      "iconHue": 158.0,
+      "iconSaturationScale": 1.35,
+      "iconMinSaturation": 0.22,
+      "iconValueScale": 1.05,
+
+      "//generator": "倍率乘在源建筑的真值上。原版风力涡轮机 300 kW，×1000 = 300 MW，注册时会把绝对值打进日志。fuelMultiplier 对风能没有意义（不烧料），留空。",
+      "generator": {
+        "powerMultiplier": 1000.0
+      },
+
+      "recipeId": 6536,
+      "//recipeHandcraftOnly": "只能手搓：配方 Type 设成 0(None)，合成器只看 Handcraft 照样列得出来，而配方选择器按 filter != recipe.Type 过滤，没有哪台机器的 assemblerRecipeType 会等于 0。",
+      "recipeHandcraftOnly": true,
+      "//recipeTimeSpend": "单位是 tick，60 tick = 1 秒。600 = 10 秒。",
+      "recipeTimeSpend": 600,
+      "recipeGridIndex": 0,
+      "//recipeItems": "1000 台风力涡轮机 + 1000 个能量矩阵。6002 = 能量矩阵——矩阵按 LabComponent.UpdateNeedsResearch 的取用顺序占 6001~6006（电磁/能量/结构/信息/引力/宇宙），能量是第二个。",
+      "recipeItems": [
+        { "id": 2203, "count": 1000 },
+        { "id": 6002, "count": 1000 }
+      ]
+    }
+  ]
+}

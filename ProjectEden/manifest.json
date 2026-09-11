@@ -1,0 +1,12 @@
+{
+  "name": "ProjectEden",
+  "version_number": "1.1.0",
+  "website_url": "",
+  "description": "把戴森球计划的后期产线整体拉满：五座万倍速巨型建筑、八种新矿脉与完整化工链、九种合金与四维属性、5000 层集装（带 preloader）。数值全在 JSON 里可调。",
+  "dependencies": [
+    "xiaoye97-BepInEx-5.4.17",
+    "xiaoye97-LDBTool-3.0.3",
+    "CommonAPI-CommonAPI-1.6.7",
+    "CommonAPI-DSPModSave-1.2.2"
+  ]
+}

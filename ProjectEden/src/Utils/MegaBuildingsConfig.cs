@@ -1,0 +1,159 @@
+#pragma warning disable 649 // 字段由 JsonUtility 反射赋值
+
+using System;
+
+namespace ProjectEden.Utils
+{
+    /// <summary>data/megabuildings.json 的映射类型。JsonUtility 要求公开字段 + [Serializable]。</summary>
+    [Serializable]
+    internal class MegaBuildingsConfig
+    {
+        /// <summary>CommonAPI TabSystem 的分页标识，需全局唯一</summary>
+        public string tabId;
+
+        public string tabName;
+        public string tabIconPath;
+
+        /// <summary>
+        /// 底部建造栏的分类号。原版只用 1~9，UIBuildMenu.StaticLoad 本身接受到 15，
+        /// 但按钮要自己建（见 BuildMenuCategoryPatches）。12 与 ProjectGenesis 一致。
+        /// </summary>
+        public int buildCategory;
+
+        /// <summary>分类按钮的水平微调（局部坐标）。位置本身由实测间距算出，这里只做补偿。</summary>
+        public float categoryButtonNudgeX;
+
+        /// <summary>从哪个原版建筑取物品模板（类型、建造模式等）。2318 = 制造台 Mk.IV</summary>
+        public int copyFromItemId;
+
+        /// <summary>
+        /// 从哪个原版模型克隆外观。49 = 物流运输站。
+        /// 必须选一个带 slotPoses 的模型，否则传送带无法直连——原版组装机没有槽位。
+        /// </summary>
+        public int copyFromModelId;
+
+        /// <summary>
+        /// 用程序化生成的几何替掉克隆来的原版模型。
+        ///
+        /// 关掉则五座建筑退回「同一个模型 + 不同颜色」——
+        /// 因为 <see cref="copyFromModelId"/> 是全局的，五座本来就只克隆一个模型。
+        /// </summary>
+        public bool proceduralModels;
+
+        /// <summary>
+        /// 连金属度/光滑度贴图（<c>_MS_Tex</c>）一起换成常量图。
+        /// <b>默认关</b>：试过一次，结果是整座建筑完全不可见。
+        /// </summary>
+        public bool overrideMetalSmoothTex;
+
+        /// <summary>
+        /// 把主贴图（<c>_MainTex</c>）换成自绘图集。关掉就沉用原版贴图——
+        /// 那张图是按原版网格 UV 排的，配新几何会花，但至少能验证“是不是贴图把它弄没了”。
+        /// </summary>
+        public bool overrideMainTex;
+
+        /// <summary>
+        /// 程序化模型相对原版包围盒的缩放。1 = 撑满整个盒子。
+        /// <b>包围盒不是占地面积</b>：原版物流运输站是细塔配细腿，
+        /// 盒子里绝大部分是空的，撑满会显得大一大圈。默认 0.6。
+        /// </summary>
+        public float modelScale;
+
+        /// <summary>
+        /// prefabDesc.assemblerSpeed，10000 = 1 倍速。
+        ///
+        /// 真正的吞吐上限是每 tick 一个配方周期（60 周期/秒），与本值无关：
+        /// AssemblerComponent.InternalUpdate 里 time 只在 time &lt; timeSpend 时累加，
+        /// 所以 speed 一旦达到配方的 timeSpend 就已经跑满，再高没有收益。
+        /// 技术上限是 time（Int32）的溢出线，约 21.47 亿。
+        /// </summary>
+        public int assemblerSpeed;
+
+        /// <summary>
+        /// 判定「巨型建筑」的速度阈值，和 assemblerSpeed 解耦，
+        /// 免得调整速度时连带改变识别逻辑。
+        /// </summary>
+        public int megaSpeedThreshold;
+
+        /// <summary>
+        /// 每 tick 结算多少个配方周期。原版固定为 1（即 60 周期/秒的引擎上限）。
+        /// 实现方式是同一 tick 内多跑几遍原版 InternalUpdate，原料不足会自动停。
+        /// </summary>
+        public int cyclesPerTick;
+
+        public int stackSize;
+        public int hpMax;
+
+        // ── 物流站能力：让巨型建筑同时作为行星内物流站工作 ──
+        public bool stationEnabled;
+
+        public int stationMaxItemCount;
+        public int stationMaxItemKinds;
+        public int stationMaxDroneCount;
+        public long stationMaxEnergyAcc;
+
+        /// <summary>
+        /// 虚拟行星物流：直接在储物格之间搬货，不让无人机真的飞（省渲染）。
+        /// 必须双向，只做入库的话别的站仍会派车来取产物。
+        /// </summary>
+        public bool virtualLogistics;
+
+        /// <summary>虚拟搬运的间隔 tick 数。0 = 10</summary>
+        public int virtualIntervalTicks;
+
+        /// <summary>虚拟入库时每个储物格囤到多少（不超过格位上限）。0 = 100000</summary>
+        public int virtualStockPerSlot;
+
+        /// <summary>每种原料在储物格里备多少份配方用量</summary>
+        public int requireStockMultiplier;
+
+        /// <summary>运输机运送量百分比（面板上的「运送量」）</summary>
+        public int deliveryDronePercent;
+
+        /// <summary>所有巨型建筑共用同一份配方原料（当前为 1 铁块 + 1 铜块）</summary>
+        public int recipeTimeSpend;
+
+        public int[] recipeItems;
+        public int[] recipeItemCounts;
+
+        public MegaBuildingEntry[] buildings;
+
+        /// <summary>合成器横向翻页的总页数，每页 14 列。1 = 维持原版、不加滚动条</summary>
+        public int replicatorPages;
+    }
+
+    [Serializable]
+    internal class MegaBuildingEntry
+    {
+        public int itemId;
+
+        /// <summary>期望的模型 ID，实际值可能被 ResolveModelId 下调</summary>
+        public int modelId;
+
+        public int recipeId;
+
+        public string displayName;
+        public string description;
+
+        /// <summary>assets/icons/&lt;iconName&gt;.png</summary>
+        public string iconName;
+
+        /// <summary>原版 ERecipeType：1=Smelt 2=Chemical 3=Refine 4=Assemble 5=Particle</summary>
+        public int recipeType;
+
+        /// <summary>合成器面板里的位置（行、列）。页号取自分页索引，运行时才确定。</summary>
+        public int gridRow;
+
+        public int gridCol;
+
+        /// <summary>在本 mod 分页里的建造栏格位（1 起）</summary>
+        public int slot;
+
+        public long idleEnergyPerTick;
+        public long workEnergyPerTick;
+
+        public float tintR;
+        public float tintG;
+        public float tintB;
+    }
+}
