@@ -142,6 +142,17 @@ Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 
 **这个仓库不是单一许可的，代码和美术分开。**
 
+### 版权
+
+```
+Copyright (C) 2026 RobertWangWang and Project Eden contributors
+Copyright (C) 2022-2026 Awbugl and ProjectGenesis contributors
+```
+
+本项目基于创世之书（ProjectGenesis）开发，代码部分经其作者授权使用。
+**按 GPL 的要求，上游的版权声明完整保留**；哪些文件属于其衍生作品、
+哪些只是借鉴思路，逐文件列在 **[NOTICE](NOTICE)** 里，相关文件头也各自写明。
+
 ### 代码：GPL-3.0
 
 `ProjectEden/src/`、`ProjectEden.Preloader/`、`tools/` 下的全部源码，以及 `ProjectEden/data/` 下的
@@ -184,7 +195,7 @@ JSON 配置，采用 **[GNU GPL v3.0](LICENSE)**。
 
 ## 致谢
 
-- **[创世之书 / GenesisBook](https://github.com/kremnev8/DSP-Mods)** —— 本项目的起点。
+- **[创世之书 / GenesisBook](https://github.com/Awbugl/ProjectGenesis)**（作者 Awbugl）—— 本项目的起点。
 - **[CheatEnabler / UXAssist](https://github.com/soarqin/DSP_Mods)**（作者 Soar Qin，MIT） ——
   作弊开关的设计参考了 CheatEnabler；英文本地化的做法参考了 `UXAssist.Common.I18N`
   （往 `Localization` 的字符串表里注册键，并在语言加载后补写）。

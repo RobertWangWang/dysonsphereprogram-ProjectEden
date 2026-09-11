@@ -1,3 +1,14 @@
+// 本文件移植自 ProjectGenesis（创世之书），属于其衍生作品。
+// Portions of this file are derived from ProjectGenesis (GenesisBook).
+//
+//     Copyright (C) 2022-2026 Awbugl and ProjectGenesis contributors
+//     https://github.com/Awbugl/ProjectGenesis
+//
+// Copyright (C) 2026 RobertWangWang and Project Eden contributors
+//
+// 按 GPL-3.0 发布，详见仓库根目录的 LICENSE 与 NOTICE。
+// Released under GPL-3.0; see LICENSE and NOTICE at the repository root.
+
 using ProjectEden.Utils;
 
 namespace ProjectEden.Patches

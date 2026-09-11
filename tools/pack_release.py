@@ -6,7 +6,7 @@ u"""把插件 + preloader 打成一个 Thunderstore / r2modman 都能吃的包�
 
 包内布局
 --------
-    manifest.json  icon.png  README.md  CHANGELOG.md  LICENSE
+    manifest.json  icon.png  README.md  CHANGELOG.md  LICENSE  NOTICE
     mod特性.md  mod_feature.md
     plugins/ProjectEden.dll
     plugins/Newtonsoft.Json.dll
@@ -83,6 +83,8 @@ def main():
         (os.path.join(ROOT, u'ProjectEden', u'icon.png'), u'icon.png'),
         (os.path.join(ROOT, u'ProjectEden', u'CHANGELOG.md'), u'CHANGELOG.md'),
         (os.path.join(ROOT, u'LICENSE'), u'LICENSE'),
+        # NOTICE 必须随包：上游的版权声明在里面，GPL 要求分发时保留
+        (os.path.join(ROOT, u'NOTICE'), u'NOTICE'),
         (os.path.join(ROOT, u'mod特性.md'), u'mod特性.md'),
         (os.path.join(ROOT, u'mod_feature.md'), u'mod_feature.md'),
         (PLUGIN, u'plugins/ProjectEden.dll'),
@@ -123,7 +125,8 @@ def write_readme():
     readme = io.open(os.path.join(ROOT, u'README.md'), encoding='utf-8').read()
 
     for a, b in [(u'[部署.md](部署.md)', u'[部署.md](%s/blob/main/%%E9%%83%%A8%%E7%%BD%%B2.md)' % REPO),
-                 (u'[CLAUDE.md](CLAUDE.md)', u'[CLAUDE.md](%s/blob/main/CLAUDE.md)' % REPO)]:
+                 (u'[CLAUDE.md](CLAUDE.md)', u'[CLAUDE.md](%s/blob/main/CLAUDE.md)' % REPO),
+                 (u'[NOTICE](NOTICE)', u'[NOTICE](NOTICE)')]:
         readme = readme.replace(a, b)
 
     io.open(os.path.join(STAGE, u'README.md'), 'w', encoding='utf-8').write(readme)

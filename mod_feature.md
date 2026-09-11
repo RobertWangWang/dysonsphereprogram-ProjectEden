@@ -1716,7 +1716,7 @@ These are **unavoidable side effects** of the changes above, not bugs:
 
 - **GenesisBook**: detected automatically, and this mod's mega-assembler feature disables itself to avoid one
   building being driven by two sets of belt logic
-- The mega buildings' art assets come from GenesisBook, and **permission is required before any public release**
+- The mega buildings' icons and models are drawn from scratch: the icons come out of `tools/make_icons.py` and the meshes and textures are generated procedurally at runtime — **no GenesisBook art asset is used**
 
 ---
 
