@@ -12,7 +12,7 @@
         <TargetFramework>net472</TargetFramework>
         <AssemblyName>ProjectEden</AssemblyName>
         <Product>Project Eden</Product>
-        <Version>1.1.0</Version>
+        <Version>1.1.1</Version>
 
         <LangVersion>latest</LangVersion>
         <Nullable>disable</Nullable>
@@ -81,11 +81,14 @@
          BepInEx/plugins/<包名>/。
 
          Newtonsoft.Json.dll 必须一起进包：插件运行时要它，少了就加载失败。 -->
+    <!-- 平铺布局的便捷包，**不是对外发布用的**：它装不下 preloader
+         （那一个必须落在 patchers/）。发布一律走 tools/pack_release.py。
+         文件名特意带 -plain 后缀：两者同名时谁后跑谁覆盖，而布局完全不同。 -->
     <Target Name="PackageForRelease" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
         <PropertyGroup>
             <DistDir>$(MSBuildThisFileDirectory)..\dist</DistDir>
             <PkgDir>$(DistDir)\$(AssemblyName)</PkgDir>
-            <PkgZip>$(DistDir)\$(AssemblyName)-$(Version).zip</PkgZip>
+            <PkgZip>$(DistDir)\$(AssemblyName)-$(Version)-plain.zip</PkgZip>
         </PropertyGroup>
 
         <RemoveDir Directories="$(PkgDir)" />
@@ -93,7 +96,7 @@
 
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(PkgDir)\" />
         <Copy SourceFiles="$(MSBuildThisFileDirectory)lib\Newtonsoft.Json.dll" DestinationFolder="$(PkgDir)\" />
-        <Copy SourceFiles="$(MSBuildThisFileDirectory)manifest.json;$(MSBuildThisFileDirectory)icon.png;$(MSBuildThisFileDirectory)README.md;$(MSBuildThisFileDirectory)CHANGELOG.md"
+        <Copy SourceFiles="$(MSBuildThisFileDirectory)manifest.json;$(MSBuildThisFileDirectory)icon.png;$(MSBuildThisFileDirectory)..\README.md;$(MSBuildThisFileDirectory)CHANGELOG.md"
               DestinationFolder="$(PkgDir)\" />
 
         <Delete Files="$(PkgZip)" />

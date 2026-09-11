@@ -59,10 +59,61 @@ def need(path, hint):
     raise SystemExit(u'缺少 %s\n  %s' % (path, hint))
 
 
+def newest_source(folder):
+    u"""这个项目目录下最新的源文件，返回 (时间戳, 路径)。"""
+    newest, culprit = 0.0, None
+    skip = {'bin', 'obj', 'dist', '.git', '.idea', 'out'}
+
+    for base, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d not in skip]
+
+        for f in files:
+            if not f.endswith(('.cs', '.json', '.csproj', '.png', '.props')):
+                continue
+
+            full = os.path.join(base, f)
+            t = os.path.getmtime(full)
+
+            if t > newest:
+                newest, culprit = t, os.path.relpath(full, ROOT)
+
+    return newest, culprit
+
+
+def check_fresh():
+    u"""Release 产物必须比它自己项目的源码新。
+
+    <b>只检查「文件在不在」是不够的。</b>
+    `dotnet build -c Release` 曾因为 csproj 里一条指向已删文件的 Copy 而持续失败，
+    而 bin/Release 里留着上一次成功构建的 DLL——脚本照样打包、照样显示成功，
+    装出去的却可能是旧插件。构建失败本来是响的，<b>是这个脚本把它变哑了</b>。
+
+    <b>比较要按项目分开。</b> 拿每个产物去比整个仓库最新的文件是错的：
+    改了插件源码后 MSBuild 会跳过 preloader 的增量构建，它的时间戳不变——
+    那是正常的，不该报错。
+    """
+    for built, folder, how in (
+        (PLUGIN, os.path.join(ROOT, u'ProjectEden'), u'dotnet build -c Release'),
+        (PRELOAD, os.path.join(ROOT, u'ProjectEden.Preloader'),
+         u'dotnet build ProjectEden.Preloader/ProjectEden.Preloader.csproj -c Release'),
+    ):
+        newest, culprit = newest_source(folder)
+
+        if os.path.getmtime(built) >= newest:
+            continue
+
+        raise SystemExit(
+            u'%s 比源码旧（最新改动：%s）。\n'
+            u'  构建可能失败了，而目录里留着上一次的产物。先跑：%s'
+            % (os.path.relpath(built, ROOT), culprit, how))
+
+
 def main():
     need(PLUGIN, u'先跑：dotnet build -c Release')
     need(NEWTON, u'ProjectEden/lib/Newtonsoft.Json.dll 应该在仓库里')
     need(PRELOAD, u'先跑：dotnet build ProjectEden.Preloader/ProjectEden.Preloader.csproj -c Release')
+
+    check_fresh()
 
     manifest_path = os.path.join(ROOT, u'ProjectEden', u'manifest.json')
     manifest = json.load(io.open(manifest_path, encoding='utf-8'))

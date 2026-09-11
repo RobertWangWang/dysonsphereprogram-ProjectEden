@@ -55,7 +55,7 @@ patchers/ProjectEden.Preloader.dll  →  BepInEx/patchers/ProjectEden/ProjectEde
 **3. 确认装对了**：`BepInEx/LogOutput.log` 里应该有这两行——
 
 ```
-Project Eden v1.1.0 已加载
+Project Eden v1.1.1 已加载
 Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 ```
 
