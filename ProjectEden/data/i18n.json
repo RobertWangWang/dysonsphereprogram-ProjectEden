@@ -234,6 +234,22 @@
     "巨型化工厂，速度 10000 倍。十二个传送带口直连，输入输出都不需要分拣器，机身自带行星内物流站。": "A mega chemical plant running at 10000x speed. Twelve belt ports connect directly, so neither input nor output needs a sorter, and it carries its own planetary logistics station.",
     "锤锻精工厂": "Forgeworks Fabricator",
     "观微对撞机": "Deep Probe Collider",
-    "巨型粒子对撞机，速度 10000 倍。十二个传送带口直连，输入输出都不需要分拣器，机身自带行星内物流站。": "A mega particle collider running at 10000x speed. Twelve belt ports connect directly, so neither input nor output needs a sorter, and it carries its own planetary logistics station."
+    "巨型粒子对撞机，速度 10000 倍。十二个传送带口直连，输入输出都不需要分拣器，机身自带行星内物流站。": "A mega particle collider running at 10000x speed. Twelve belt ports connect directly, so neither input nor output needs a sorter, and it carries its own planetary logistics station.",
+    "//-- 生物温室 --": "",
+    "精炼油 · 酯交换": "Refined Oil · Transesterification",
+    "藻油与甲醇在碱催化下互换酯基，三条脂肪酸链逐条被甲醇换下来，得到脂肪酸甲酯——也就是生物柴油。副产的甘油留在釜底。这条路子让整条藻类产线接上了原有的石化下游。": "Algal oil and methanol swap ester groups over a base catalyst; the three fatty-acid chains come off one by one and leave as fatty-acid methyl esters — biodiesel, in other words. The glycerol by-product stays at the bottom of the vessel. This is what connects the whole algal line to the existing petrochemical downstream.",
+    "生物温室": "Biodome",
+    "巨型生化培养舱，速度 10000 倍。穹顶下是恒温恒湿的人工雨林，光合育林、藻菌共培养、溶剂萃取三道工序都在这里完成。育林那道受日照约束——太阳落到地平线以下就停工。十二个传送带口直连，输入输出都不需要分拣器，机身自带行星内物流站。": "A mega bioculture vessel running at 10000x speed. Under the dome sits a climate-controlled artificial rainforest where all three steps — photosynthetic forestry, algal-bacterial co-culture and solvent extraction — are carried out. The forestry step is bound to sunlight: once the sun drops below the horizon it stops. Twelve belt ports connect directly, so neither input nor output needs a sorter, and it carries its own planetary logistics station.",
+    "菌落": "Microbial Consortium",
+    "微藻与异养细菌的共培养生物量。藻固碳产油，菌分解藻的渗出物、把氮磷还给藻——两者搭伙比各自单干长得快。离心后是一团墨绿色的湿滤饼，油就藏在细胞里。": "Biomass from a co-culture of microalgae and heterotrophic bacteria. The algae fix carbon and make oil; the bacteria break down what the algae exude and hand the nitrogen and phosphorus back — together they grow faster than either does alone. Centrifuged, it is a dark green wet cake with the oil still locked inside the cells.",
+    "藻油": "Algal Oil",
+    "从藻细胞里榨出来的甘油三酯，工业上叫单细胞油脂。成分和植物油是一类东西，差别只在它长在罐子里而不是地里——不占耕地、不看天时，只要有光和氮磷就长。": "Triglycerides pressed out of algal cells — single-cell oil, as industry calls it. Chemically it is the same family as vegetable oil; the difference is that it grows in a tank rather than a field, taking no farmland and waiting on no season, needing only light, nitrogen and phosphorus.",
+    "木材 · 光合育林": "Log · Photosynthetic Forestry",
+    "穹顶下的人工雨林。恒温恒湿、二氧化碳加富，生长速度是野地里的几十倍，代价是整座棚子的光照全靠恒星——太阳落到地平线以下，这里就停工。": "An artificial rainforest under the dome. Climate-controlled and CO₂-enriched, it grows dozens of times faster than open ground — at the price that the whole house is lit by the star alone. Once the sun drops below the horizon, work stops.",
+    "菌落 · 藻菌共培养": "Microbial Consortium · Algal-Bacterial Co-culture",
+    "把木料和草料打成浆，连同水一起送进曝气罐。藻靠光长、菌吃藻的渗出物，两者的氮磷在罐子里循环——比单养藻快得多。通氧是给菌呼吸用的，尾气是二氧化碳。": "Wood and plant matter are pulped and fed into an aerated tank along with water. The algae live on light, the bacteria on what the algae exude, and their nitrogen and phosphorus cycle inside the vessel — far faster than algae alone. The oxygen is for the bacteria to respire; the offgas is carbon dioxide.",
+    "藻油 · 溶剂萃取": "Algal Oil · Solvent Extraction",
+    "先高压破壁，再用溶剂把细胞里的甘油三酯洗出来，蒸掉溶剂剩下的就是藻油。脱脂后的藻渣在这里被当作废料处理掉了。": "High-pressure homogenisation breaks the cell walls, then a solvent washes the triglycerides out; boil the solvent off and what remains is algal oil. The defatted residue is discarded here as waste.",
+    "生化培养设备": "Bioculture Facility"
   }
 }

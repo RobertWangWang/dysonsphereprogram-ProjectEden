@@ -118,6 +118,30 @@ namespace ProjectEden
                 if (Machines[i].RecipeType == recipeType)
                     return Machines[i].Entry.displayName;
 
+            return MegaBuildingRecipeTypeName(recipeType);
+        }
+
+        /// <summary>
+        /// 巨型建筑也能持有自定义配方类型（生物温室的 11 号），这时「制造于」该写它的名字。
+        ///
+        /// <b>只认自定义类型号，不认原版的。</b> 前五座巨型建筑借的是原版类型
+        /// （1 熔炉 / 2 化工 / 4 组装 / 5 粒子），若在这里一并返回，
+        /// 所有原版配方的「制造于」都会从「制造台」变成「天工装配厂」——
+        /// 那是把原版文案改掉，不是补一句缺失的文案。
+        /// 原版占 1~8 和 15，自定义区间是 9~14。
+        /// </summary>
+        private static string MegaBuildingRecipeTypeName(int recipeType)
+        {
+            if (recipeType < 9 || recipeType > 14) return null;
+
+            MegaBuildingEntry[] buildings = MegaBuildingRegistry.Config?.buildings;
+
+            if (buildings == null) return null;
+
+            for (var i = 0; i < buildings.Length; i++)
+                if (buildings[i] != null && buildings[i].recipeType == recipeType)
+                    return buildings[i].displayName;
+
             return null;
         }
 
@@ -127,6 +151,19 @@ namespace ProjectEden
             for (var i = 0; i < Machines.Count; i++)
                 if (Machines[i].ItemId == itemId)
                     return Machines[i].Entry.machineTypeName;
+
+            // 持有自定义配方类型的巨型建筑：原版 typeString 是
+            // assemblerRecipeType - 1 的跳转表，11 号会落到 default，显示成不相干的词
+            MegaBuildingEntry[] buildings = MegaBuildingRegistry.Config?.buildings;
+
+            if (buildings == null) return null;
+
+            for (var i = 0; i < buildings.Length; i++)
+                if (buildings[i] != null && buildings[i].itemId == itemId
+                                         && buildings[i].recipeType >= 9 && buildings[i].recipeType <= 14)
+                    return string.IsNullOrEmpty(buildings[i].machineTypeName)
+                        ? buildings[i].displayName
+                        : buildings[i].machineTypeName;
 
             return null;
         }

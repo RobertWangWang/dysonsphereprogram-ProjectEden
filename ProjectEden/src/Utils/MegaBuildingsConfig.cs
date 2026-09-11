@@ -138,8 +138,30 @@ namespace ProjectEden.Utils
         /// <summary>assets/icons/&lt;iconName&gt;.png</summary>
         public string iconName;
 
-        /// <summary>原版 ERecipeType：1=Smelt 2=Chemical 3=Refine 4=Assemble 5=Particle</summary>
+        /// <summary>
+        /// ERecipeType。原版：1=Smelt 2=Chemical 3=Refine 4=Assemble 5=Particle；
+        /// <b>9~14 是本 mod 的自定义区间</b>（9 电化学、10 氧化还原、11 生化培养）。
+        /// 借原版类型意味着原版机器也做得了那些配方；用自定义类型则是这一座的专属。
+        /// </summary>
         public int recipeType;
+
+        /// <summary>
+        /// 物品提示栏「类型」那一行的文字。<b>只在 <see cref="recipeType"/> 是自定义类型时才需要</b>：
+        /// 原版 <c>ItemProto.typeString</c> 是 <c>assemblerRecipeType - 1</c> 的跳转表，
+        /// 借原版类型的建筑自己就能查到，自定义类型会落到 default 显示成不相干的词。
+        /// 留空则退回建筑名。
+        /// </summary>
+        public string machineTypeName;
+
+        /// <summary>
+        /// 整座建筑的产能随日照变化：<b>满日照 = 配置的满速，零日照 = 停工</b>，
+        /// 它跑的所有配方一起停。算法见 <see cref="Patches.MegaLightPatches"/>，
+        /// 与太阳能板（<c>PowerGeneratorComponent.EnergyCap_PV</c>）完全一致。
+        ///
+        /// <b>按建筑而不是按配方。</b> 早先按配方判定过（只有光合育林晒太阳），
+        /// 按所有者的要求改成整座建筑；<c>ores.json</c> 里那个同名的配方开关已删除。
+        /// </summary>
+        public bool lightDependent;
 
         /// <summary>合成器面板里的位置（行、列）。页号取自分页索引，运行时才确定。</summary>
         public int gridRow;

@@ -18,7 +18,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 
 ## I. Mega Structures
 
-A new **"Mega Structures" tab** (category 12) appears in the build bar, holding five 10000x facilities:
+A new **"Mega Structures" tab** (category 12) appears in the build bar, holding six 10000x facilities:
 
 | Building | Recipe type | Working power |
 |---|---|---|
@@ -27,6 +27,7 @@ A new **"Mega Structures" tab** (category 12) appears in the build bar, holding 
 | Calciner Chemical Plant | Chemical | 22.5 MW |
 | Forgeworks Fabricator | Assemble | 22.5 MW |
 | Deep Probe Collider | Particle | 45 MW |
+| Biodome | **Bioculture** (this mod only) | 18 MW |
 
 - **No prerequisite tech.** The recipe is 1 Iron Ingot + 1 Copper Ingot, hand-crafted in 1 second
 - **Belts connect directly**: 12 ports, no sorters needed
@@ -34,7 +35,11 @@ A new **"Mega Structures" tab** (category 12) appears in the build bar, holding 
   materials from logistics stations and advanced mining machines by itself, and ships products out by itself
 - **30 storage slots**, 10,000,000 per slot
 
-There is a sixth thing on this tab — the **Wind Turbine Cluster** — which is not an assembler. See section X.
+The first five borrow **vanilla recipe types**, so a vanilla machine can run those recipes too — the mega versions are
+merely much faster. The Biodome is different: its recipe type is this mod's own number 11 (Bioculture), and its three
+recipes **can be run by nothing else**. See section XIX.
+
+There is a seventh thing on this tab (slot 7) — the **Wind Turbine Cluster** — which is not an assembler. See section X.
 
 ### About "10000x"
 
@@ -1720,11 +1725,154 @@ These are **unavoidable side effects** of the changes above, not bugs:
 
 ---
 
+## XIX. The Biodome: a light-bound biological chain
+
+The sixth building on the Mega Structures tab. Two things about it are structurally unlike the other five:
+
+1. **Its recipe type is this mod's own number 11 (Bioculture)**, not a borrowed vanilla one. The other five run
+   vanilla recipes that a vanilla machine can also run — they are merely ten thousand times faster. The Biodome's
+   three recipes **can be run by nothing else**.
+2. **The whole building depends on sunlight.** It is the only building in this mod whose output varies with the
+   environment: **full sun = the full 10000x rate, no sun = a complete stop**, with all three recipes stopping
+   together.
+
+### The three recipes
+
+| Recipe | Inputs | Products | Time |
+|---|---|---|---|
+| Log · Photosynthetic Forestry | **none** | Log x4 + Plant Fuel x4 | 3 s |
+| Microbial Consortium · Algal-Bacterial Co-culture | Water x4 + Log x2 + Plant Fuel x2 + Oxygen x2 | Microbial Consortium x2 + Carbon Dioxide x2 | 4 s |
+| Algal Oil · Solvent Extraction | Microbial Consortium x3 | Algal Oil x1 | 3 s |
+
+The oxygen comes from the existing "Oxygen · Water Electrolysis" (Electrochemical Plant); the carbon dioxide feeds
+back into the existing "Methanol · CO2 Hydrogenation", so the carbon goes round a loop and nothing is thrown away.
+
+### Downstream of algal oil: Refined Oil · Transesterification (vanilla Chemical Plant)
+
+Algal oil is not only a fuel — it connects to the existing petrochemical downstream:
+
+| Recipe | Machine | Inputs | Products | Time |
+|---|---|---|---|---|
+| Refined Oil · Transesterification | **vanilla Chemical Plant** | Algal Oil x2 + Methanol x6 | Refined Oil x6 | 4 s |
+
+`C57H104O6 + 3 CH3OH -> 3 C19H36O2 + C3H8O3`, taking triolein, **balanced**, with the recipe scaled by 2. Methanol
+strips the triglyceride's three fatty-acid chains off one at a time, giving three fatty-acid methyl esters (biodiesel)
+and one glycerol.
+
+Three things worth stating:
+
+- **Why the vanilla Chemical Plant and not the Redox Chemical Plant.** Transesterification is a substitution at the
+  ester group; carbon's oxidation state never changes — the same test that keeps MTO's dehydration on the Chemical
+  Plant (see section XII). Turning algal oil into actual alkanes would mean hydrodeoxygenation, which *is* a
+  reduction and would belong on the Redox Chemical Plant. Choosing transesterification keeps machine and reaction
+  class consistent.
+- **The glycerol by-product is omitted.** There is no game item for it, and **water is not substituted in its
+  place** — that would be inventing a false equation.
+- **It is not an energy arbitrage.** Taking vanilla Refined Oil at 4.4 MJ: 2 Algal Oil (8.4 MJ) + 6 Methanol (30 MJ)
+  = 38.4 MJ in, 6 Refined Oil = 26.4 MJ out. A net loss.
+
+It also gives methanol a large new customer — the C1 chain's only downstream used to be formaldehyde and ethylene.
+
+### Why photosynthetic forestry has no inputs
+
+Photosynthesis itself balances: 6 CO2 + 6 H2O --light--> C6H12O6 + 6 O2. The problem is that **the game has no
+"atmosphere"**. Writing carbon dioxide and water in as ingredients would force the player to pipe gas to every
+greenhouse, when in reality a greenhouse takes both straight out of the air.
+
+So on paper it creates matter out of nothing, and that is paid for with the light constraint: **no light, no output.**
+The sun is this recipe's real raw material; it simply does not occupy a slot.
+
+The constraint sits on the **whole building**, not on this one recipe: at night the co-culture and the extraction stop
+too. Chemically the co-culture runs inside a tank and could keep going, but the owner's call was to make it uniform —
+one building, one state, which is far easier to explain than "some recipes in this machine turn and some do not".
+
+### How the light is computed: copied from the solar panel
+
+`PowerGeneratorComponent.EnergyCap_PV` is one line, in full:
+
+```
+currentStrength = clamp01((sun direction . building position, normalised) * 2.5 + 0.8572445) * luminosity
+```
+
+This mod uses that formula verbatim, and takes its two inputs from the same places:
+`PlanetData.runtimeLocalSunDirection` and `PlanetData.luminosity` (both checked against the call site in
+`PowerSystem.GameTick`). The 2.5 and the 0.8572445 are what let the strength reach zero slightly after the sun drops
+below the horizon — **there is a dusk, not a hard cutoff**.
+
+The behaviour is therefore identical to a solar panel's, and it applies to **whatever recipe the building is
+running**:
+
+- The planet rotates and output rises and falls with it; **the night side stops**
+- The dark side of a tidally locked planet is **permanently stopped**; the lit side runs at full rate forever
+- Further from the star is slower (that is what `luminosity` is)
+- A Dyson sphere or swarm **does not help** — those feed ray receivers, not daylight
+
+### Implementation: it scales the cycle count, not the speed
+
+A mega building's `speed` is 100,000,000 (10000x), far above any recipe's `timeSpend`, so **slowing it down does
+nothing at all until it drops below `timeSpend`**. What actually decides throughput is how many recipe cycles settle
+per tick (60 by default, i.e. 3600 cycles/s), so that is the number scaled by sunlight: strength 1.0 gives 60 cycles,
+0.5 gives 30, 0 gives none.
+
+Slowing it down would also have a worse side effect: a mega building is recognised by `speed >= threshold`, so pushing
+the speed under that threshold means the building is never picked up again on the next tick — permanently dead.
+
+**The cost, stated up front: the panel's "production speed" row always reads 10000x.** That row reads `speed`, while
+what actually tracks the sunlight is how many cycles settle per tick. To see what it is producing right now, watch the
+output, not that row.
+
+On a zero-strength tick one extra thing is needed. This mod's hook is injected **before** the vanilla
+`InternalUpdate` call, and that call cannot be cancelled — on its own it will settle a full cycle. So `time` is
+pushed down in advance to a value that still cannot reach `timeSpend` after the increment; the increment's upper
+bound is exactly `speedOverride`, so the value used is `-speedOverride - 1`. That is an exact figure, not a guess.
+
+### Where the two new items' numbers come from
+
+Following the standard in section XII, item by item:
+
+- **Microbial Consortium** (not a fluid, no heat value). An algal-bacterial consortium is a real process: the
+  microalgae fix carbon and make oil, the heterotrophic bacteria consume what the algae exude and hand the nitrogen
+  and phosphorus back, and the pair out-produces either alone. It is called a "consortium" and contains algae for
+  exactly that reason — it is mixed biomass, not one species. Harvested, it is a wet cake (what centrifugation or
+  flocculation actually yields), hence not a fluid. **No heat value is given**: burning wet biomass directly is a net
+  loss, because the latent heat of evaporating the water eats most of the combustion heat. Burning it would require a
+  drying step the game does not have.
+
+- **Algal Oil** (fluid, chemical fuel, 4.2 MJ). **This is the only heat value in the table derived by mass rather
+  than by mole.** The table's anchor is coal at 2.7 MJ against carbon's 393.5 kJ/mol enthalpy of combustion. A
+  triglyceride (taking triolein) burns at about 35,100 kJ/mol, which on the molar anchor would be **241 MJ, 89 times
+  coal** — right off the end of vanilla's fuel ladder. The molar anchor works for small molecules because one "unit"
+  of each is a comparable size; one unit of triolein carries 57 carbons and is simply not in the same league as one
+  unit of carbon. So the anchor here is **mass**: biodiesel is about 37 MJ/kg and coal about 24 MJ/kg, a ratio of
+  1.55, giving 2.7 x 1.55 = 4.2 MJ. That lands between Crude Oil (4.05) and Fire Ice (4.8).
+
+- **The co-culture recipe is not a balanced equation**, for the same reason as "Vanadium Ingot · Residue Recovery":
+  biomass is not a compound and has no fixed formula (the empirical CH1.8O0.5N0.2 is an average elemental ratio that
+  moves with strain and culture conditions), so no strict coefficients exist. The ratios are taken at the order of
+  magnitude a mass balance gives. The carbon dioxide is **an unavoidable product of aerobic respiration**, not a
+  product added to round the recipe out.
+
+- **Three consortium to one oil** corresponds to roughly 33% lipid content by dry weight — the real upper band for
+  oleaginous algae under nitrogen limitation; ordinary culture gives about 20%. The real process also leaves defatted
+  residue, and **no residue product is given here**: the most natural match for it is Plant Fuel, which is an input to
+  the recipe above, and connecting the two would make a self-sustaining free-growth loop.
+
+### One balance note
+
+Zero inputs at 60 cycles per tick is **14,400 Logs/s + 14,400 Plant Fuel/s** in full sunlight. That is the same order
+as the other mega buildings (they also run 3600 cycles/s), but all of those consume inputs and this one does not;
+averaged over a day/night cycle it comes to roughly half. If that is too much, lower `cyclesPerTick` in
+`megabuildings.json` (global) or cut the product counts on that recipe in `ores.json` — both are data, no code change
+needed. To drop the light constraint entirely, set the Biodome's `lightDependent` to `false` in
+`megabuildings.json`.
+
+---
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The five mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `megabuildings.json` | The six mega buildings, the tab, speed, built-in logistics station, replicator page count |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations |

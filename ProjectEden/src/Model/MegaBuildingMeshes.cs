@@ -4,7 +4,7 @@ using S = ProjectEden.Model.BuildingTexture;
 namespace ProjectEden.Model
 {
     /// <summary>
-    /// 五座巨型建筑各自的程序化几何、贴图，以及把它们换进 <see cref="PrefabDesc"/> 的那一步。
+    /// 六座巨型建筑各自的程序化几何、贴图，以及把它们换进 <see cref="PrefabDesc"/> 的那一步。
     ///
     /// <b>要解决的问题：五座建筑长得一模一样。</b> <c>megabuildings.json</c> 里
     /// <c>copyFromModelId</c> 是<b>一个全局设置</b>（49，物流运输站），五座克隆的是同一个模型，
@@ -21,7 +21,7 @@ namespace ProjectEden.Model
 
         private static bool _shaderReported;
 
-        // ══ 五座建筑的造型 ════════════════════════════════════
+        // ══ 六座建筑的造型 ════════════════════════════════════
 
         // ── 天工装配厂：三层收口台座 + 中央塔柱 ──────────────
         private static void SkyAssembler(MeshKit k)
@@ -196,6 +196,76 @@ namespace ProjectEden.Model
             k.AddBox(new Vector3(0f, 0.95f * U, 0f), new Vector3(0.1f * U, 0.1f * U, 1.5f * U), S.Pipe);
         }
 
+        // ── 生物温室：穹顶温室 + 外挂培养罐 ──────────────────
+        //
+        // 造型的三件事都对应三条配方，不是随手堆的：
+        //   穹顶（发光玻璃面）  = 光合育林，也是它唯一需要晒到太阳的部分
+        //   两只外挂立罐        = 藻菌共培养，罐子里不看天
+        //   底座上的泵与管      = 溶剂萃取
+        // 穹顶用六层圆台逼近半球——网格里没有球，而圆台堆叠出来的分面效果
+        // 恰好像玻璃幕墙的分格，比真球面更像温室。
+        private static void BioGreenhouse(MeshKit k)
+        {
+            k.AddBox(new Vector3(0f, 0.16f * U, 0f), new Vector3(2.1f * U, 0.32f * U, 2.1f * U), S.Concrete, S.Grating);
+
+            // 种植床：抬起来一层，穹顶落在它上面
+            k.AddBox(new Vector3(0f, 0.36f * U, 0f), new Vector3(1.74f * U, 0.14f * U, 1.74f * U), S.PlateDark, S.Grating);
+
+            const int levels = 6;
+            const float radius = 0.95f * U;
+            const float domeBase = 0.43f * U;
+            const float domeHeight = 1.05f * U;
+
+            for (var i = 0; i < levels; i++)
+            {
+                float a0 = Mathf.PI * 0.5f * i / levels;
+                float a1 = Mathf.PI * 0.5f * (i + 1) / levels;
+
+                float r0 = Mathf.Cos(a0) * radius;
+                float r1 = Mathf.Cos(a1) * radius;
+                float y0 = domeBase + Mathf.Sin(a0) * domeHeight;
+                float y1 = domeBase + Mathf.Sin(a1) * domeHeight;
+
+                k.AddCone(new Vector3(0f, y0, 0f), r0, r1, y1 - y0, 14, S.Glow);
+
+                // 每层底沿套一圈深色框。没有它，穹顶是一坨发光体而不是骨架撑起的玻璃房
+                k.AddCylinder(new Vector3(0f, y0, 0f), r0 * 1.03f, 0.05f * U, 14, S.PlateDark);
+            }
+
+            // 顶部通风塔：温室要排热，这是它区别于「圆顶基地」的地方
+            float top = domeBase + domeHeight;
+
+            k.AddCylinder(new Vector3(0f, top - 0.02f * U, 0f), 0.17f * U, 0.24f * U, 10, S.Vent, S.PlateDark);
+            k.AddCone(new Vector3(0f, top + 0.22f * U, 0f), 0.22f * U, 0.05f * U, 0.16f * U, 10, S.Accent);
+
+            // 两只培养罐，对角挂在穹顶外侧
+            for (var s = -1; s <= 1; s += 2)
+            {
+                var at = new Vector3(0.82f * U * s, 0.32f * U, -0.76f * U * s);
+
+                k.AddCylinder(at, 0.24f * U, 0.92f * U, 12, S.PlateRivet, S.PlateDark);
+                k.AddRibs(at, 0.25f * U, 0.92f * U, 6, 0.045f * U, S.PlateDark);
+                k.AddCone(new Vector3(at.x, at.y + 0.92f * U, at.z), 0.24f * U, 0.09f * U, 0.13f * U, 12, S.PlateLight);
+
+                // 液位观察带：罐里是绿的藻液，贴图上只能靠发光面示意
+                k.AddBox(new Vector3(at.x, at.y + 0.46f * U, at.z + 0.24f * U),
+                         new Vector3(0.07f * U, 0.56f * U, 0.04f * U), S.Glow);
+
+                // 罐顶接回穹顶的横管，沿 X 走（AddBox 是轴对齐的，斜着接会穿帮）
+                k.AddBox(new Vector3(at.x * 0.5f, at.y + 0.86f * U, at.z),
+                         new Vector3(Mathf.Abs(at.x), 0.08f * U, 0.08f * U), S.Pipe);
+            }
+
+            // 走道 + 泵组：萃取那一段的设备
+            k.AddRailing(Vector3.zero, 1.0f * U, 1.0f * U, 0.32f * U, 0.2f * U, S.Grating);
+
+            k.AddGreebleRow(new Vector3(-0.86f * U, 0.42f * U, 0.92f * U), new Vector3(0.86f * U, 0.42f * U, 0.92f * U),
+                            4, new Vector3(0.17f * U, 0.18f * U, 0.17f * U), S.Vent);
+
+            k.AddGreebleRow(new Vector3(-0.92f * U, 0.42f * U, -0.86f * U), new Vector3(-0.92f * U, 0.42f * U, 0.4f * U),
+                            3, new Vector3(0.14f * U, 0.22f * U, 0.14f * U), S.PlateDark);
+        }
+
         // ══ 换进 PrefabDesc ═══════════════════════════════════
 
         /// <summary>
@@ -219,6 +289,7 @@ namespace ProjectEden.Model
                 case 6502: ChemPlant(kit); break;
                 case 6503: PrecisionCenter(kit); break;
                 case 6504: ParticleCollider(kit); break;
+                case 6505: BioGreenhouse(kit); break;
                 default: return false;
             }
 

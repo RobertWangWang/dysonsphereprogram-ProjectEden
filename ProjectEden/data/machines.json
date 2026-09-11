@@ -268,11 +268,12 @@
       "//modelId": "上限 727。710~727 已被矿脉与其它新建筑排满，往下取 709。",
       "modelId": 709,
 
-      "//megaTab": "放进本 mod 自己的「巨型建筑」分页与同名建造分类。页号由 CommonAPI 运行时分配、分类号在 megabuildings.json 里配，两个都写不进这里，所以只给行列和槽位。前五格是五座巨型建筑，本条排第 6。",
+      "//megaTab": "放进本 mod 自己的「巨型建筑」分页与同名建造分类。页号由 CommonAPI 运行时分配、分类号在 megabuildings.json 里配，两个都写不进这里，所以只给行列和槽位。前六格是六座巨型建筑（第 6 格是后加的生物温室），本条让到第 7。",
+      "//why-moved": "本条原来占第 6 格。让位不是必须的——MegaBuildingRegistry 先注册并登记槽位，本条会被自动顺延到第 7 并打 WARNING——但那样布局取决于注册顺序而不是配置，看日志才知道它在哪。写死更省事。槽位与合成面板格位都不进存档（LDBTool 的 CustomGridIndex.cfg 对本 mod 的 proto 全记 0，即无覆盖），所以挪动是安全的。",
       "megaTab": true,
       "gridRow": 1,
-      "gridCol": 6,
-      "buildSlot": 6,
+      "gridCol": 7,
+      "buildSlot": 7,
 
       "//tint": "风力涡轮机本体是白灰色，染成青绿——和五座巨型建筑（橙/蓝/紫/…）以及原版发电建筑都分得开。",
       "tint": [0.42, 0.95, 0.72],

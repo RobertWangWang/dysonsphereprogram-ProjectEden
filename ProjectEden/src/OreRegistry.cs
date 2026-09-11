@@ -269,7 +269,10 @@ namespace ProjectEden
                 case ERecipeType.Refine:   return "精炼厂";
                 case ERecipeType.Assemble: return "制造台";
                 case ERecipeType.Particle: return "粒子对撞机";
-                default:                   return "";
+
+                // 自定义类型（9 电化学 / 10 氧化还原 / 11 生化培养）的机器名在
+                // machines.json 和 megabuildings.json 里，不在这个 switch 里
+                default: return MachineRegistry.RecipeTypeMachineName(recipeType) ?? "";
             }
         }
 
@@ -585,7 +588,8 @@ namespace ProjectEden
             {
                 if (entry == null || !entry.enabled) continue;
 
-                if (!BuildSide(entry.items, owner, entry.name, "原料", out int[] items, out int[] itemCounts)) continue;
+                // 原料侧允许为空（零原料配方，比如光合育林）；产物侧不允许
+                if (!BuildSide(entry.items, owner, entry.name, "原料", out int[] items, out int[] itemCounts, true)) continue;
                 if (!BuildSide(entry.results, owner, entry.name, "产物", out int[] results, out int[] resultCounts)) continue;
 
                 var reg = new Recipe { Entry = entry };
@@ -676,16 +680,31 @@ namespace ProjectEden
 
         /// <summary>把配方的一侧（原料或产物）解析成 LDB 要的两个平行数组。</summary>
         private static bool BuildSide(RecipeItemEntry[] side, Ore owner, string recipeName, string label,
-            out int[] ids, out int[] counts)
+            out int[] ids, out int[] counts, bool allowEmpty = false)
         {
             ids = null;
             counts = null;
 
             if (side == null || side.Length == 0)
             {
-                ProjectEdenPlugin.Log.LogError($"配方「{recipeName}」没有配{label}，跳过");
+                if (!allowEmpty)
+                {
+                    ProjectEdenPlugin.Log.LogError($"配方「{recipeName}」没有配{label}，跳过");
 
-                return false;
+                    return false;
+                }
+
+                // 零原料配方是合法的，但它和「漏写了原料」长得一模一样，所以在这里报一行，
+                // 免得一条打字错误变成一台凭空造物的机器。
+                // 引擎侧已核对过 IL：AssemblerComponent.InternalUpdate 的缺料检查是
+                // for (i = 0; i < requireCounts.Length; i++)，长度为 0 时循环体一次都不进，
+                // 「原料不足」那条 return 走不到。
+                ProjectEdenPlugin.Log.LogInfo($"配方「{recipeName}」是零原料配方——{label}一格都没有，这是配置里写明的");
+
+                ids = new int[0];
+                counts = new int[0];
+
+                return true;
             }
 
             ids = new int[side.Length];

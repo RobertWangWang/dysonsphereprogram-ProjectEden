@@ -128,7 +128,7 @@ namespace ProjectEden.Patches
 
             UpdateSlots(factory, ref component);
 
-            RunExtraCycles(ref component, power, productRegister, consumeRegister);
+            RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
         }
 
         /// <summary>
@@ -145,10 +145,24 @@ namespace ProjectEden.Patches
         /// 之所以多跑几遍就能多产出：高速下 time 会累积成一个「待结算周期」的缓冲，
         /// 每次调用消化其中一个，而 time &gt;= timeSpend 期间不再累加。
         /// </summary>
-        private static void RunExtraCycles(ref AssemblerComponent component, float power, int[] productRegister,
-            int[] consumeRegister)
+        private static void RunExtraCycles(PlanetFactory factory, ref AssemblerComponent component, float power,
+            int[] productRegister, int[] consumeRegister)
         {
             int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+
+            // 看天吃饭的建筑（生物温室）：周期数按日照强度缩放，满日照满产、零日照停工。
+            // 缩到 0 就连原版那一次也要压住——它插在我们后面，拦不掉，只能让它结算不了
+            if (MegaLightPatches.IsLightDependent(factory, component.entityId))
+            {
+                cycles = MegaLightPatches.ScaleCycles(factory, ref component, cycles);
+
+                if (cycles <= 0)
+                {
+                    MegaLightPatches.Suppress(ref component);
+
+                    return;
+                }
+            }
 
             // 原本那次调用紧随其后，所以这里只补差额
             for (var i = 1; i < cycles; i++) component.InternalUpdate(power, productRegister, consumeRegister);

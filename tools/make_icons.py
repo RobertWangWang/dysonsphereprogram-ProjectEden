@@ -12,6 +12,7 @@ resvg 是 Rust 写的，wheel 里自带，还原生支持透明通道。
 用法：python tools/make_icons.py        # 输出到 tools/out/
 """
 
+import math
 import pathlib
 
 import drawsvg as dw
@@ -901,6 +902,144 @@ def particle_collider():
     return d
 
 
+def bio_greenhouse():
+    """生物温室：等距穹顶 + 两只外挂培养罐。六座里唯一的穹顶轮廓。
+
+    <b>轮廓要和别的五座在 80px 下一眼分开</b>——塔是竖的、对撞机是圆环、
+    龙门是方框，穹顶是半圆，互相不撞。玻璃分格（三条经线 + 两条纬线）不是装饰：
+    没有它，穹顶在小尺寸下就是一坨果冻，看不出是玻璃房。
+    """
+    d = canvas()
+    p = _pal("#46b95c")
+    dark = _pal("#1b5c2c")
+    glass = "#93efb6"
+
+    _prism(d, 0, 30, 38, 8, dark)
+
+    # 穹顶：上半圆 + 前半椭圆封底，等距里的球顶就是这个形状
+    d.append(dw.Path(fill=glass, fill_opacity=0.92, stroke=dark[3], stroke_width=1.8,
+                     stroke_linejoin="round")
+             .M(-30, 12).A(30, 30, 0, 0, 1, 30, 12)
+             .A(30, 30 * ISO, 0, 0, 1, -30, 12).Z())
+
+    # 经线：从顶点拉到三个前沿点
+    for x, y in ((-30, 12), (0, 12 + 30 * ISO), (30, 12)):
+        d.append(dw.Line(0, -18, x, y, stroke=dark[3], stroke_width=1.3, stroke_opacity=0.75))
+
+    # 纬线：两条前半椭圆
+    for t in (0.40, 0.72):
+        r = 30 * (1 - t * t) ** 0.5
+        d.append(dw.Path(fill="none", stroke=dark[3], stroke_width=1.2, stroke_opacity=0.6)
+                 .M(-r, 12 - 30 * t).A(r, r * ISO, 0, 0, 0, r, 12 - 30 * t))
+
+    # 顶部通风塔
+    _cyl(d, 0, -26, 5, 9, _pal("#d7e6c4"))
+
+    # 两只培养罐：压在穹顶前面，才看得出是挂在外侧的
+    for dx in (-33, 33):
+        _cyl(d, dx, 4, 8, 24, p, cap_gloss=0.3)
+        d.append(dw.Rectangle(dx - 2, 10, 4, 14, fill=glass, fill_opacity=0.85))
+
+    return d
+
+
+def microbial_consortium():
+    """菌落：培养皿里的藻菌滤饼。
+
+    画皿不画分子：藻菌共培养物是一团生物量，没有结构式可画。
+    <b>菌落团的位置写死不随机</b>——图标要可重现，换台机器生成出来不能不一样。
+    """
+    d = canvas()
+    dish = _pal("#c2ced9")
+    cake = "#1d4a2a"
+
+    # 皿壁：先画筒身，顶面盖上去藏住接缝（和 _cyl 同一套做法）
+    d.append(dw.Path(fill=dish[2], stroke=dish[3], stroke_width=1.6)
+             .M(-36, 0).L(-36, 13).A(36, 36 * ISO, 0, 0, 0, 36, 13)
+             .L(36, 0).A(36, 36 * ISO, 0, 0, 1, -36, 0).Z())
+
+    d.append(dw.Ellipse(0, 0, 36, 36 * ISO, fill=cake, stroke=dish[3], stroke_width=1.6))
+
+    # 菌落团：三档明度，凑出湿滤饼的团块感
+    blobs = ((-14, -3, 9, "#2f7a42"), (7, -6, 7, "#3b9350"), (17, 2, 6, "#2a6b3a"),
+             (-4, 5, 8, "#37874a"), (-24, 3, 5, "#245f33"), (2, -1, 4, "#5ec276"))
+
+    for cx, cy, r, fill in blobs:
+        d.append(dw.Ellipse(cx, cy, r, r * 0.72, fill=fill, stroke="#12331c", stroke_width=0.9))
+
+    # 高光：湿的，不是干粉
+    d.append(dw.Ellipse(-10, -6, 11, 4.4, fill="#ffffff", fill_opacity=0.16))
+
+    return d
+
+
+def algal_oil():
+    """藻油：一滴单细胞油脂。
+
+    不画结构式：甘油三酯是 57 个碳的大分子，缩到 80px 只剩一团糊。
+    颜色定在<b>金绿</b>而不是原油那种琥珀，两张图摆一起要能分开。
+    """
+    d = canvas()
+    edge = "#3d5c12"
+
+    d.append(dw.Path(fill="#8fbe2f", stroke=edge, stroke_width=2.2, stroke_linejoin="round")
+             .M(0, -40).C(15, -14, 30, 0, 30, 13)
+             .A(30, 30, 0, 0, 1, -30, 13)
+             .C(-30, 0, -15, -14, 0, -40).Z())
+
+    # 底部压暗：给液滴一点体积
+    d.append(dw.Ellipse(0, 21, 25, 11, fill="#5d861a", fill_opacity=0.5))
+
+    # 悬在油里的藻细胞：说明它是藻榨出来的，不是矿物油
+    for cx, cy, r in ((-9, 6, 4.2), (8, 12, 3.4), (0, -2, 2.8)):
+        d.append(dw.Ellipse(cx, cy, r, r * 0.8, fill="#2f6b2a", fill_opacity=0.7))
+
+    # 高光：液滴的标志，没有它读起来像块石头
+    d.append(dw.Ellipse(-9, -12, 6, 9, fill="#ffffff", fill_opacity=0.5))
+
+    return d
+
+
+def photosynthesis():
+    """光合育林：叶片 + 落在它上面的日光。
+
+    这是配方图标，画的是<b>工艺</b>不是产物——它同时是全 mod 唯一一条
+    「受光照影响」的配方，太阳必须在图上，否则这条规则在界面里毫无提示。
+    """
+    d = canvas()
+
+    # 日轮在左上，被叶子压住一角
+    d.append(dw.Circle(-20, -22, 13, fill="#ffd95e", stroke="#c98f16", stroke_width=1.6))
+
+    for i in range(8):
+        a = math.pi * 2 * i / 8
+        d.append(dw.Line(-20 + math.cos(a) * 16, -22 + math.sin(a) * 16,
+                         -20 + math.cos(a) * 22, -22 + math.sin(a) * 22,
+                         stroke="#e8b029", stroke_width=2.6, stroke_linecap="round"))
+
+    # 叶片：两段对称的贝塞尔，尖端朝右上
+    d.append(dw.Path(fill="#4aa84f", stroke="#1f5c27", stroke_width=2.0, stroke_linejoin="round")
+             .M(-26, 30).C(-26, -4, -2, -26, 30, -28)
+             .C(28, 6, 6, 30, -26, 30).Z())
+
+    # 主脉 + 侧脉：叶子的识别点
+    d.append(dw.Path(fill="none", stroke="#1f5c27", stroke_width=2.0, stroke_linecap="round")
+             .M(-26, 30).C(-8, 14, 8, 0, 29, -27))
+
+    for t in (0.28, 0.5, 0.72):
+        x0 = -26 + (29 + 26) * t
+        y0 = 30 - (30 + 27) * t * 0.92
+        d.append(dw.Line(x0, y0, x0 + 4, y0 - 13, stroke="#1f5c27", stroke_width=1.5,
+                         stroke_linecap="round", stroke_opacity=0.8))
+
+    # 叶面高光：光是从左上打过来的，和日轮位置对齐
+    d.append(dw.Path(fill="#8fd894", fill_opacity=0.45)
+             .M(-18, 22).C(-16, 2, 0, -14, 20, -20)
+             .C(6, -6, -6, 8, -18, 22).Z())
+
+    return d
+
+
 def tab_mega():
     """建造栏的「巨型建筑」页签图标。
 
@@ -979,4 +1118,10 @@ if __name__ == "__main__":
     render(chem_plant(), "chem-plant")
     render(mega_assembler(), "mega-assembler")
     render(particle_collider(), "particle-collider")
+    render(bio_greenhouse(), "bio-greenhouse")
     render(tab_mega(), "tab-mega")
+
+    # 生物温室的产物与配方图标
+    render(microbial_consortium(), "microbial-consortium")
+    render(algal_oil(), "algal-oil")
+    render(photosynthesis(), "photosynthesis")

@@ -133,6 +133,28 @@
       "tintR": 0.3059,
       "tintG": 0.2196,
       "tintB": 0.4941
+    },
+    {
+      "//": "第六座。它和前五座不同的地方在于**配方类型是本 mod 自己的 11 号（生化培养）**——前五座借的都是原版类型（1 熔炉 / 2 化工 / 4 组装 / 5 粒子），所以原版机器也做得了那些配方；11 号只有这一座做得了，三条配方是它的专属。ERecipeType 是 int 枚举，(ERecipeType)11 不需要有名字就合法，原版占了 1~8 和 15，本 mod 已用 9（电化学）、10（氧化还原），11 是接着往下取的。",
+      "//lightDependent": "整座建筑的产能随日照线性变化：**满日照 = 满速 10000 倍，零日照 = 停工**，三条配方一起停。曲线照抄太阳能板的 PowerGeneratorComponent.EnergyCap_PV——clamp01(太阳方向·建筑位置单位向量 * 2.5 + 0.8572445) * 星球光照度，所以有黄昏而不是一刀切，潮汐锁定星球的暗面永久停工。实现上缩放的是每 tick 的配方周期数（cyclesPerTick），不是 speed：巨型建筑靠 speed >= megaSpeedThreshold 识别，降速到阈值以下这台建筑就再也不会被接管。**副作用：面板上的「制造速度」始终显示 10000 倍**，那一栏读的是 speed，真正随光照走的是产量。",
+      "lightDependent": true,
+      "itemId": 6505,
+      "modelId": 708,
+      "recipeId": 6505,
+      "displayName": "生物温室",
+      "description": "巨型生化培养舱，速度 10000 倍。穹顶下是恒温恒湿的人工雨林，光合育林、藻菌共培养、溶剂萃取三道工序都在这里完成。育林那道受日照约束——太阳落到地平线以下就停工。十二个传送带口直连，输入输出都不需要分拣器，机身自带行星内物流站。",
+      "iconName": "bio-greenhouse",
+      "recipeType": 11,
+      "//machineTypeName": "物品提示栏「类型」那一行。只有自定义配方类型需要填——原版 typeString 是 assemblerRecipeType - 1 的跳转表，11 号会落到 default。",
+      "machineTypeName": "生化培养设备",
+      "gridRow": 1,
+      "gridCol": 6,
+      "slot": 6,
+      "idleEnergyPerTick": 60000,
+      "workEnergyPerTick": 300000,
+      "tintR": 0.2745,
+      "tintG": 0.7255,
+      "tintB": 0.3608
     }
   ],
   "//replicatorPages": "合成器（Ctrl+替换/制造界面）横向翻页的总页数，每页 14 列。原版每个分页是 8 行 × 14 列、第 1 页几乎满了；开了之后底部会出现一根横向滚动条，可以左右拉动看后面几页。1 = 维持原版、不加滚动条。注意第 9 行及以后原版根本不画（RefreshRecipeIcons 里 row >= 8 直接跳过），所以扩容只能往列上走。",
