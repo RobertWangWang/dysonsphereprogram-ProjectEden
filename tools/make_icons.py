@@ -1053,6 +1053,84 @@ def vanadium_residue_oil():
     return d
 
 
+def proliferator(glow, rim, shell, dense):
+    """活性增产剂：一枚会发光的孢子囊。
+
+    <b>刻意不画成原版那种喷漆罐。</b> 这一族是用活性复合材做的，图标语言跟着
+    「活的」走：囊体 + 里面的发光核 + 菌丝。摆在原版三档旁边要一眼看出不是同一族。
+
+    <b>同档两个变体靠形态分，不靠颜色分</b>——颜色是用来分档的（Mk.IV 青、Mk.V 紫），
+    形态才是用来分性格的：
+
+    <list type="bullet">
+    <item><b>浓缩型</b>（dense=True）：囊窄壁厚，核大而集中，囊口封着。
+    等级高、喷数少——一份的劲都压在里面。</item>
+    <item><b>广延型</b>（dense=False）：囊宽壁薄，核小，菌丝从囊口散出去，末端结孢子。
+    等级低、喷数多——一份铺得开。</item>
+    </list>
+
+    <b>亮边和亮核都是必须的。</b> DSP 的界面底色是深的，钒渣油那次就是因为整张图
+    压得太暗，在格子里直接看不见。这一族本身是发光体，正好不犯那个毛病。
+    """
+    d = canvas()
+
+    if dense:
+        # 窄而挺：上端收成封死的囊口
+        d.append(dw.Path(fill=shell, stroke=rim, stroke_width=2.8, stroke_linejoin="round")
+                 .M(0, -40).C(13, -30, 20, -10, 20, 6)
+                 .A(20, 22, 0, 0, 1, -20, 6)
+                 .C(-20, -10, -13, -30, 0, -40).Z())
+
+        # 核：大、居中偏下，占满囊腔
+        d.append(dw.Ellipse(0, 6, 12.5, 14, fill=glow, fill_opacity=0.95))
+        d.append(dw.Ellipse(0, 6, 7, 8, fill="#ffffff", fill_opacity=0.55))
+
+        # 囊壁上的环纹：三道，紧
+        for y, w in ((-22, 7.5), (-15, 10.5), (-8, 13)):
+            d.append(dw.Line(-w, y, w, y, stroke=rim, stroke_width=2.0, stroke_opacity=0.75))
+    else:
+        # 宽而扁：上端敞开
+        d.append(dw.Path(fill=shell, stroke=rim, stroke_width=2.6, stroke_linejoin="round")
+                 .M(0, -26).C(18, -20, 27, -6, 27, 8)
+                 .A(27, 20, 0, 0, 1, -27, 8)
+                 .C(-27, -6, -18, -20, 0, -26).Z())
+
+        # 核：小，说明劲被摊薄了
+        d.append(dw.Ellipse(0, 8, 9, 9.5, fill=glow, fill_opacity=0.92))
+        d.append(dw.Ellipse(0, 8, 4.5, 5, fill="#ffffff", fill_opacity=0.5))
+
+        # 菌丝：从囊口散出去，末端各结一颗孢子
+        for dx, dy, ex, ey in ((-3, -30, -26, -42), (-1, -31, -11, -46),
+                               (1, -31, 9, -46), (3, -30, 24, -41)):
+            d.append(dw.Path(fill="none", stroke=rim, stroke_width=2.4, stroke_linecap="round")
+                     .M(dx * 3, -24).Q(dx * 6, dy, ex, ey))
+            d.append(dw.Circle(ex, ey, 3.6, fill=glow, fill_opacity=0.95))
+            d.append(dw.Circle(ex - 1.1, ey - 1.1, 1.5, fill="#ffffff", fill_opacity=0.7))
+
+        # 囊壁环纹：两道，疏
+        for y, w in ((-14, 14), (-6, 21)):
+            d.append(dw.Line(-w, y, w, y, stroke=rim, stroke_width=1.9, stroke_opacity=0.6))
+
+    return d
+
+
+# Mk.IV 青，Mk.V 紫：色阶接着原版三档往上走，同族内部靠形态分
+def proliferator_4_dense():
+    return proliferator("#3fe0d0", "#7ff0e4", "#16383b", True)
+
+
+def proliferator_4_spread():
+    return proliferator("#3fe0d0", "#7ff0e4", "#16383b", False)
+
+
+def proliferator_5_dense():
+    return proliferator("#c56bff", "#e2aaff", "#2e1b47", True)
+
+
+def proliferator_5_spread():
+    return proliferator("#c56bff", "#e2aaff", "#2e1b47", False)
+
+
 def photosynthesis():
     """光合育林：叶片 + 落在它上面的日光。
 
@@ -1409,3 +1487,9 @@ if __name__ == "__main__":
 
     # 可燃液体发电：钒渣油
     render(vanadium_residue_oil(), "vanadium-residue-oil")
+
+    # 活性增产剂：颜色分档（Mk.IV 青 / Mk.V 紫），形态分性格（浓缩 / 广延）
+    render(proliferator_4_dense(), "proliferator-4-dense")
+    render(proliferator_4_spread(), "proliferator-4-spread")
+    render(proliferator_5_dense(), "proliferator-5-dense")
+    render(proliferator_5_spread(), "proliferator-5-spread")
