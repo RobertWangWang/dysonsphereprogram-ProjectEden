@@ -12,7 +12,7 @@
         <TargetFramework>net472</TargetFramework>
         <AssemblyName>ProjectEden</AssemblyName>
         <Product>Project Eden</Product>
-        <Version>1.1.3</Version>
+        <Version>1.2.0</Version>
 
         <LangVersion>latest</LangVersion>
         <Nullable>disable</Nullable>
