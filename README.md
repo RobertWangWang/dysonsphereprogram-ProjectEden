@@ -14,6 +14,10 @@
 - 📘 **[中文：mod特性.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md)**
 - 📗 **[English: mod_feature.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod_feature.md)**
 
+> **本项目在很大程度上借助 AI 完成。文中描述的引擎行为都在游戏内验证过；欢迎提 bug。**
+>
+> **Written with heavy AI assistance. All engine behaviour described here was verified in-game; bug reports welcome.**
+
 ---
 
 ## ⚠️ 先看这里：存档兼容性
