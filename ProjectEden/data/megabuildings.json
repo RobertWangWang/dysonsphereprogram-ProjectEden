@@ -160,5 +160,7 @@
     }
   ],
   "//replicatorPages": "合成器（Ctrl+替换/制造界面）横向翻页的总页数，每页 14 列。原版每个分页是 8 行 × 14 列、第 1 页几乎满了；开了之后底部会出现一根横向滚动条，可以左右拉动看后面几页。1 = 维持原版、不加滚动条。注意第 9 行及以后原版根本不画（RefreshRecipeIcons 里 row >= 8 直接跳过），所以扩容只能往列上走。",
-  "replicatorPages": 3
+  "replicatorPages": 3,
+  "//ownTabForModProtos": "把本 mod 默认落在**第 1 页**的物品与配方整体搬到本 mod 自己的分页上。原版物品第 1 页实测 111/112 格已占，挤进去只能落到第 14 列之外，而画物品格的四个窗口都硬裁 col >= 14——落到扩展列就等于这件物品**在掉落过滤和信号选取窗口里不存在**，在物品选取窗口里也要靠横向翻页或搜索才捞得回来。第 3 页安全的依据：页号就是标签页号，而 CommonAPI 的 TabSystem.SetHooks 同时挂了UIReplicatorPatch、UIRecipePickerPatch 和 UIItemPickerPatch，三个窗口都会多出这一页。**只搬第 1 页**：建筑类物品本来就在第 2 页（建筑标签），那是它们该待的地方，也没溢出。关掉就退回原来的行为。",
+  "ownTabForModProtos": true
 }

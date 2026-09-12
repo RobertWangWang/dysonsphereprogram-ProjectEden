@@ -351,5 +351,14 @@ namespace ProjectEden.Patches
 
         /// <summary>出货时每个产物格里留多少个不送走。0 = 全部送走</summary>
         public int outputReserveItems;
+
+        /// <summary>终局科技要不要**直接**列出生物矩阵。false 时只靠宇宙矩阵配方间接需要。</summary>
+        public bool bioMatrixInTechs;
+
+        /// <summary>实验室 3D 动画里代表生物矩阵的数字；0 表示不改，保持原版。</summary>
+        public int bioMatrixShaderDigit;
+
+        /// <summary>那五个动画位置怎么排，每位填 6（宇宙矩阵）或 7（生物矩阵）。</summary>
+        public int bioMatrixShaderPattern;
     }
 }

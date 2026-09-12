@@ -693,6 +693,26 @@
       "icon": "sic-power-module",
       "//iconFrom": "**iconFrom 的名字有误导性：它是 proto 的克隆模板，不只是图标来源。** OreRegistry 第 304 行 `ItemProto source = LDB.items.Select(entry.iconFrom)`，拿不到就**整条物品跳过**；模板还负责提供 DescFields 等数组字段——那正是 DrillBitRegistry 手工 new proto 时漏掉 DescFields、一悬停就 NRE 的同一件事，只是从另一头看。本条自带 icon，所以 TintExtraIcon 会直接返回，1108 只当模板用。",
       "iconFrom": 1108
+    },
+    {
+      "//": "生物矩阵。**依据是真的**：真菌菌丝网络会产生电脉冲，并被认真研究为一种非常规计算基质（Adamatzky 等人的真菌电子学方向）。所以「把菌丝长成一块矩阵」不是凭空的科幻，而是把那条研究方向推到工业规模。菌落在这里负责代谢供养——它本来就是藻菌共培养体，固碳产油、循环氮磷。",
+      "//icon": "**不画自绘图标，按要求用原版矩阵改色。** 留空 icon 就会走 TintExtraIcon 那条改色路径（自带 icon 时它直接返回）。色相取 78°（黄绿/橄榄），刻意避开原版已占的两档：结构矩阵约 45°（黄）、引力矩阵约 120°（绿）——夹在中间才一眼分得开。",
+      "//iconFrom": "6001 = 电磁矩阵。它同时是 proto 的克隆模板（不只是图标来源），所以必须填一个真实存在的原版物品号；拿矩阵当模板，DescFields 等字段的形制也对得上。",
+      "key": "bio-matrix",
+      "enabled": true,
+      "name": "生物矩阵",
+      "description": "在菌丝基体里长出来的活体计算基质。菌丝网络本身会产生电脉冲并沿着连接传递，把它按规则长成阵列，信号就能在里面走；菌落负责代谢供养，让这块矩阵一直活着。它不是被造出来的，是被养出来的。",
+      "itemId": 6007,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "生物温室",
+      "isFluid": false,
+      "iconFrom": 6001,
+      "iconHue": 78.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.22,
+      "iconValueScale": 1.05,
+      "//itemId": "**必须和 6001 连续，这不是风格问题。** PlanetFactory.InsertInto（投料进实验室那条路）IL 03F6 是 `slot = itemId - 6001`，再判 `slot < 0 || slot >= 6` 就丢弃；FactorySystem.GameTickLabResearchMode 用同一个减法算动画状态。所以矩阵的槽位是**物品号减 6001** 得来的——号一旦不连续，矩阵既进不了实验室也不报错。原版六种占 6001–6006，本条接 6007。（初版给的 6644 就是这个错：6644−6001=643，直接落在门外。）"
     }
   ],
   "ores": [
@@ -2731,6 +2751,35 @@
       "results": [
         {
           "ref": "sic-power-module",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "//": "2 菌丝基体 + 2 菌落 → 1 生物矩阵。",
+      "//machine": "生物温室（本 mod 的 11 号「生化培养」）。两样投料本来就都产自这台建筑，而这一步也是培养而非装配——机器跟工艺类别走。",
+      "//name": "按仓库规矩以产物打头：合成面板里没有物品格，只有配方格，名字不以产物开头的话玩家在面板里找不到这件东西。",
+      "enabled": true,
+      "name": "生物矩阵 · 菌丝培养",
+      "description": "菌丝基体按阵列长开，菌落在其间代谢供养。长成之后整块都是活的。",
+      "recipeId": 6644,
+      "type": 11,
+      "timeSpend": 180,
+      "gridIndex": 1601,
+      "//icon": "不配 icon 也不配 iconFrom，让它跟着产物走——产物的图标是改色出来的，配方要是自己去指原版矩阵，拿到的是没改色的那张，两边就对不上了。见 OreRegistry.SyncStandaloneRecipeIcons。",
+      "items": [
+        {
+          "ref": "mycelial-matrix",
+          "count": 2
+        },
+        {
+          "ref": "microbial-consortium",
+          "count": 2
+        }
+      ],
+      "results": [
+        {
+          "ref": "bio-matrix",
           "count": 1
         }
       ]

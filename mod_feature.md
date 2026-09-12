@@ -41,6 +41,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXII. Living Proliferators: two tiers above vanilla, each in two characters](#xxii-living-proliferators-two-tiers-above-vanilla-each-in-two-characters)
 - [XXIII. Alien Veins: mining them consumes drill bits](#xxiii-alien-veins-mining-them-consumes-drill-bits)
 - [XXIV. Silicon Carbide: what moissanite is for, and it buys throughput](#xxiv-silicon-carbide-what-moissanite-is-for-and-it-buys-throughput)
+- [XXV. Bio Matrix: the seventh matrix, and it is grown](#xxv-bio-matrix-the-seventh-matrix-and-it-is-grown)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -2416,6 +2417,80 @@ is cheaper, and the recipe would be dead content the moment it appeared in the r
 
 ---
 
+## XXV. Bio Matrix: the seventh matrix, and it is grown
+
+All six vanilla matrices are synthesised in the **Matrix Lab**. The seventh is not.
+
+| | |
+|---|---|
+| Made in | **the Biodome** (not the Matrix Lab) |
+| Recipe | Hyphal Substrate ×2 + Colony ×2 → Bio Matrix ×1, 3 s |
+| Used for | the **seventh ingredient** of the Universe Matrix |
+
+### Why it is not synthesised in the lab
+
+A Matrix Lab **crystallises** — it arranges matter into a lattice. A Bio Matrix is **grown**:
+the hyphal network generates electrical pulses and passes them along its connections, so
+growing it into an ordered array lets signals travel through it, while the colony feeds it
+metabolically and keeps the whole thing alive. It is not manufactured; it is cultivated.
+
+So it belongs to the Biodome. **You cannot select it under "Matrix Synthesis" in the Matrix
+Lab — that is by design, not an omission.**
+
+It also plugs the biological chain straight into the tech tree: hyphal substrate and colonies
+already come out of the Biodome, so the algae line stops being a side branch and becomes part
+of the main progression.
+
+### How it becomes a hard end-game requirement
+
+```
+Biodome ──► Bio Matrix ──► Universe Matrix (7th ingredient) ──► end-game techs
+```
+
+**No tech requirement changed at all — they still ask only for Universe Matrices.** What changed
+is the Universe Matrix itself: its recipe went from six ingredients to seven, and the new one is
+Bio Matrix. So the rule still states in one line: *behind the white matrix, there is now something
+living.*
+
+That makes Bio Matrix a **hard** end-game requirement, but one that is **counted once** — you do
+not pay twice for the same thing.
+
+> Want the heavier version, where techs ask for Bio Matrix **on top of** their Universe Matrices?
+> Set `bioMatrixInTechs` to true in `lab.json`. It is off by default.
+
+> **Note for existing saves**: the Universe Matrix recipe went from six ingredients to seven.
+> An already-built Universe Matrix line **needs one more input feeding Bio Matrix**, or the lab
+> will sit at "missing raw materials". The lab's internal data fixes itself on load — you do not
+> have to tear anything down and rebuild it.
+
+### The Matrix Lab window changes with it
+
+| Situation | Cells on the ring | Shape |
+|---|---|---|
+| Matrix Synthesis, nothing selected yet | 5 | regular pentagon (as in vanilla) |
+| Matrix Synthesis, making a Universe Matrix | 6 | regular hexagon; the extra cell is Bio Matrix |
+| Matrix Synthesis, making any other matrix | 5 | regular pentagon |
+| Research Mode | 5 | regular pentagon (by default no tech asks for Bio Matrix directly, so that cell is not drawn) |
+
+The seventh cell appears only where it is **actually usable**. By default that means only while
+making a Universe Matrix, where it is the seventh ingredient slot. It is hidden otherwise — so the
+"pick which matrix to make" screen never shows a cell that does nothing when clicked, and Research
+Mode never shows a slot that would never be consumed. (Set `bioMatrixInTechs` to true and Research
+Mode shows it as well.)
+
+### The 3-D animation on the building
+
+While researching a tech that needs Universe Matrices (that is, one that indirectly consumes Bio
+Matrix), the animation ring on the Matrix Lab building includes it too (two of the five animation
+positions are given to Bio Matrix).
+
+This is `bioMatrixShaderDigit` in `lab.json`; **set it to 0 to get vanilla's appearance back**.
+There is a switch because that animation is handed to the game's own compiled shader, and vanilla
+never had a seventh matrix — whether the shader recognises a seventh colour can only be found out
+by running it. The default pattern deliberately keeps three Universe Matrix positions, so if the
+shader does not recognise it, only those two positions look wrong: never a blank ring, and never
+any effect on throughput or research speed.
+
 ## Config Quick Reference
 
 | File | What it controls |
@@ -2423,7 +2498,7 @@ is cheaper, and the recipe would be dead content the moment it appeared in the r
 | `megabuildings.json` | The six mega buildings, the tab, speed, built-in logistics station, replicator page count |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
-| `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations |
+| `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes |
 | `power.json` | Power node coverage radius |
 | `belts.json` | Speed of the three belt tiers |

@@ -320,7 +320,7 @@ namespace ProjectEden.Patches
                 }
             }
 
-            LayoutVeinCollectorRows(station, uis, count);
+            LayoutStorageRows(station, uis, count);
 
             SyncScrollbar(maxPage);
         }
@@ -348,15 +348,35 @@ namespace ProjectEden.Patches
         /// 在算采集器窗口高度时就是 <c>76 * 槽数 + 136</c>，
         /// <see cref="RowHeight"/> 用的就是这个数。
         ///
-        /// 只对采集器做。普通物流站那条分支原版摆得好好的，碰它只会引入回归。
+        /// <b>但「只对采集器做」是不够的，而且漏掉的那一半真的出事了。</b>
+        /// <c>UIStationStorage</c> 这批控件<b>是整个窗口共用的</b>——玩家开哪个站都是同一批对象。
+        /// 于是给采矿机摆过一次之后，那套坐标就留在控件上；再打开行星内 / 星际 / 综合物流枢纽时，
+        /// 原版<b>只重写 <c>storageUIs[0]</c></b>，第 1 行往后仍然停在为采矿机算出来的位置上，
+        /// <b>三种物流站的储物格全部错位</b>。
+        ///
+        /// 这和 <see cref="MultiProductUIPatches"/> 的 <c>RestoreSlot1</c> 是同一条，只是方向相反：
+        /// 那次是「原版不重写的东西被我们改了就得自己复位」，这次是同一句话的下半句——
+        /// <b>写了就得负责还原，而且还原的时机是「轮到别人用这批控件的时候」。</b>
+        /// 所以这里不是「不是采集器就返回」，而是「不是采集器就放回原位」。
         /// </summary>
-        private static void LayoutVeinCollectorRows(StationComponent station, UIStationStorage[] uis, int count)
+        private static void LayoutStorageRows(StationComponent station, UIStationStorage[] uis, int count)
         {
-            // <b>只管矿脉采集器。</b> 气体采集器走的是上面那个 !isVeinCollector 分支，
-            // 原版会给它摆位置，而且它在原版里本来就会显示多行（气态巨星有好几种气体）——
-            // 也就是说那条路径的行距是经过验证的，碰它只会引入回归。
-            if (!station.isVeinCollector) return;
-            if (uis.Length < 2 || uis[0] == null) return;
+            if (uis == null || uis.Length < 2 || uis[0] == null) return;
+
+            // 第一次见到这批控件时先把原位记下来，之后才允许动它们。
+            // 这时候的坐标一定是原版的：采集器那条分支原版根本不摆位置，
+            // 普通物流站那条也只写 storageUIs[0]，两种情况下 1..n 都还停在 prefab 给的位置上。
+            if (_homeRows == null)
+            {
+                _homeRows = new Vector2[uis.Length];
+
+                for (var i = 0; i < uis.Length; i++)
+                {
+                    var home = uis[i]?.transform as RectTransform;
+
+                    if (home != null) _homeRows[i] = home.anchoredPosition;
+                }
+            }
 
             var first = uis[0].transform as RectTransform;
 
@@ -366,17 +386,28 @@ namespace ProjectEden.Patches
 
             for (var i = 1; i < uis.Length; i++)
             {
-                if (uis[i] == null) continue;
-
-                var trs = uis[i].transform as RectTransform;
+                var trs = uis[i]?.transform as RectTransform;
 
                 if (trs == null) continue;
 
-                var want = new Vector2(origin.x, origin.y - RowHeight * i);
+                // 采集器：按行高自己往下排。其余：<b>放回原位</b>——见下面为什么这半边是必须的
+                Vector2 want = station.isVeinCollector
+                    ? new Vector2(origin.x, origin.y - RowHeight * i)
+                    : i < _homeRows.Length
+                        ? _homeRows[i]
+                        : trs.anchoredPosition;
 
                 if (trs.anchoredPosition != want) trs.anchoredPosition = want;
             }
         }
+
+        /// <summary>
+        /// 储物格各行在 prefab 里的原始位置，第一次见到控件时记下。
+        ///
+        /// <b>这批控件是整个窗口共用的</b>——玩家开哪个站都是同一批对象，
+        /// 所以给采集器摆过之后必须还原，否则那套坐标会跟着窗口跑到别的站上去。
+        /// </summary>
+        private static Vector2[] _homeRows;
 
         /// <summary>
         /// 储物格布局仍是原版那 6 个控件，这里只额外挂一根滚动条来驱动页码。

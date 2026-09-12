@@ -248,6 +248,45 @@ namespace ProjectEden.Utils
             return 0;
         }
 
+        private static bool _ownTabLogged;
+
+        /// <summary>
+        /// 把第 1 页的请求改到本 mod 自己的分页上。理由见
+        /// <see cref="MegaBuildingsConfig.ownTabForModProtos"/>。
+        ///
+        /// <b>三道闸都过了才搬</b>，任何一道不过就原样返回——
+        /// 页号就是标签页号，搬到一个没注册成功的分页等于让东西凭空消失，
+        /// 那种失败还不会报错。
+        /// </summary>
+        private static int PreferOwnTab(int wanted)
+        {
+            MegaBuildingsConfig cfg = MegaBuildingRegistry.Config;
+
+            if (cfg == null || !cfg.ownTabForModProtos) return wanted;
+
+            int tab = MegaBuildingRegistry.TabIndex;
+
+            // 原版占 1（物品）和 2（建筑），所以自有分页必然 ≥ 3；
+            // 拿不到就是 CommonAPI 那边没注册成功，这时候搬过去等于扔掉
+            if (tab <= 2) return wanted;
+
+            // 只搬第 1 页。建筑本来就在第 2 页，那是它们该待的地方
+            if (wanted / 1000 != 1) return wanted;
+
+            if (!_ownTabLogged)
+            {
+                _ownTabLogged = true;
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"物品与配方格位：默认第 1 页的一律改到本 mod 自己的第 {tab} 页。"
+                    + "原版第 1 页实测 111/112 格已占，挤进去只能落到第 14 列之外，"
+                    + "而掉落过滤与信号选取窗口硬裁 14 列——那等于这件物品在那些窗口里不存在。"
+                    + "（megabuildings.json 的 ownTabForModProtos 可关）");
+            }
+
+            return tab * 1000 + wanted % 1000;
+        }
+
         /// <summary>
         /// 合成面板格位。<b>只在本页内找</b>，不能滚到下一页——分页号决定物品落在
         /// 「物品」还是「建筑」标签下，翻页等于把东西搬到另一个标签里去了。
@@ -259,6 +298,8 @@ namespace ProjectEden.Utils
             Func<int, bool> alsoTaken = null, int alsoAvoid = 0)
         {
             if (wanted <= 0) wanted = 1601;
+
+            wanted = PreferOwnTab(wanted);
 
             int page = wanted / 1000;
             int maxRow = 1, maxCol = 1;

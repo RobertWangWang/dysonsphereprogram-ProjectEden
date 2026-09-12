@@ -3,6 +3,10 @@
   "//collision": "注册时会**跳过原版已经有的键**并打 WARNING——不然会把原版那条翻译全局改掉。所以像「铁块」「钢材」「低速传送带」这类原版名字不必也不该写进来。",
   "//missing": "启动时会核对一遍：配置里出现过、但这里没有对应条目的中文串，会各报一次 WARNING。新加物品忘了配英文不会静默。",
   "strings": {
+    "生物矩阵": "Bio Matrix",
+    "在菌丝基体里长出来的活体计算基质。菌丝网络本身会产生电脉冲并沿着连接传递，把它按规则长成阵列，信号就能在里面走；菌落负责代谢供养，让这块矩阵一直活着。它不是被造出来的，是被养出来的。": "A living computational substrate grown inside a mycelial matrix. Mycelium networks generate electrical spikes and propagate them along their connections; grow one into an ordered array and signals will run through it, while the microbial consortium keeps the whole thing metabolising. It is not manufactured — it is cultured.",
+    "生物矩阵 · 菌丝培养": "Bio Matrix · Mycelial Culture",
+    "菌丝基体按阵列长开，菌落在其间代谢供养。长成之后整块都是活的。": "The mycelial matrix is grown out into an array with the consortium metabolising between its strands. What comes out is alive all the way through.",
     "高纯碳化硅": "High-Purity Silicon Carbide",
     "掺氮的单晶碳化硅晶圆，透着琥珀绿。矿石里的碳化硅是绝缘的，籽晶升华长出来、掺进氮之后它才导电——这一步买到的就是这件事。禁带宽度是硅的三倍，击穿场强是硅的十倍。": "A nitrogen-doped single-crystal silicon carbide wafer, amber-green and translucent. The carbide in the ore is an insulator; only after seeded sublimation growth and nitrogen doping does it conduct — and that is exactly what this step buys. Its band gap is three times silicon’s and its breakdown field ten times.",
     "氮化铝": "Aluminium Nitride",

@@ -163,6 +163,12 @@ namespace ProjectEden
             LDBTool.PostAddDataAction += MinerStationSurvey.OnPostAddData;
 
             // 漏译核对也排在最后：要等所有 proto 都进了 LDB 才数得清
+            // 第七种矩阵：排在矿种注册之后（要按 key 解析物品号），
+            // 也要排在 LDB.techs 建好之后才追加得了科技
+            LDBTool.PostAddDataAction += BioMatrixPatches.OnPostAddData;
+            // 必须排在生物矩阵之后：它要读 BioMatrixPatches.MatrixId
+            LDBTool.PostAddDataAction += UniverseMatrixPatches.OnPostAddData;
+
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             LDBTool.PostAddDataAction += ProtoArrayCheck.Verify;
 
@@ -192,6 +198,8 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= MinerStationSurvey.OnPostAddData;
+            LDBTool.PostAddDataAction -= BioMatrixPatches.OnPostAddData;
+            LDBTool.PostAddDataAction -= UniverseMatrixPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= I18N.VerifyCoverage;
             LDBTool.PostAddDataAction -= ProtoArrayCheck.Verify;
 

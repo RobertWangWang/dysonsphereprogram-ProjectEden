@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: six 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), and six rule-bypass cheat switches that are off by default. ~28,600 lines of C# in 95 files — 92 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: six 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, and six rule-bypass cheat switches that are off by default. ~31,000 lines of C# in 103 files — 96 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). Not a git repository. **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
@@ -245,7 +245,13 @@ The postfix also recomputes the bool result — whose "not a failure" exemption 
 
 **Build-error text does not match its key.** `BuildPreview.GetConditionText` returns Chinese *keys* (`MK2MinerTooClose` → "距离大型采矿机太近") that `LDB.strings` then maps to display text with different wording — "无法与其他大型采矿站建造在同一个位置" is `Collide`. Searching the assembly for a quoted message finds nothing, and the string table is a serialized blob inside `resources.assets` that plain grep can't read either. **Log the real `EBuildCondition` instead of reasoning from the message.**
 
+**`[HarmonyPatch(typeof(T), nameof(T.M))]` on an *overloaded* method throws at `PatchAll` time, and that takes the whole mod down — not just the patch.** `AccessTools.DeclaredMethod` ends in `Type.GetMethod(name, flags)`, which raises `AmbiguousMatchException`; it surfaces as a stack trace through `Harmony.PatchAll` / `ProjectEdenPlugin.Awake` with no hint of which attribute is at fault. `PlanetFactory.InsertInto` has two overloads (`Int32 entityId` and `UInt32 ioTargetTypedId`), **both carrying the matrix branch**, so both need patching anyway.
+
+**And do not fix it by naming the parameter types either** — this repo’s preloader widens that very chain’s `byte itemCount / itemInc / out byte remainInc` to `Int16`, so a signature written with `typeof(byte)` resolves to nothing once the widening is active, and *that* failure is silent. Use a `TargetMethods()` that selects by **name** and yields every overload: correct under both widths, and it patches both overloads without listing either signature.
+
 **`CodeMatch(OpCodes.Call, null)` matches every call.** If `AccessTools.Method` fails overload resolution it returns null, and the matcher then silently rewrites the first arbitrary call in the method. Null-check the `MethodInfo` before building the matcher.
+
+**The same null has a second way in, and it fails much later than it is made: emitting it as an *operand*.** `code[i].opcode = OpCodes.Call; code[i].operand = AccessTools.Method(...)` with a null result produces a `call null`, which survives the transpiler, survives the build, and throws `ArgumentNullException: Invalid argument for call NULL` from `ILManipulator.WriteTo` — a stack trace pointing at Harmony’s writer, nowhere near the line that was wrong. (It happened here by splitting a patch class: the helper moved to the new class while the `typeof(...)` still named the old one.) **Resolve the `MethodInfo` once, before the loop, and bail out loudly when it is null** — not transpiling is always better than emitting a null operand.
 
 **Statistics panels derive the miner's item from the vein, not the miner.** Both `UIReferenceSpeedTip.AddEntryDataWithFactory` (参考速率) and `ProductionExtraInfoCalculator.CalculateFactory` (理论产能) gate on `veinPool[miner.veins[…]].productId == queriedItem`, so once the ore→ingot remap is on, the miner vanishes from those panels — it produces 铜块 but is filed under 铜矿. `MinerProductStat_Transpiler` appends a `MapMinerProduct` call after each `ldfld VeinData::productId`; the miner's local is found by walking back to `ldfld MinerComponent::veins` and taking the instruction before it, which holds for both methods. The `PlanetFactory` argument sits at a different index in each, so it's located by scanning `original.GetParameters()` rather than hardcoded.
 
@@ -402,6 +408,23 @@ the duplication, and would not be worth it for a building that was actually dist
 
 - `StationCapacityPatches` — slot capacity/count and max charging power on prefabDesc + per-tick fix-up for existing stations. Also hosts `StationsConfig`. Charging power is a three-hop chain: `PrefabDesc.workEnergyPerTick` → `PowerConsumerComponent.workEnergyPerTick` (**saved**) → `SetPCState` scales it by `1.05 - energy/energyMax` into `requiredEnergy` → `StationComponent.energyPerTick`. Only the middle hop needs fixing at runtime, and that fix-up must be a **one-time bootstrap, not a per-tick force** — the station panel's 最大充能功率 slider (`UIStationWindow.OnMaxChargePowerSliderValueChange`) writes the very same field, so overwriting it every tick makes the slider snap back the instant you let go. The patch therefore only raises stations still sitting at the vanilla value it recorded before editing `prefabDesc`. That slider's range is derived from the prefab too: min `prefabDesc/2`, max `prefabDesc×5`, value `= 50000 × slider`.
 - `StationExpandPatches` — 30 slots. Vanilla unrolls `AddItem` and the four supply/demand queries over `storage[0..5]`, so **beyond 6 slots items vanish on delivery**; all five are replaced with full scans. Adds paging + a scrollbar to `UIStationWindow` (widgets rebound by index, layout untouched), resizes `UIEntityBriefInfo.icons` in `_OnCreate`, and grows existing stations' arrays on `GameData.Import`.
+
+  **`UIStationStorage` widgets are SHARED across every station the player opens, and vanilla only
+  ever rewrites row 0.** That combination shipped a regression: `LayoutStorageRows` (added so the
+  miner's second row would not sit on top of its first — see the drill-bit section) moved rows 1..n
+  to coordinates derived from the *miner's* row 0, and those coordinates then stayed on the widgets.
+  Open a 大型采矿机, then open any of the three logistics stations, and `OnStationIdChange` (IL 08A4)
+  rewrites `storageUIs[0]` and nothing else — so **all three station windows drew rows 1..5 in the
+  miner's layout**. Reported as 「三个物流站的 ui 不兼容了」.
+
+  This is `MultiProductUIPatches.RestoreSlot1` again, and the method's own doc comment already
+  stated the rule it broke — *whatever vanilla does not rewrite is what you must restore yourself*.
+  Only the first half had been implemented. The complete rule is: **if you write it, you own
+  restoring it, and the moment to restore is when someone else takes the widget over.** So the guard
+  is not `if (!isVeinCollector) return;` but `if (!isVeinCollector) put it back`, against home
+  positions recorded the first time the widgets are seen (safe in either order: vanilla skips
+  positioning entirely for collectors and writes only row 0 for stations, so rows 1..n still hold
+  their prefab values at that moment).
   **Showing a row vanilla never shows costs two more fixes, and both are "vanilla only writes what it
   needs".** Giving the 大型采矿机 a second storage row (the drill-bit slot) exposed them in order.
   (1) **Position.** `UIStationWindow.OnStationIdChange` IL 08A4 reads
@@ -475,6 +498,114 @@ Three things worth knowing before touching labs:
 **Labs pull from the logistics network without being stations** (`LabLogisticSupplyPatches`). Giving a lab `prefabDesc.isStation` does work — `CreateEntityLogicComponents` checks `isLab` and `isStation` in independent blocks, so one entity can carry both components — but labs *stack*, so every level would grow its own `StationComponent` and drone fleet, and `prefabDesc` only affects newly built labs. Instead a postfix on `PlanetTransport.GameTick` moves items straight from station storage into the lab buffers. Three passes (collect shortfall → take from stations → distribute) rather than scanning stations per lab, because the latter is labs × stations; containers are reused statics. Remember the two buffers differ: production `served[]` is a plain count, research `matrixServed[]` is ×3600.
 
 **It has to be bidirectional**, for the same reason the mega buildings do: supply alone leaves `produced[]` piling up to `assembleOutputStorage` and the lab stalls, so the player still needs inserters. `ShipOut` mirrors the three passes (gather `produced[]` → push into stations → deduct what was actually accepted; nothing is deducted before a station takes it). Both directions key on the slot flag the player set, symmetrically: **taking** only drains `ELogisticStorage.Supply` (draining someone's Demand slot is theft), **pushing** only fills `Demand` (the explicit "deliver this here" marker; export is then the vanilla idiom, local Demand + remote Supply). Pushing first ignored `localLogic` and matched `itemId` alone, reasoned as "it stands in for a belt, and belt insertion ignores logistics settings" — wrong, because a belt has to physically reach the station and a virtual push does not: any new station with a matrix slot filled itself instantly and began supplying the planet. Research-mode labs have no `produced[]` and are skipped. Takes also deduct `StationStore.inc` proportionally — removing count while leaving `inc` alone makes the remaining items carry the whole stack's proliferator points, i.e. **free proliferation on every transfer**, while the receiving side gets un-sprayed goods. `MegaVirtualLogisticsPatches` had this bug and no longer does: all four `count` mutations now carry a paired `inc` one, the ratio always taken against the total *before* the deduction. Its outbound third pass settles against the **debt** recorded in pass two rather than each slot's own spray rate, so what the destinations received and what the sources pay are exactly equal and the books cannot drift. (`StationStore.inc` is Int32, unlike the belt's byte-wide `Cargo.inc` — no overflow concern at station scale.)
+
+#### A seventh matrix — `src/Patches/Lab/BioMatrixPatches.cs`, `UniverseMatrixPatches.cs`, `LabSeventhSlotPatches.cs`
+
+生物矩阵 (item **6007**) is the seventh research matrix. It is **grown in the 生物温室, not
+synthesised in a lab** — so it never appears under 矩阵合成 — and it is the Universe Matrix's
+seventh ingredient. No preloader: the data layer sizes itself, and the hardcoded parts are a
+closed, enumerated list.
+
+**The item id is not a style choice.** `PlanetFactory.InsertInto` IL 03F6 computes the matrix slot
+as `itemId - 6001` and discards anything outside `[0, 6)`; `FactorySystem.GameTickLabResearchMode`
+uses the same subtraction. So matrix ids **must stay dense from 6001**, and the first version's
+6644 (`6644 - 6001 = 643`) made it silently un-insertable. `BioMatrixPatches` now refuses to extend
+the table unless `LDB.items.Select(id).Name` really is 生物矩阵 — because **LDBTool's `CustomID.cfg`
+re-pins ids by display name after registration**, and for a matrix a wrong id is not a misplaced
+icon, it is a table pointing at an id with no proto while the real proto computes slot 643.
+
+**Most of the lab is data-driven; exactly three methods unroll the six slots.** Enumerating every
+method in the assembly that touches `LabComponent.served / needs / incServed / matrixServed`, and
+classifying each access by whether its index is a literal or a loop variable, gives a closed list —
+everything else (`PlanetFactory.InsertInto` both overloads, `InternalUpdateAssemble`,
+`TakeBackItems_Lab`, `ThrowItems_Lab`, `EntityFastFillIn`, `UILabWindow._OnUpdate` /
+`OnItemButtonClick`, the statistics panels) is `ldlen`-bounded and needs nothing:
+
+| Method | Shape | Who covers it |
+|---|---|---|
+| `UpdateNeedsResearch` | `needs[0..5]` | `BioMatrixPatches` postfix |
+| `InternalUpdateResearch` | 45 literal touches | prefix caps the rate, postfix deducts |
+| `UpdateOutputToNext` | 42 literal touches (**both** `matrixServed` and produce-mode `served`) | two separate postfixes — the research one does **not** cover produce mode |
+| `SetFunction` | `needs = new int[6]`, `Array.Clear(needs, 0, 6)` | `UniverseMatrixPatches` postfix |
+| `UpdateNeedsAssemble` | `needs[0..5]`, 12 literal touches | `UniverseMatrixPatches` postfix |
+
+The last two are what a **seven-ingredient produce recipe** needs, and getting them wrong fails the
+way the 30-slot station did: `needs[]` is the only thing inserters consult, so a seventh ingredient
+with no `needs` slot is **never requested and never errors** — the lab just waits forever for
+something nothing will deliver. Prefix/postfix throughout; the only transpiler is the one constant
+in `InsertInto`, anchored on the unique `ldc.i4 6001 ; sub`.
+
+**Save compatibility is vanilla's own.** `LabComponent.Import` IL 03A5–03D2 resizes `served` /
+`incServed` to `recipeExecuteData.requires.Length` and copies what fits, so an old six-ingredient
+lab self-heals. It does **not** do the same for `needs`, so our postfixes check that length
+themselves before using it.
+
+**Modify the vanilla recipe during `PostAddDataAction`.** `RecipeProto.InitRecipeItems` rebuilds the
+whole `recipeExecuteData` dictionary (IL 0000 `newobj`, 0005 `stsfld`) and LDBTool calls it *after*
+`PostAddDataAction` — so editing `Items` / `ItemCounts` there is picked up for free, with no refresh
+of our own. The recipe is found by scanning for a product of 6006, never by a hardcoded id.
+
+**The lab window's ring is measured, then re-applied per mode.** Vanilla's six cells are a regular
+pentagon of radius 100 centred on cell 5 at (0, −9.5), at `90° − 72°k`. A sixth ring cell does not
+fit as an insertion (36° spacing → 61.8 px between centres against 96 px widgets, i.e. overlap); as
+a hexagon it does (60° → 100 px, a 4 px gap). `LabSeventhSlotPatches` therefore measures the ring
+once (centre, radius, clockwise order — nothing hardcoded) and re-lays it out whenever the count
+changes: **5 ring cells → pentagon, exactly reproducing vanilla; 6 → hexagon.** It deliberately does
+**not** follow unlock state, which vanilla uses to hide un-researched matrices — that gap is vanilla
+behaviour and not ours to "fix".
+
+Three things that cost time here, each an existing rule re-earned:
+
+- **`_OnInit` runs at UI construction, `_OnUpdate` only while the window is open.** A log with the
+  `_OnInit` lines and none of the `_OnUpdate` ones means the window was never opened, not that the
+  code is broken — two independent probes on `_OnUpdate` both being silent is what settles it.
+  `_OnRegEvent` runs after `_OnInit` (IL 001A then 0036) and its wiring loop is `ldlen`-bounded, so
+  extending the arrays in an `_OnInit` postfix gets the seventh button wired **by vanilla** — wiring
+  it again would double-subscribe.
+- **Clone only the roots.** A slot owns eight widgets that nest in each other; cloning each one
+  separately yields two copies, and the one you write to is not the one drawn on top
+  (`MultiProductUIPatches`' "slot 3 shows slot 2's icon with slot 3's count"). Compute which of the
+  eight is contained by no other, clone those, resolve the rest by relative path out of the clones.
+  And `Instantiate(obj, parent)` defaults to `worldPositionStays = true`, which rewrites
+  `anchoredPosition` — use the three-argument overload with `false`.
+- **Roll back rather than half-extend.** If any widget fails to resolve, destroy the clones and stay
+  at six: an array of length 7 with a null `itemButtons[6]` makes vanilla's own `_OnRegEvent` throw,
+  and a null `itemIcons[6]` throws every frame in `_OnUpdate`. Both are far harder to diagnose than
+  "there is no seventh cell".
+
+**The decorative ring lines are a second, independent table.** Under the ring's parent sits a
+`lines` node holding two groups of five: spokes (2 × 9.6, radius 50, aligned with the cells) and
+dashes (28 × 2, radius 80.7 ≈ `100·cos36°`, on the edge midpoints), both satisfying
+`rotation = angle − 90`. They are re-spaced from measured originals — `phase = ((angle − 90) / step)
+mod 1`, `radius' = radius · cos(step'·phase) / cos(step·phase)` — and each group gets one spare
+clone, hidden at five. **Take the phase as a circular mean over the group, not from one member**:
+the first spoke sits at (0, 50) whose `Atan2` returns 89.99999, so a single sample fed through
+`Mathf.Repeat(x, 1)` wraps a phase of 0 to ≈1 and the radius comes out 80.9 instead of 50. The
+hidden spoke group is re-spaced too — it is hidden in one mode, not in all of them.
+
+**The 3-D animation is one array element, because of a coincidence this mod created.**
+`GameTickLabResearchMode` (IL 0111–0181) folds a tech's matrices into an index —
+`state |= 1 << slot` for slots 0–4, and `slot == 5` short-circuits to **32** — then writes
+`techShaderStates[state] + 0.2f` into `AnimData.working_length`. The table's values are **five
+digits, each naming which matrix that animation position shows**: index 31 (all five basic) is
+`23514`, index 32 is `66666`. Since index 32 means "this tech needs a Universe Matrix", and the
+Universe Matrix recipe now contains 生物矩阵, entry 32 is exactly the techs that consume it — so
+`techShaderStates[32] = 67676` is the whole change, with no transpiler on a per-frame method. The
+code verifies that premise (either the techs list it directly, or the recipe contains it) and
+refuses to touch the animation otherwise.
+
+**Whether the shader accepts digit 7 cannot be answered offline** — the vanilla table never contains
+a 7 and the shader is a compiled asset, the same wall as the vein recolour. So the default pattern
+keeps three `6`s (failure degrades to two wrong positions, never a blank ring), the whole thing sits
+behind `lab.json`'s `bioMatrixShaderDigit` (0 restores vanilla, no rebuild), and it logs in every
+state.
+
+**Whether techs require it directly is `lab.json`'s `bioMatrixInTechs`, default false.** The
+Universe Matrix recipe already contains it, so appending it to the 32 techs as well is a double
+requirement; the owner cut that. The three places that depend on the answer — the research-mode
+`needs` slot, whether the seventh cell is drawn in research mode, and which premise the animation
+rests on — all read `UsedByTechs`, **counted back out of `LDB.techs`** rather than inferred from the
+switch, so flipping the switch moves all three with no second decision written anywhere.
 
 ### Power coverage — `src/Patches/Power/PowerCoveragePatches.cs`
 
@@ -883,13 +1014,13 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
-The nineteen configs: `megabuildings.json` (tab, build category 12, the six buildings with their pinned model IDs 708 and 723–727, station block), `advancedminer.json` (miner/pump limits + the ore→ingot product map), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed + the lab↔station virtual feed), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch).
+The nineteen configs: `megabuildings.json` (tab, build category 12, the six buildings with their pinned model IDs 708 and 723–727, station block), `advancedminer.json` (miner/pump limits + the ore→ingot product map), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
 **LDBTool re-binds proto IDs from its own config, after your code sets them.** `LDBTool.PreAddProto` → `Bind` → `IdBind` / `GridIndexBind` records every mod proto's ID and GridIndex in `BepInEx/config/LDBTool/LDBTool.CustomID.cfg` and `LDBTool.CustomGridIndex.cfg`, **keyed by the proto's display name**, and on every later launch it writes those stored values *back onto the proto*. So changing an ID in this repo's JSON has **no effect** on a proto that has already been registered once — the first ID a proto is ever given is sticky until that cfg entry is deleted. Cobalt sat on 电磁矩阵's 6001 through three config edits because of this. When an ID looks ignored, check that cfg before anything else, and delete the entry (both files) to let the new value take. `OreRegistry.VerifyIds` now checks the post-registration reality and names the file.
 
-**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001), and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631 and 6636–6639 (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635 and 6640–6643. Model IDs 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室) and 12 is 锻造 (锤锻精工厂), leaving **13–14**.
+**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631 and 6636–6639 (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635 and 6640–6644. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室) and 12 is 锻造 (锤锻精工厂), leaving **13–14**.
 
 **PowerShell scripts for IL inspection must be pure ASCII.** Windows PowerShell reads `.ps1` as ANSI, so a heredoc-written script containing Chinese characters gets mangled into parser errors that look nothing like an encoding problem (`unexpected token 'case'`, `missing string terminator`).
 

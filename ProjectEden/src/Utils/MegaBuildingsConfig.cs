@@ -120,6 +120,28 @@ namespace ProjectEden.Utils
 
         /// <summary>合成器横向翻页的总页数，每页 14 列。1 = 维持原版、不加滚动条</summary>
         public int replicatorPages;
+
+        /// <summary>
+        /// 把本 mod 默认落在<b>第 1 页</b>的物品与配方，整体搬到本 mod 自己的分页上。
+        ///
+        /// <b>为什么要搬。</b> 原版物品第 1 页实测 111/112 格已占，
+        /// 所以本 mod 的物品只能往第 14 列之外溢出——而画物品格的四个窗口都硬裁
+        /// <c>col &gt;= 14</c>，落到扩展列就等于这件物品<b>在掉落过滤和信号窗口里不存在</b>，
+        /// 在物品选取窗口里也得靠横向翻页或搜索才捞得回来。配方那边同理。
+        ///
+        /// <b>为什么第 3 页是安全的。</b> 页号就是标签页号，搬到一个不存在的标签
+        /// 等于让东西彻底消失。本 mod 已经通过 CommonAPI 的 TabSystem 注册了自己的分页
+        /// （<see cref="ProjectEden.MegaBuildingRegistry.TabIndex"/>，注释里就写着「它同时就是
+        /// GridIndex 的页号」），而 CommonAPI 的 <c>TabSystem.SetHooks</c> 同时挂了
+        /// <c>UIReplicatorPatch</c>、<c>UIRecipePickerPatch</c> 和 <b><c>UIItemPickerPatch</c></b>
+        /// ——三个窗口都会多出这一页，所以物品和配方都够得到。
+        ///
+        /// <b>只搬第 1 页。</b> 建筑类物品本来就落在第 2 页（建筑标签），
+        /// 那是它们该待的地方，实测也没有溢出到第 14 列之外，不动它。
+        ///
+        /// 关掉就退回原来的行为（第 1 页 + 扩展列 + 横向翻页）。
+        /// </summary>
+        public bool ownTabForModProtos;
     }
 
     [Serializable]

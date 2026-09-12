@@ -741,10 +741,6 @@ namespace ProjectEden
                 if (owner != null) owner.Recipes.Add(reg);
                 else StandaloneRecipes.Add(reg);
 
-                if (owner == null && string.IsNullOrEmpty(entry.icon) && entry.iconFrom <= 0)
-                    ProjectEdenPlugin.Log.LogWarning(
-                        $"配方「{entry.name}」不属于任何矿种，又没配 icon / iconFrom，合成面板上那一格会是空白");
-
                 ProjectEdenPlugin.Log.LogInfo(
                     $"配方「{entry.name}」已注册：ID {reg.RecipeId}，{MachineName(entry.type)}，" +
                     $"{Describe(items, itemCounts)} → {Describe(results, resultCounts)}，{entry.timeSpend / 60f:0.##} 秒");
@@ -922,19 +918,23 @@ namespace ProjectEden
 
             ExtendGasThemes();
 
-            if (Ores.Count == 0) return;
-
-            DumpThemes();
-
-            foreach (Ore ore in Ores)
+            if (Ores.Count > 0)
             {
-                VerifyIds(ore);
-                AddVeinProto(ore);
-                ExtendThemes(ore);
-                TintIcons(ore);
+                DumpThemes();
+
+                foreach (Ore ore in Ores)
+                {
+                    VerifyIds(ore);
+                    AddVeinProto(ore);
+                    ExtendThemes(ore);
+                    TintIcons(ore);
+                }
+
+                VerifyVeinArrayOrder();
             }
 
-            VerifyVeinArrayOrder();
+            // 放最后：它要抄的产物图标由上面两趟染色生成，早跑一步就只能抄到没改色的那张
+            SyncStandaloneRecipeIcons();
         }
 
         /// <summary>
@@ -1565,6 +1565,60 @@ namespace ProjectEden
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"{e.oreName}的图标已由铁的对应图标改色生成（色相 {e.iconHue:0}°，饱和度 ×{e.iconSaturationScale:0.##}，明度 ×{e.iconValueScale:0.##}）");
+        }
+
+        /// <summary>
+        /// 顶层配方（不属于任何矿种的那些）没自己配图标时，跟着它的<b>产物</b>走。
+        ///
+        /// <b>矿种自带的配方早有这条规则</b>——「配方图标默认跟着锭走」，见 <see cref="TintIcons"/>。
+        /// 顶层配方此前没人管：它要么自配 <c>icon</c>，要么配 <c>iconFrom</c>，
+        /// 而后者取的是<b>没改色的原版图标</b>，并且染色那一趟明确跳过它。
+        /// 于是第一个「走纯改色路径、又有自己顶层配方」的物品就会暴露出来：
+        /// 物品是改色后的样子，合成面板里那一格却是原版原色，**两边对不上**。
+        /// 生物矩阵是第一个撞上这件事的。
+        ///
+        /// <b>这一趟必须放在所有染色之后</b>：产物可能是额外物品、矿石或锭，
+        /// 三者的图标分别由 <see cref="TintExtraIcon"/> 与 <see cref="TintIcons"/> 生成，
+        /// 早跑一步就只会抄到还没改色的那张。
+        ///
+        /// <b>警告改成检查末态，而不是在注册时预测。</b> 原先注册时就断言
+        /// 「没配 icon / iconFrom ⇒ 这格会是空白」，而这个方法恰恰把那一格填上了——
+        /// 于是生物矩阵每次启动都收到一条说它坏了的警告，它其实好的。
+        /// 这和 CLAUDE.md 里流体白名单那次是同一个形状：**别去预测结果，去核对结果**，
+        /// 否则自己把洞补上之后，报警的还是自己。
+        /// </summary>
+        private static void SyncStandaloneRecipeIcons()
+        {
+            foreach (Recipe reg in StandaloneRecipes)
+            {
+                RecipeProto proto = LDB.recipes.Select(reg.RecipeId);
+
+                if (proto == null) continue;
+
+                OreRecipeEntry e = reg.Entry;
+
+                // 自配 icon 的走 IconPath + Preload；配了 iconFrom 的是显式指定，尊重它。两者都已有图。
+                if (string.IsNullOrEmpty(e.icon) && e.iconFrom <= 0
+                                                 && proto.Results != null && proto.Results.Length > 0)
+                {
+                    ItemProto product = LDB.items.Select(proto.Results[0]);
+                    Sprite icon = product?._iconSprite;
+
+                    if (icon != null)
+                    {
+                        proto._iconSprite = icon;
+
+                        ProjectEdenPlugin.Log.LogInfo(
+                            $"配方「{proto.Name}」的图标跟随产物「{product.name}」");
+                    }
+                }
+
+                // 末态核对：到这一步还没图的，合成面板上那一格就真的是空白
+                if (proto._iconSprite == null)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        $"配方「{proto.Name}」到最后也没有图标，合成面板上那一格会是空白——"
+                        + "给它配个 icon / iconFrom，或者让它的产物有图标");
+            }
         }
 
         /// <summary>额外物品的图标：由它自己配的那个原版物品的图标改色而来。</summary>
