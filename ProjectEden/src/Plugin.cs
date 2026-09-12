@@ -164,6 +164,7 @@ namespace ProjectEden
 
             // 漏译核对也排在最后：要等所有 proto 都进了 LDB 才数得清
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
+            LDBTool.PostAddDataAction += ProtoArrayCheck.Verify;
 
             Logger.LogInfo($"{NAME} v{VERSION} 已加载");
         }
@@ -192,6 +193,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= ProliferatorSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= MinerStationSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= I18N.VerifyCoverage;
+            LDBTool.PostAddDataAction -= ProtoArrayCheck.Verify;
 
             _harmony?.UnpatchSelf();
             Logger.LogInfo($"{NAME} 已卸载");

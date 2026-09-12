@@ -644,6 +644,55 @@
       "iconSaturationScale": 1.0,
       "iconMinSaturation": 0.0,
       "iconValueScale": 1.0
+    },
+    {
+      "//": "高纯碳化硅。**物理气相传输法（PVT，又称改良 Lely 法）**：SiC 粉在 2200–2500 °C 低压惰性气氛中升华，在温度略低的籽晶上重新凝结成晶锭。Lely 1955 年做出第一批，Tairov 与 Tsvetkov 1978 年加了籽晶，成为今天工业上唯一量产的路线。",
+      "//not-balanced": "**这条不是配平的化学方程式**，SiC 进 SiC 出。4:1 代表的是提纯 + 晶锭生长 + 切割损耗——PVT 的粉料利用率本就不高，而从晶锭切晶圆的锯缝损耗在碳化硅上尤其大，它太硬。按仓库规矩不假装它有化学计量，和钒渣油那条一样写明。",
+      "//nitrogen": "**氮是掺杂剂，不是反应物。** 氮取代碳位是 SiC 标准的 n 型掺杂，也正是它能做导电衬底的原因；真实浓度在 1e18–1e19 cm^-3 量级，是痕量。配方只能填整数，所以「×2」是游戏量子不是配比。",
+      "key": "silicon-carbide-wafer",
+      "enabled": true,
+      "name": "高纯碳化硅",
+      "description": "掺氮的单晶碳化硅晶圆，透着琥珀绿。矿石里的碳化硅是绝缘的，籽晶升华长出来、掺进氮之后它才导电——这一步买到的就是这件事。禁带宽度是硅的三倍，击穿场强是硅的十倍。",
+      "itemId": 6636,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "冶炼厂",
+      "isFluid": false,
+      "icon": "sic-wafer",
+      "//iconFrom": "**iconFrom 的名字有误导性：它是 proto 的克隆模板，不只是图标来源。** OreRegistry 第 304 行 `ItemProto source = LDB.items.Select(entry.iconFrom)`，拿不到就**整条物品跳过**；模板还负责提供 DescFields 等数组字段——那正是 DrillBitRegistry 手工 new proto 时漏掉 DescFields、一悬停就 NRE 的同一件事，只是从另一头看。本条自带 icon，所以 TintExtraIcon 会直接返回，1108 只当模板用。",
+      "iconFrom": 1108
+    },
+    {
+      "//": "氮化铝。直接氮化：2 Al + N2 -> 2 AlN，**配平的**。Al 0 -> +3、N 0 -> -3，是氧化还原，所以走氧化还原化工厂。",
+      "//why": "功率模块的衬底要同时做到两件互相矛盾的事：导热（把芯片的热带走）与绝缘（顶住几百上千伏）。氮化铝热导率 170–230 W/(m·K) 却是绝缘体，正是干这个的标准材料，和覆铜（DBC）一起构成模块基板。**它不是凑数辅料，是被 SiC 自己逼出来的**——SiC 的功率密度比硅高得多，衬底的散热能力也就更吃紧。",
+      "key": "aluminium-nitride",
+      "enabled": true,
+      "name": "氮化铝",
+      "description": "白色陶瓷基板，两面覆铜。导热接近金属却完全绝缘——这对矛盾的性质是功率模块衬底的唯一要求，也是氮化铝在这个位置上无可替代的原因。",
+      "itemId": 6637,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "氧化还原化工厂",
+      "isFluid": false,
+      "icon": "aluminium-nitride",
+      "//iconFrom": "**iconFrom 的名字有误导性：它是 proto 的克隆模板，不只是图标来源。** OreRegistry 第 304 行 `ItemProto source = LDB.items.Select(entry.iconFrom)`，拿不到就**整条物品跳过**；模板还负责提供 DescFields 等数组字段——那正是 DrillBitRegistry 手工 new proto 时漏掉 DescFields、一悬停就 NRE 的同一件事，只是从另一头看。本条自带 icon，所以 TintExtraIcon 会直接返回，1108 只当模板用。",
+      "iconFrom": 1108
+    },
+    {
+      "//": "碳化硅功率模块。真实的模块是一摞三明治：SiC 芯片 / 烧结银或焊料 / 覆铜的氮化铝陶瓷基板（DBC）/ 底板，再灌封。所以配方是晶圆 + 基板 + 铜，机器是装配而不是化学反应。",
+      "//copper": "铜的量最大——DBC 两面都覆铜，而且模块里的铜既是导流也是热容。",
+      "key": "sic-power-module",
+      "enabled": true,
+      "name": "碳化硅功率模块",
+      "description": "黑色环氧灌封的方砖，两侧伸出铜排。碳化硅开关管的导通电阻与开关损耗都远低于硅，同样的散热条件下能搬动多得多的功率——电动车主驱、光伏并网、轨道牵引，用的都是它。",
+      "itemId": 6638,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "制造台",
+      "isFluid": false,
+      "icon": "sic-power-module",
+      "//iconFrom": "**iconFrom 的名字有误导性：它是 proto 的克隆模板，不只是图标来源。** OreRegistry 第 304 行 `ItemProto source = LDB.items.Select(entry.iconFrom)`，拿不到就**整条物品跳过**；模板还负责提供 DescFields 等数组字段——那正是 DrillBitRegistry 手工 new proto 时漏掉 DescFields、一悬停就 NRE 的同一件事，只是从另一头看。本条自带 icon，所以 TintExtraIcon 会直接返回，1108 只当模板用。",
+      "iconFrom": 1108
     }
   ],
   "ores": [
@@ -675,7 +724,7 @@
       ],
       "veinRarity": 4.0,
       "veinAmountScale": 1.0,
-      "//placement": "**全表最稀有的一种**，母星系不刷。主题选没有水和风化作用的干旱/灰烬世界——陨石物质在那种地方才留得住。钨的 chance 是 0.09、钒是 0.06，这条给 0.02：和钨一样没有合成后路，但钨是「找不到就整条硬质合金线不存在」，这条只是「后期少一样东西」，所以底噪可以更薄。",
+      "//placement": "**母星系不刷**（RareSettings[i*4+0] = 0）。主题选没有水和风化作用的干旱/灰烬世界——陨石物质在那种地方才留得住。**chance 的演变：0.02 → 0.06 → 0.12，每一步都是被数据逃的。** 0.02 是拍的；0.06 是按估算抬的；0.12 是 RareVeinSurvey 数出来的：它的三个主题在一个星区里只有 **18 颗**候选行星，而钒有 37 颗、钨 33 颗——同样的 0.06，钒期望 2.2 颗而它只有 1.1 颗。**稀有度不能只看概率，要看期望（概率 × 候选行星数）**，而候选行星数取决于主题表和本局种子，离线算不出来。0.12 有锚：原版最稀有的稀有矿是光栅石 0.1（熔岩/戈壁/冰原冻土），金伯利 0.18，所以 0.12 落在原版最稀有那一档里。它真正的稀有标志不是概率，是**全星区只有 18 颗行星能承载它，而且母星系一颗不给**。",
       "placement": {
         "mode": "rare",
         "themes": [
@@ -684,7 +733,7 @@
           "黑石盐滩"
         ],
         "birthSystem": false,
-        "chance": 0.02,
+        "chance": 0.12,
         "extraChance": 0.2,
         "richness": 0.6
       },
@@ -2482,12 +2531,12 @@
       ]
     },
     {
-      "//": "C\u2085\u2087H\u2081\u2080\u2084O\u2086 + 3 CH\u2083OH \u2192 3 C\u2081\u2089H\u2083\u2086O\u2082 + C\u2083H\u2088O\u2083。以三油酸甘油酯计的酯交换，**配平的**，这里按 \u00d72 取整。甘油三酯的三条脂肪酸链被甲醇逐条换下来，得到三份脂肪酸甲酯（生物柴油）和一份甘油。",
+      "//": "C₅₇H₁₀₄O₆ + 3 CH₃OH → 3 C₁₉H₃₆O₂ + C₃H₈O₃。以三油酸甘油酯计的酯交换，**配平的**，这里按 ×2 取整。甘油三酯的三条脂肪酸链被甲醇逐条换下来，得到三份脂肪酸甲酯（生物柴油）和一份甘油。",
       "//machine": "**走原版化工厂（type 2），因为它不是氧化还原。** 酯交换是酯基的取代反应，碳的氧化态自始至终没变——和 MTO 脱水留在化工厂是同一个判据。真要把藻油变成烷烃得走加氢脱氧（HDO），那才是还原，该归氧化还原化工厂；这里选酯交换，机器与反应类别自洽。",
-      "//glycerol": "副产物甘油（C\u2083H\u2088O\u2083）游戏里没有对应物品，**略去不产**。不拿水或别的东西顶替——那是编一个假方程式。想补的话它是一条独立的新物品，不在这条配方的范围里。",
+      "//glycerol": "副产物甘油（C₃H₈O₃）游戏里没有对应物品，**略去不产**。不拿水或别的东西顶替——那是编一个假方程式。想补的话它是一条独立的新物品，不在这条配方的范围里。",
       "//energy": "以原版精炼油 4.5 MJ 计（这个数是启动时读出来的，不是凭记忆）：投入 2 藻油（8.4 MJ）+ 6 甲醇（30 MJ）= 38.4 MJ，产出 6 精炼油 = 27.0 MJ。**净亏**，不存在靠这条配方白赚能量的路子。",
       "enabled": true,
-      "name": "精炼油 \u00b7 酯交换",
+      "name": "精炼油 · 酯交换",
       "description": "藻油与甲醇在碱催化下互换酯基，三条脂肪酸链逐条被甲醇换下来，得到脂肪酸甲酯——也就是生物柴油。副产的甘油留在釜底。这条路子让整条藻类产线接上了原有的石化下游。",
       "recipeId": 6604,
       "type": 2,
@@ -2597,6 +2646,92 @@
         {
           "id": 1125,
           "count": 2
+        }
+      ]
+    },
+    {
+      "//": "籽晶升华生长。比例的含义见物品条目的 //not-balanced：不是化学计量，是提纯+生长+切割损耗。",
+      "//machine": "冶炼厂（type 1）。它是升华—再结晶，不是化学反应，走高温炉。",
+      "enabled": true,
+      "name": "高纯碳化硅 · 籽晶升华",
+      "description": "莫桑石粉在两千多度下升华，在温度略低的籽晶上重新长成单晶。通入的氮取代碳位，把本征绝缘的碳化硅变成导电衬底。",
+      "recipeId": 6640,
+      "type": 1,
+      "timeSpend": 240,
+      "gridIndex": 1601,
+      "icon": "sic-wafer",
+      "items": [
+        {
+          "ref": "moissanite.ore",
+          "count": 4
+        },
+        {
+          "ref": "nitrogen",
+          "count": 2
+        }
+      ],
+      "results": [
+        {
+          "ref": "silicon-carbide-wafer",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "//": "2 Al + N2 -> 2 AlN，配平。氧化还原化工厂（type 10）：Al 0 -> +3、N 0 -> -3。",
+      "enabled": true,
+      "name": "氮化铝 · 直接氮化",
+      "description": "铝粉在氮气氛中直接氮化。产物导热接近金属而电阻极高，是功率模块基板的标准材料。",
+      "recipeId": 6641,
+      "type": 10,
+      "timeSpend": 120,
+      "gridIndex": 1601,
+      "icon": "aluminium-nitride",
+      "items": [
+        {
+          "ref": "aluminum.ingot",
+          "count": 2
+        },
+        {
+          "ref": "nitrogen",
+          "count": 1
+        }
+      ],
+      "results": [
+        {
+          "ref": "aluminium-nitride",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "//": "芯片贴装与封装。制造台（type 4）：是把零件叠起来，不是化学反应。",
+      "enabled": true,
+      "name": "碳化硅功率模块 · 贴装封装",
+      "description": "碳化硅芯片烧结在覆铜的氮化铝基板上，接出铜排，灌封成砖。",
+      "recipeId": 6642,
+      "type": 4,
+      "timeSpend": 180,
+      "gridIndex": 1601,
+      "icon": "sic-power-module",
+      "items": [
+        {
+          "ref": "silicon-carbide-wafer",
+          "count": 2
+        },
+        {
+          "ref": "aluminium-nitride",
+          "count": 4
+        },
+        {
+          "id": 1104,
+          "count": 8
+        }
+      ],
+      "results": [
+        {
+          "ref": "sic-power-module",
+          "count": 1
         }
       ]
     }

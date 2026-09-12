@@ -305,8 +305,16 @@ namespace ProjectEden
 
                 if (source == null)
                 {
+                    // <b>消息里要写清楚它是模板而不只是图标</b>——
+                    // 字段名叫 iconFrom，很容易让人以为「我自带 icon 就不用填」，
+                    // 而它其实是 proto 的克隆模板：下面 MakeItem 从 source 抄
+                    // DescFields 等数组字段，拿不到就整条物品跳过，
+                    // 之后所有引用它的 ref 全部解析失败。碳化硅那三条就是这么塌的。
                     ProjectEdenPlugin.Log.LogError(
-                        $"物品「{entry.name}」的图标来源 {entry.iconFrom} 在原版里不存在，跳过");
+                        $"物品「{entry.name}」没有可用的 proto 模板：iconFrom = {entry.iconFrom}，"
+                        + "在原版里找不到。整条物品跳过，所有引用它的配方也会跟着失败。\n"
+                        + "  **iconFrom 不只是图标来源，它是克隆模板**（要靠它抄 DescFields 等数组字段），"
+                        + "所以即使自带了 icon 也必须填一个真实存在的原版物品号");
 
                     continue;
                 }
@@ -1334,7 +1342,8 @@ namespace ProjectEden
         /// [i*4+2] 出现之后，每再追加一个矿脉位的概率（最多连滚 11 次）
         /// [i*4+3] 储量 / 浓度系数
         /// </code>
-        /// 所以「母星系不要有」是<b>原版就支持的数据位</b>，把 [i*4+1] 填 0 即可，不用打补丁。
+        /// 所以「母星系不要有」是<b>原版就支持的数据位</b>，把 <b>[i*4+0]</b> 填 0 即可，不用打补丁。
+        /// <b>注意是 [+0] 不是 [+1]</b>——本类头一版记反了，见下面写入处的注释。
         ///
         /// 概率还会按行星自身的稀有度指数做幂次修正（<c>1 - pow(1 - chance, 指数)</c>），
         /// 所以这里填的是基准值，实际出现率随星球浮动。
@@ -1372,8 +1381,17 @@ namespace ProjectEden
 
                 float chance = place.chance > 0f ? place.chance : 0.1f;
 
-                settings[slot * 4 + 0] = chance;
-                settings[slot * 4 + 1] = place.birthSystem ? chance : 0f;
+                // <b>这两个的顺序和直觉相反，别凭印象写。</b>
+                // GenerateVeins IL 03F6：ldfld StarData::index ; brfalse.s IL_0417
+                //   —— index == 0（母星系）跳到 0417，取 RareSettings[i*4 + 0]
+                //   —— 落空（index != 0，母星系之外）取 RareSettings[i*4 + 1]
+                // 所以 **[+0] 是母星系那一档，[+1] 是母星系之外那一档**。
+                // 头一版按「[+0] 是常规、[+1] 是母星系特例」写，正好反了：
+                // birthSystem: false 于是把「母星系之外」写成了 0，
+                // 四种自定义稀有矿因此**只在母星系刷**，出了母星系一颗都没有。
+                // 症状是玩家开新档跑遍外面报「没找到」，而注册、主题、矿脉表全对。
+                settings[slot * 4 + 0] = place.birthSystem ? chance : 0f;
+                settings[slot * 4 + 1] = chance;
                 settings[slot * 4 + 2] = place.extraChance;
                 settings[slot * 4 + 3] = place.richness > 0f ? place.richness : 0.5f;
 
@@ -1439,9 +1457,31 @@ namespace ProjectEden
 
                 bool iron = theme.VeinSpot != null && theme.VeinSpot.Length > ironIndex && theme.VeinSpot[ironIndex] > 0;
                 int rare = theme.RareVeins?.Length ?? 0;
-                string rareList = rare > 0
-                    ? "（矿种 " + string.Join(",", Array.ConvertAll(theme.RareVeins, x => x.ToString())) + "）"
-                    : "";
+                // 把每个稀有槽的四元组一并打出来。
+                // 本方法跑在 ExtendRareSlots 之前，所以这里的全是**原版值**——
+                // 它们是「[+0] 到底是母星系还是母星系之外」的直接证据：
+                // 原版的稀有矿（可燃冰、分形硅石、刺笋结晶…）母星系都不刷，
+                // 所以它们的母星系那一档应当是 0。哪一个是 0，哪个就是母星系档。
+                var rareList = "";
+
+                if (rare > 0)
+                {
+                    var rb = new System.Text.StringBuilder("（");
+                    float[] rs = theme.RareSettings;
+
+                    for (var r = 0; r < rare; r++)
+                    {
+                        if (r > 0) rb.Append("、");
+
+                        rb.Append("矿种 ").Append(theme.RareVeins[r]);
+
+                        if (rs != null && r * 4 + 3 < rs.Length)
+                            rb.Append($" [{rs[r * 4 + 0]:0.###}/{rs[r * 4 + 1]:0.###}"
+                                      + $"/{rs[r * 4 + 2]:0.###}/{rs[r * 4 + 3]:0.###}]");
+                    }
+
+                    rareList = rb.Append("）").ToString();
+                }
 
                 ProjectEdenPlugin.Log.LogInfo(
                     $"  [{theme.ID,3}] {theme.displayName ?? theme.DisplayName,-14} 类型 {theme.PlanetType,-7} " +

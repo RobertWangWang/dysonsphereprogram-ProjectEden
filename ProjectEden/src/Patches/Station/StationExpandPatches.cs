@@ -165,8 +165,23 @@ namespace ProjectEden.Patches
         private static bool _syncingScrollbar;
 
         /// <summary>
-        /// 原版 RefreshTrans 每帧按「全部格数 × 行高」算窗口高度，30 格会撑到屏幕外。
-        /// 从算好的高度里扣掉放不下的行数，原版随集装科技变化的那套基础计算就都保留了。
+        /// 按「我们实际画几行」和「原版以为要画几行」的<b>差值</b>修正窗口高度。
+        ///
+        /// 原版 <c>RefreshTrans</c> 每帧自己算一遍高度，用的行数是（IL 00B2–00D4）：
+        ///
+        /// <code>
+        /// slots = (isCollector || isVeinCollector) ? collectionIds.Length : storage.Length;
+        /// windowTrans.sizeDelta = new Vector2(x, 100 + 76 * slots + 36);
+        /// </code>
+        ///
+        /// <b>两个方向都要修，而这一版之前只修了一个方向。</b>
+        /// 30 格物流站是「原版以为 30 行、我们只画 5 行」，高度会撑到屏幕外，要缩；
+        /// 大型采矿机是<b>反过来</b>——原版按 <c>collectionIds.Length</c> 算，那是 1，
+        /// 而我们要画矿石加钻头两行，得<b>长</b>一行，否则第二行溢出窗口。
+        /// 旧代码写的是 <c>if (count &lt;= visible) return;</c>，采矿机走的正是这条 return。
+        ///
+        /// 差值写法把两种情况统一了，而且对气体采集器恒等于 0（我们和原版数出来的行数一样），
+        /// 所以不会去碰一个本来就正确的布局。行高 76 是原版自己的常数，见上面那段 IL。
         /// </summary>
         [HarmonyPostfix]
         [HarmonyPatch(typeof(UIStationWindow), "RefreshTrans")]
@@ -174,14 +189,75 @@ namespace ProjectEden.Patches
         {
             if (station == null) return;
 
-            int count = StorageCount(station);
+            int shown = StorageCount(station);
             int visible = VisibleRows(__instance);
 
-            if (count <= visible) return;
+            // 控件就这么多，再多的格子靠翻页，所以实际画出来的行数封顶在控件数
+            if (shown > visible) shown = visible;
+
+            int assumed = VanillaRowCount(station);
+            int delta = shown - assumed;
+
+            if (delta == 0) return;
+
+            // 多画行时再多留一点空隙。见下面 PanelClearance 的推导
+            float grow = RowHeight * delta + (delta > 0 ? PanelClearance : 0f);
 
             Vector2 size = __instance.windowTrans.sizeDelta;
 
-            __instance.windowTrans.sizeDelta = new Vector2(size.x, size.y - RowHeight * (count - visible));
+            __instance.windowTrans.sizeDelta = new Vector2(size.x, size.y + grow);
+
+        }
+
+
+        /// <summary>
+        /// 多画储物格行时，窗口在「一行的高度」之外再多留的空隙。
+        ///
+        /// <b>为什么不需要去移动窗口下半块——这块布局改错了三次，结论和三次的方向都相反。</b>
+        /// 实测（<c>UIStationWindow</c> 的真实 rect，不是从截图估的）：
+        ///
+        /// <code>
+        /// 窗口     sizeDelta=(600, 456)              世界上下沿 54.4 / 49.9
+        /// 最后一行 anchored=(40, -266) 高 70          世界上下沿 51.8 / 51.1
+        /// 下半块   anchored=(0, 80)   高 150          世界上下沿 52.2 / 50.7
+        ///          pivot=(0.5, 0)  anchorMin=(0,0)  anchorMax=(1,0)
+        /// </code>
+        ///
+        /// 三件事一目了然，而且每一件都推翻了之前的一次改动：
+        ///
+        /// <list type="number">
+        /// <item><b>下半块贴的是窗口底边</b>（<c>anchorMin/Max.y = 0</c>，<c>pivot.y = 0</c>），
+        /// 而储物格贴的是顶边。<b>窗口一长高，两者自动分开</b>——
+        /// 手动推它是多余的，三次改动修的是一个不该修的东西。</item>
+        /// <item><b>它的矩形顶边不是可见内容的顶边。</b> 反推原版单行布局：
+        /// 窗口 380 时第 0 行底边在底上方 120，而下半块矩形顶边在 230 ——
+        /// <b>矩形上面约 110 单位是空白</b>。所以「量矩形重叠」必然多算 110，
+        /// 那正是第三版把整块推出窗口的原因（110 + 间隙 &gt; 80，y 变负，掉到窗口外面）。</item>
+        /// <item>窗口长高一行（456）之后，最后一行底边在底上方 121.6，
+        /// 而下半块可见内容顶边 ≈ <c>y + 150 − 110 = 120</c>。
+        /// <b>120 对 121.6，本来就是贴着的</b>——原版那套锚点自己就把事情办对了。</item>
+        /// </list>
+        ///
+        /// 既然只差一点点，就把那一点点加在窗口高度上，而不是去动别人的位置：
+        /// 多长 16 个单位，可见内容和最后一行之间就有约 16 的空隙。
+        /// <b>这个数是从上面那组实测反推出来的，不是试出来的。</b>
+        ///
+        /// 过程上值得记一笔：这块布局试错三次，每一次都是从截图估数——
+        /// 而截图既分不清「矩形边」和「可见内容边」，也读不出画布缩放，
+        /// 那两样恰恰是三次全错的原因。<b>该在第二次就去打日志。</b>
+        /// </summary>
+        private const float PanelClearance = 16f;
+
+        /// <summary>
+        /// 原版 <c>RefreshTrans</c> 自己数出来的行数，逐字照抄它的判据（IL 00B2–00D4），
+        /// 好让差值真的是差值。<b>别改成 <see cref="StorageCount"/></b>——
+        /// 那个是「我们要画几行」，这个是「原版以为要画几行」，两者不同正是要修的原因。
+        /// </summary>
+        private static int VanillaRowCount(StationComponent station)
+        {
+            if (station.isCollector || station.isVeinCollector) return station.collectionIds?.Length ?? 0;
+
+            return station.storage?.Length ?? 0;
         }
 
         /// <summary>
@@ -244,7 +320,62 @@ namespace ProjectEden.Patches
                 }
             }
 
+            LayoutVeinCollectorRows(station, uis, count);
+
             SyncScrollbar(maxPage);
+        }
+
+        /// <summary>
+        /// 矿脉采集器的储物格行要自己摆位置，因为<b>原版在这条分支里不摆</b>。
+        ///
+        /// <c>UIStationWindow.OnStationIdChange</c> IL 08A4：
+        ///
+        /// <code>
+        /// if (!station.isVeinCollector) {
+        ///     storageUIs[0].rectTransform.anchoredPosition = new Vector2(40f, -90f);
+        ///     veinCollectorPanel._Close();
+        /// }
+        /// </code>
+        ///
+        /// 采集器只画一行，位置无所谓，所以原版直接跳过了这段。
+        /// 等本 mod 把钻头槽那一行也画出来，第二行就停在 prefab 的老位置上，
+        /// 和第一行叠在一起——**看起来像渲染故障，其实是没人负责摆它**。
+        /// 这和 <see cref="MultiProductUIPatches"/> 记的是同一条：
+        /// <b>原版<u>不</u>重写的那部分，才是需要自己复位的部分</b>，
+        /// 而这要靠读原版路径里的<b>写入</b>、不是读取，才看得出来。
+        ///
+        /// <b>行高 76 不是量出来的，是原版自己的常数。</b> 同一个方法 IL 08FF
+        /// 在算采集器窗口高度时就是 <c>76 * 槽数 + 136</c>，
+        /// <see cref="RowHeight"/> 用的就是这个数。
+        ///
+        /// 只对采集器做。普通物流站那条分支原版摆得好好的，碰它只会引入回归。
+        /// </summary>
+        private static void LayoutVeinCollectorRows(StationComponent station, UIStationStorage[] uis, int count)
+        {
+            // <b>只管矿脉采集器。</b> 气体采集器走的是上面那个 !isVeinCollector 分支，
+            // 原版会给它摆位置，而且它在原版里本来就会显示多行（气态巨星有好几种气体）——
+            // 也就是说那条路径的行距是经过验证的，碰它只会引入回归。
+            if (!station.isVeinCollector) return;
+            if (uis.Length < 2 || uis[0] == null) return;
+
+            var first = uis[0].transform as RectTransform;
+
+            if (first == null) return;
+
+            Vector2 origin = first.anchoredPosition;
+
+            for (var i = 1; i < uis.Length; i++)
+            {
+                if (uis[i] == null) continue;
+
+                var trs = uis[i].transform as RectTransform;
+
+                if (trs == null) continue;
+
+                var want = new Vector2(origin.x, origin.y - RowHeight * i);
+
+                if (trs.anchoredPosition != want) trs.anchoredPosition = want;
+            }
         }
 
         /// <summary>
@@ -377,12 +508,43 @@ namespace ProjectEden.Patches
             return uis == null || uis.Length == 0 ? VanillaSlots : uis.Length;
         }
 
+        /// <summary>
+        /// 窗口要画几行储物格。
+        ///
+        /// <b>采集器不按 <c>storage.Length</c> 走</b>，因为 <c>StationComponent.Init</c>
+        /// 的采集分支只铺到 <c>collectionIds.Length</c>，后面的格子是<b>没初始化过的</b>
+        /// （<c>max</c> 为 0，装不下东西）。按数组长度画就会给气体采集器凭空多出一堆死格子，
+        /// 顺带把 30 格物流站那套翻页界面拖到它身上来——那是 GasCollectorPatches 记着的老教训。
+        ///
+        /// <b>但「采集种类数」也不对，它正是钻头槽画不出来的原因。</b>
+        /// 大型采矿机的 <c>collectionIds.Length</c> 是 1，于是无论
+        /// <see cref="AlienVeinPatches"/> 把第 1 格布置成什么样，这里都只报 1 行，
+        /// 窗口永远只有矿石那一行。玩家看到的就是「格子加了，界面上没有」。
+        ///
+        /// 所以判据改成<b>这一格能不能用</b>：采集种类数之后的格子，
+        /// 只有被人为给过容量的才算。这条对原版采集器是恒等的——
+        /// 没有任何东西会写它们多余格子的 <c>max</c>
+        /// （<c>StationCapacityPatches</c> 只认 stations.json 的 itemIds 加巨型建筑，
+        /// 采矿机和气体采集器都不在里面），所以它们仍然只画采集种类数那么多行。
+        /// </summary>
         private static int StorageCount(StationComponent station)
         {
-            // 采集器类的格数取决于可采集物种类，不按 prefabDesc 走
-            if (station.isCollector || station.isVeinCollector) return station.collectionIds?.Length ?? 0;
+            StationStore[] storage = station.storage;
 
-            return station.storage?.Length ?? 0;
+            if (!station.isCollector && !station.isVeinCollector) return storage?.Length ?? 0;
+
+            int collect = station.collectionIds?.Length ?? 0;
+
+            if (storage == null) return collect;
+            if (collect > storage.Length) collect = storage.Length;
+
+            // 从后往前找最后一个「有容量」的格子，中间的空格一并画出来，
+            // 否则行号和 storage 下标会对不上
+            for (int i = storage.Length - 1; i >= collect; i--)
+                if (storage[i].max > 0)
+                    return i + 1;
+
+            return collect;
         }
 
         // ── 四、存档兼容 ────────────────────────────────────────

@@ -242,7 +242,7 @@ namespace ProjectEden.Patches
         [HarmonyPrefix]
         [HarmonyPatch(typeof(MinerComponent), nameof(MinerComponent.InternalUpdate))]
         private static void MinerComponent_InternalUpdate_Prefix(ref MinerComponent __instance, PlanetFactory factory,
-            ref float miningRate, ref float miningSpeed)
+            float power, ref float miningRate, ref float miningSpeed)
         {
             if (!IsBoosted(ref __instance, factory)) return;
 
@@ -298,7 +298,7 @@ namespace ProjectEden.Patches
 
             // 外星矿脉的钻头消耗：排在最后，因为它要用限幅完毕的 miningSpeed
             // 算这一 tick 到底挖出多少件；而且它只对那一种矿脉生效
-            AlienVeinPatches.Tick(ref __instance, factory, ref miningSpeed, perTick);
+            AlienVeinPatches.Tick(ref __instance, factory, power, ref miningSpeed, perTick);
         }
 
         // ── 一次性日志 ────────────────────────────────────────

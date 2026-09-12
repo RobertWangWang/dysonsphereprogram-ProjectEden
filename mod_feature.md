@@ -39,6 +39,8 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XX. Living Composite: hyphae growing metal into a solid](#xx-living-composite-hyphae-growing-metal-into-a-solid)
 - [XXI. Combustible Liquid Power Plant: what you burn decides how much you get out](#xxi-combustible-liquid-power-plant-what-you-burn-decides-how-much-you-get-out)
 - [XXII. Living Proliferators: two tiers above vanilla, each in two characters](#xxii-living-proliferators-two-tiers-above-vanilla-each-in-two-characters)
+- [XXIII. Alien Veins: mining them consumes drill bits](#xxiii-alien-veins-mining-them-consumes-drill-bits)
+- [XXIV. Silicon Carbide: what moissanite is for, and it buys throughput](#xxiv-silicon-carbide-what-moissanite-is-for-and-it-buys-throughput)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -2212,6 +2214,205 @@ belt stacking 5000  →  level 6 at most
 **Belt stacking and proliferator level are two charges against the same budget.** Getting to
 level 10 would mean dropping stacking below 3276, which is plainly a bad trade. The startup log
 computes the ceiling for your current config and spells out the derivation.
+
+---
+
+## XXIII. Alien Veins: mining them consumes drill bits
+
+**A vein found only outside your home system, harder than the drill bit itself — mining it consumes bits.**
+"Interstellar", "extremely rare" and "eats drill bits" are not three design decisions; they are three
+properties of one real mineral. The full derivation, with twenty citations, is in `外星矿脉V1.md`
+at the repo root.
+
+| | |
+|---|---|
+| Vein | Moissanite Vein (type 23), yields **Moissanite**; it is not smelted into a metal |
+| Where | **None at all in the home system**; Barren Desert / Ashen Gelisol / Halite Flats, 12% per planet |
+| How | Advanced Mining Machine, **storage slot 1 holds drill bits** |
+| One bit | mines **47,970** ore |
+| Bits made in | the **Forgeworks Fabricator** (this mod's `ERecipeType` 12, Forging) |
+
+### What it solves
+
+This mod's Advanced Mining Machine already runs at 200,000/s **with no running cost at all**. The obvious
+way to add one is to make all mining consume bits — but that is a nerf to existing saves.
+
+**So instead: leave every existing ore alone and add one new vein that is the only thing consuming bits.**
+The new vein appears only on planets **not yet generated**, so no existing factory loses a single machine,
+and no config switch is needed. And because nothing that was already running can stop, **halting outright
+when bits run out** is an acceptable failure mode rather than something needing a slowdown compromise.
+
+### Why moissanite — all three reasons are real
+
+- **It really does come from other stars.** Silicon carbide in meteorites is a **presolar grain**, condensed
+  in the stellar winds of stars that died before the Sun; ~90% comes from low-mass carbon stars. So "you
+  cannot find it at home" is mineralogy, not balance.
+- **It really is extremely rare.** It barely exists naturally on Earth; when Moissan first found it in a
+  meteorite crater in 1893 he took it for diamond.
+- **It really is harder than the bit.** Mohs ~9.5, Vickers ~2800 HV — **above tungsten carbide's ~2600**.
+  Mining it is not "wears a bit faster"; the tool is softer than the rock.
+
+### The drill bit: one item, four recipes
+
+Qualifying materials are not listed, they are **selected by a predicate**: enough hardness (floor = ore
+hardness − 12) and non-zero toughness. Run that over the four-axis table and however many materials
+qualify is however many recipes you get.
+
+| Material | Hardness | Toughness | Ore per bit from it | **Input → 1 bit** |
+|---|---|---|---|---|
+| Diamond | 100 | 5 | 47,970 | **×1** |
+| Moissanite | 96 | 8 | 34,131 | ×2 |
+| Tungsten Carbide | 95 | 10 | 32,065 | ×2 |
+| Cemented Carbide | 90 | 11 | 10,006 | **×5** |
+
+**The bit itself is uniform** — the four-axis difference moved to *how much material one costs*:
+`inputs = ceil(capacity / that material's yield)`, where `capacity` is the best material's yield. So the
+best material costing exactly 1 is **computed, not decreed**.
+
+Two things worth saying:
+
+- **Toughness is the axis that earns its place.** Diamond cleaves rather than deforming and has very low
+  toughness; without that term diamond would run away with it and tungsten carbide and cemented carbide
+  would be dead content instantly. With it the spread closes to under 5× and the lower tiers stay in use —
+  because they are far cheaper. **The real decision on this chain is ore-per-bit versus cost-per-bit.**
+- **Moissanite makes a good bit itself.** That falls out of the predicate rather than being a special case —
+  silicon carbide is an abrasive in the first place. It is **not bootstrapping**: the entry-tier cemented
+  carbide needs no moissanite, so the option only opens once you already have some.
+
+### Why the Forgeworks Fabricator
+
+A drill rod is an open-die chromium-steel forging — forging refines the grain, which is what lets it take
+impact loading — and the carbide teeth on the crown are sintered, not assembled. **The machine follows the
+process class**, the same test that keeps MTO dehydration on the vanilla Chemical Plant.
+
+Worth noting: the **Forgeworks Fabricator used to be the same thing as the Heavenworks Assembler** — both
+on vanilla Assemble type 4, with word-for-word identical descriptions, which by this repo's own dominance
+test is duplicated content. This chain gave it a type of its own, and only then did it become a real forge.
+The cost is that it no longer takes vanilla assembly recipes — and the Heavenworks Assembler picks up every
+one of those.
+
+### That slot on the miner
+
+The Advanced Mining Machine goes from 1 storage slot to 2, and **slot 1 is laid out by the mod as a Demand
+slot for drill bits**, stocking 3000 (about 12 minutes at full speed). If the logistics network has bits
+they are delivered automatically; nothing to configure.
+
+> **Only newly built miners.** `storage` is baked into the save at build time. This costs nothing here —
+> moissanite veins only appear on planets not yet generated, so every miner you build on one is new.
+
+**Three states mine nothing and therefore charge nothing**, each using vanilla's own test:
+
+| State | Vanilla's test |
+|---|---|
+| No power | `power < 0.1` (first line of `InternalUpdate`) |
+| Station slot full | `storage[0].localSupplyCount >= max` (first line of `UpdateVeinCollection`) |
+| Internal buffer full | `productCount >= capacity` |
+
+No ore out, no bit spent — both stop together. **Stopping only the charge would mean plugging the output
+lets you mine a whole buffer for free.**
+
+### Cannot find it? The log tells you where
+
+It really is rare, so the mod works out the distribution at the start of every game:
+
+```
+Moissanite Vein: 18 candidate planets outside the home system / 0 inside, chance 0.12 -> ~2.2 expected
+```
+
+Turn on `prospectRareVeins` in `alienvein.json` and it will additionally **borrow the game's own star-map
+scan** to sweep every candidate planet and name them outright:
+
+```
+Moissanite Vein: 3 planets
+    Blue Pole Star - Blue Pole Star III (4 veins, 1,284,000 reserves)
+```
+
+Turn it back off once you have found one, to skip those dozens of background scans.
+
+---
+
+## XXIV. Silicon Carbide: what moissanite is for, and it buys throughput
+
+What is moissanite for? **Power semiconductors.** The product is a
+**Silicon Carbide Power Exchanger** — it stores not one joule more; what you replaced is the
+converter, not the battery. The full derivation is in `碳化硅下游V1.md` at the repo root.
+
+| | |
+|---|---|
+| Chain | Moissanite → High-Purity SiC → (+ Aluminium Nitride) → SiC Power Module → SiC Power Exchanger |
+| Throughput | **30×** the vanilla exchanger (the lithium one is 6×) |
+| Serves | **the same Lithium Accumulators**, the identical pair the lithium exchanger uses |
+
+### It is not a tier above the lithium set
+
+This is the pivot of the whole chain, and the reason it deserves to exist:
+
+| | Buys | Basis |
+|---|---|---|
+| Lithium Accumulator | **how much you store** (capacity ×6, charge ×10) | electrochemistry: lithium cobalt oxide cathode, graphite anode |
+| SiC Power Exchanger | **how fast you move it** (throughput ×30) | power electronics: silicon carbide switches |
+
+**Silicon carbide stores nothing in the real world; it is a converter device** — SiC MOSFETs go in
+inverters, and there is not one grain of it inside a battery. So the two answer **two different
+bottlenecks**:
+
+- Not enough storage → add Lithium Accumulators
+- Storage is fine but you cannot get power in or out fast enough → add a SiC Power Exchanger
+
+**Your lithium batteries are not obsoleted.** The new exchanger serves that same accumulator pair,
+so upgrading **swaps the converter, not the battery** — exactly how a real SiC retrofit works.
+
+> **This is also why there is no "silicon carbide accumulator".** That would write a converter device
+> up as a storage medium, the same class of error as putting a recipe on the wrong machine.
+
+### Three steps, every one a real process
+
+| Step | Recipe | Machine |
+|---|---|---|
+| High-Purity SiC | Moissanite ×4 + Nitrogen ×2 → ×1 | Smelter |
+| Aluminium Nitride | Aluminium Ingot ×2 + Nitrogen ×1 → ×2 | Redox Chemical Plant |
+| SiC Power Module | High-Purity SiC ×2 + Aluminium Nitride ×4 + Copper Ingot ×8 → ×1 | Assembler |
+
+- **High-purity SiC** uses **physical vapour transport**: silicon carbide powder sublimes at over two
+  thousand degrees and regrows as a single crystal on a slightly cooler seed. Lely made the first
+  batch in 1955; Tairov and Tsvetkov added the seed in 1978, and that is still the only route in
+  volume production today. The **nitrogen is a dopant**: it substitutes onto carbon sites and turns
+  intrinsically insulating silicon carbide into a conducting substrate — conductivity is precisely
+  what this step buys.
+- **Aluminium nitride** is the one balanced step: `2 Al + N₂ → 2 AlN`. It has to do two contradictory
+  things at once — **conduct heat** (carry the die’s heat away) and **insulate** (hold off high
+  voltage). AlN conducts heat almost like a metal while insulating completely, which is why it is the
+  standard power-module substrate. **It is not filler; silicon carbide forces it**: SiC’s power
+  density is far above silicon’s, so the substrate’s ability to shed heat becomes the tight
+  constraint.
+- **The power module** packages that sandwich: dies sintered onto copper-clad AlN, busbars brought
+  out, the whole thing potted into a brick.
+
+> **Nitrogen finds its second use here.** It was added as a collectable gas giant gas for the
+> Haber process (ammonia); doping is an entirely separate use — and both are real.
+
+### The conductivity axis finally leads
+
+| Item | Hardness | Toughness | Corrosion | Conductivity |
+|---|---|---|---|---|
+| Moissanite (ore) | 96 | 8 | 92 | **18** |
+| High-Purity SiC | 96 | 8 | 92 | **42** |
+| Aluminium Nitride | 60 | 10 | 88 | **2** |
+| SiC Power Module | 35 | 30 | 70 | **96** |
+
+Conductivity is largely a spectator among the alloys; on this chain it tells the whole story:
+**18 (insulating mineral) → 42 (nitrogen-doped substrate) → 96 (power device)**. Aluminium nitride’s
+2 is the counter-example — **the same chain needs an insulator**, and that is real too.
+
+### One recipe you will not see
+
+High-purity SiC has **exactly the same four axes as moissanite ore** (both are silicon carbide), so
+the drill bit predicate would have accepted it too, adding a "High-Purity SiC → Drill Bit" recipe.
+That one is **excluded on purpose**: a wafer costs 4 moissanite, so making bits straight from the ore
+is cheaper, and the recipe would be dead content the moment it appeared in the replicator.
+
+**The predicate cannot answer this** — it asks "is this hard enough", while the question here is
+"would anyone actually use it". The first is computable; the second is a judgement.
 
 ---
 

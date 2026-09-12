@@ -245,25 +245,81 @@
       "//": "散生相，填料锰钢（50/80/15/10）。韧性 88 > 填料的 80——基体贡献的那一维，也是复合材存在的理由。耐蚀 68 接近基体：金属被有机物包住、彼此不连通，一处生锈传不到别处。导电 4：孤岛之间没有路。",
       "ref": "living-composite-1",
       "name": "活性复合材 I",
-      "values": { "hardness": 15, "toughness": 88, "corrosion": 68, "conductivity": 4 }
+      "values": {
+        "hardness": 15,
+        "toughness": 88,
+        "corrosion": 68,
+        "conductivity": 4
+      }
     },
     {
       "//": "渗流相，填料镀铬铜（25/60/75/80）。硬度只比 I 高 7 点而导电从 4 跳到 38——**电学渗流先于力学渗流**：导电只需要一条贯穿路径，刚度需要承载连通性。导电 38 远低于填料的 80，因为填了金属的聚合物相对聚合物跳几个数量级，但永远赶不上金属本身。",
       "ref": "living-composite-2",
       "name": "活性复合材 II",
-      "values": { "hardness": 22, "toughness": 76, "corrosion": 72, "conductivity": 38 }
+      "values": {
+        "hardness": 22,
+        "toughness": 76,
+        "corrosion": 72,
+        "conductivity": 38
+      }
     },
     {
       "//": "贯通相，填料钴铬合金（65/55/95/15）。硬度 55 ≤ 填料 65，导电 12 ≤ 填料 15，韧性 62 > 填料 55，三条约束都满足。耐蚀 85 是四级最高，铬的功劳。",
       "ref": "living-composite-3",
       "name": "活性复合材 III",
-      "values": { "hardness": 55, "toughness": 62, "corrosion": 85, "conductivity": 12 }
+      "values": {
+        "hardness": 55,
+        "toughness": 62,
+        "corrosion": 85,
+        "conductivity": 12
+      }
     },
     {
       "//": "刚化相，填料硬质合金（90/11/82/14）。硬度 82 ≤ 90、导电 13 ≤ 14、韧性 18 > 11。韧性塌到 18 是刚化的代价：网络三角化之后再没有耗散能量的机制。",
       "ref": "living-composite-4",
       "name": "活性复合材 IV",
-      "values": { "hardness": 82, "toughness": 18, "corrosion": 80, "conductivity": 13 }
+      "values": {
+        "hardness": 82,
+        "toughness": 18,
+        "corrosion": 80,
+        "conductivity": 13
+      }
+    },
+    {
+      "//": "高纯碳化硅。和莫桑石同为 SiC，硬度/韧性/耐蚀照抄矿石那一行。",
+      "//axes": "导电从 18 抬到 42：掺氮之后它是导电型衬底，这正是提纯这一步买到的东西。**导电这一列在这条链上第一次当主角**——18（矿石）→ 42（衬底）→ 96（器件）。",
+      "ref": "silicon-carbide-wafer",
+      "name": "高纯碳化硅",
+      "values": {
+        "hardness": 96,
+        "toughness": 8,
+        "corrosion": 92,
+        "conductivity": 42
+      }
+    },
+    {
+      "//": "氮化铝。陶瓷，不是金属，但和碳化钨、莫桑石一样用同一套轴——要参与谓词与混合律就得有这一行。",
+      "//axes": "硬度 60：莫氏约 7。韧性 10：陶瓷。耐蚀 88：化学稳定。**导电 2：它是绝缘体**——同一条链上需要一个绝缘体，这是真的，不是为了凑低值。",
+      "ref": "aluminium-nitride",
+      "name": "氮化铝",
+      "values": {
+        "hardness": 60,
+        "toughness": 10,
+        "corrosion": 88,
+        "conductivity": 2
+      }
+    },
+    {
+      "//": "碳化硅功率模块。封装件，硬度韧性取封装外壳而不是里面的芯片。",
+      "//axes": "导电 96 给满：它就是拿来导电的。这一行让「导电」那一轴在本 mod 里第一次有了顶端。",
+      "ref": "sic-power-module",
+      "name": "碳化硅功率模块",
+      "values": {
+        "hardness": 35,
+        "toughness": 30,
+        "corrosion": 70,
+        "conductivity": 96
+      }
     }
   ]
 }

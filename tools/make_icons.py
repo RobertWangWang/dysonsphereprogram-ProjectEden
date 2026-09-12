@@ -1537,6 +1537,150 @@ def tab_mega():
     return d
 
 
+
+def sic_wafer():
+    """高纯碳化硅：一片带定位边的晶圆。
+
+    <b>颜色是真的。</b> 掺氮的 n 型 4H-SiC 晶圆本身就是**透绿到琥珀绿**的——
+    半绝缘的那种才接近黑灰。这一族的卖点正是「掺了氮所以导电」，
+    所以颜色直接把那件事画出来，而不是随便挑一个好看的。
+
+    <b>形制上要和活性复合材那族分开。</b> 那族也是圆片（抛光截面），
+    区别靠两样：这里有**定位边**（晶圆那条直边，真实存在，用来标晶向），
+    以及一道很硬的镜面高光——晶圆是抛光到原子级的，复合材截面不是。
+    """
+    d = canvas()
+
+    body = "#4e7a35"        # 掺氮 4H-SiC：透绿
+    body_hi = "#87b95f"
+    body_lo = "#2f4d20"
+    edge = "#1b2c13"
+    sheen = "#d8f2b8"
+
+    # 晶圆主体：一个带定位边的圆。定位边切在左下
+    d.append(dw.Path(fill=body, stroke=edge, stroke_width=2.6, stroke_linejoin="round")
+             .M(-36, 6).A(38, 38, 0, 1, 1, -14, 34).L(-36, 6).Z())
+
+    # 上缘受光
+    d.append(dw.Path(fill=body_hi, fill_opacity=0.55)
+             .M(-30, -14).A(34, 34, 0, 0, 1, 26, -22).L(18, -8)
+             .A(24, 24, 0, 0, 0, -22, -2).Z())
+
+    # 下缘暗部
+    d.append(dw.Path(fill=body_lo, fill_opacity=0.5)
+             .M(-13, 31).A(34, 34, 0, 0, 0, 31, 12).L(19, 8)
+             .A(22, 22, 0, 0, 1, -9, 20).Z())
+
+    # 镜面高光：一道斜扫，抛光晶圆的标志
+    d.append(dw.Lines(-20, -26, -6, -30, 22, 14, 8, 18,
+                      close=True, fill=sheen, fill_opacity=0.5))
+    d.append(dw.Lines(2, -30, 9, -31, 31, 2, 24, 4,
+                      close=True, fill=sheen, fill_opacity=0.32))
+
+    # 定位边加一道亮线，免得在小尺寸下看不出那是条直边
+    d.append(dw.Lines(-36, 6, -14, 34, stroke=sheen, stroke_width=2.2,
+                      stroke_opacity=0.75, fill="none"))
+
+    return d
+
+
+def aluminium_nitride():
+    """氮化铝：一块覆铜的陶瓷基板。
+
+    <b>画的是它在功率模块里的真实样子</b>——DBC（直接覆铜）基板：
+    白色氮化铝陶瓷片，上下两面各覆一层铜箔，铜面还蚀刻出线路岛。
+    单画一块白瓷片会和任何「白色方块」撞脸，而覆铜这一层既是真的，
+    又一眼说明它是干什么用的。
+
+    白瓷色在本 mod 的调色板里没人占——矿石金属都有色相，
+    这块是唯一的近白色，所以在物品栏里很好认。
+    """
+    d = canvas()
+
+    ceramic = "#e6e2d8"     # 氮化铝陶瓷：近白微暖
+    ceramic_hi = "#ffffff"
+    ceramic_lo = "#b3aea1"
+    edge = "#4a473f"
+    copper = "#c8763a"
+    copper_hi = "#efa869"
+    copper_lo = "#8a4c22"
+
+    # 陶瓷片主体：一块略带透视的薄板
+    d.append(dw.Lines(-38, -12, 0, -30, 38, -12, 0, 6,
+                      close=True, fill=ceramic, stroke=edge,
+                      stroke_width=2.4, stroke_linejoin="round"))
+    # 厚度：前侧面
+    d.append(dw.Lines(-38, -12, 0, 6, 0, 18, -38, 0,
+                      close=True, fill=ceramic_lo, stroke=edge,
+                      stroke_width=2.4, stroke_linejoin="round"))
+    d.append(dw.Lines(38, -12, 0, 6, 0, 18, 38, 0,
+                      close=True, fill=ceramic_lo, stroke=edge,
+                      stroke_width=2.4, stroke_linejoin="round"))
+    d.append(dw.Lines(-38, -12, 0, -30, 0, -24, -38, -6,
+                      close=True, fill=ceramic_hi, fill_opacity=0.7))
+
+    # 覆铜层：顶面上蚀刻出的两块线路岛
+    d.append(dw.Lines(-22, -12, -4, -20, 8, -14, -10, -6,
+                      close=True, fill=copper, stroke=copper_lo, stroke_width=1.6))
+    d.append(dw.Lines(-2, -19, 12, -26, 26, -19, 12, -12,
+                      close=True, fill=copper, stroke=copper_lo, stroke_width=1.6))
+    d.append(dw.Lines(-22, -12, -4, -20, -1, -18.5, -19, -10.5,
+                      close=True, fill=copper_hi, fill_opacity=0.6))
+
+    return d
+
+
+def sic_power_module():
+    """碳化硅功率模块：黑封装 ＋ 铜排。
+
+    <b>真实的功率模块就长这样</b>：黑色环氧灌封的方砖，
+    两侧伸出铜排端子（直流母排与交流输出），顶面有安装螺孔。
+    画成「器件」而不是「一块料」是刻意的——这一族的定位是成品器件，
+    和矿石、锭块、陶瓷片都要一眼分开。
+
+    黑配铜在本 mod 里也没人占（钒渣油是深色但带油光，不是这种哑光黑塑）。
+    """
+    d = canvas()
+
+    case = "#2b2f36"        # 环氧封装：哑光黑
+    case_hi = "#4a515c"
+    case_lo = "#16191e"
+    edge = "#0c0e12"
+    copper = "#c8763a"
+    copper_hi = "#efa869"
+    copper_lo = "#7d4520"
+    mark = "#6f7a88"
+
+    # 铜排：先画，让封装压在上面
+    for x in (-40, 18):
+        d.append(dw.Lines(x, -8, x + 22, -8, x + 22, 6, x, 6,
+                          close=True, fill=copper, stroke=copper_lo,
+                          stroke_width=2.0, stroke_linejoin="round"))
+        d.append(dw.Lines(x, -8, x + 22, -8, x + 22, -4, x, -4,
+                          close=True, fill=copper_hi, fill_opacity=0.65))
+
+    # 封装本体
+    d.append(dw.Lines(-26, -22, 26, -22, 26, 18, -26, 18,
+                      close=True, fill=case, stroke=edge,
+                      stroke_width=2.6, stroke_linejoin="round"))
+    d.append(dw.Lines(-26, -22, 26, -22, 26, -15, -26, -15,
+                      close=True, fill=case_hi, fill_opacity=0.5))
+    d.append(dw.Lines(-26, 11, 26, 11, 26, 18, -26, 18,
+                      close=True, fill=case_lo, fill_opacity=0.6))
+
+    # 安装螺孔：两个角
+    for cx in (-19, 19):
+        d.append(dw.Circle(cx, -16, 3.2, fill=case_lo, stroke=mark, stroke_width=1.4))
+
+    # 顶面丝印：三条，像功率模块外壳上的型号标
+    for i, w in enumerate((18, 24, 12)):
+        d.append(dw.Lines(-w / 2, 0 + i * 6, w / 2, 0 + i * 6,
+                          stroke=mark, stroke_width=2.0,
+                          stroke_opacity=0.55, fill="none"))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -1609,3 +1753,8 @@ if __name__ == "__main__":
     # 外星矿脉
     render(moissanite_ore(), "moissanite-ore")
     render(drill_bit(), "drill-bit")
+
+    # 碳化硅下游：晶圆 → 基板 → 功率模块
+    render(sic_wafer(), "sic-wafer")
+    render(aluminium_nitride(), "aluminium-nitride")
+    render(sic_power_module(), "sic-power-module")

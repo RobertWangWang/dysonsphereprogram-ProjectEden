@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: six 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, and six rule-bypass cheat switches that are off by default. ~23,800 lines of C# in 77 files — 74 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: six 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), and six rule-bypass cheat switches that are off by default. ~28,600 lines of C# in 95 files — 92 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). Not a git repository. **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
-**GenesisBook** (`ProjectGenesis`, ~16k lines — clone it next to this repo) is the reference implementation. Most non-trivial mechanisms here were ported from it — when something doesn't work, check how it solved the same problem before inventing an approach. **Its code is used under permission from its author; none of its art is.** Every one of the 41 PNGs in `assets/icons/` is now generated by `tools/make_icons.py`, including the five mega-building icons and the build-menu tab icon, which were the last ones of uncertain provenance — so the repo ships no third-party art at all. The building icons deliberately mirror the procedural meshes in `src/Model/`, so the icon and the thing standing on the ground are the same shape.
+**GenesisBook** (`ProjectGenesis`, ~16k lines — clone it next to this repo) is the reference implementation. Most non-trivial mechanisms here were ported from it — when something doesn't work, check how it solved the same problem before inventing an approach. **Its code is used under permission from its author; none of its art is.** Every one of the 60 PNGs in `assets/icons/` is now generated by `tools/make_icons.py`, including the five mega-building icons and the build-menu tab icon, which were the last ones of uncertain provenance — so the repo ships no third-party art at all. The building icons deliberately mirror the procedural meshes in `src/Model/`, so the icon and the thing standing on the ground are the same shape.
 
 ## Content rule: new items and recipes must be derived from real chemistry and physics
 
@@ -267,10 +267,178 @@ The postfix also recomputes the bool result — whose "not a failure" exemption 
 
 **Chains like this need a state dump, not a hypothesis.** Five stages (station slots → buffer → delivery list → pairing → courier) all present the same symptom: the couriers sit still. Several rounds were wasted reasoning from startup logs, which say nothing because the player has not configured the building yet, and from one-shot warnings that were true only when they fired. `courierDebugLog` prints all five stages on one line every 10 s; turn it on before forming a theory.
 
+#### Alien veins and drill bits — `AlienVeinPatches` + `DrillBitRegistry`
+
+One vein type (莫桑石, type 23) consumes a **drill bit** per N ore mined. Only that type, so
+existing saves are untouched and "no bit → the miner simply stops" is an acceptable failure mode.
+Three findings are worth keeping; the first two are about the same station slot.
+
+**An array slot that exists is not a slot that works.** Raising the miner's
+`prefabDesc.stationMaxItemKinds` from 1 to 2 does make `StationComponent.Init` allocate
+`storage[2]` — and that is all it does. Both fill loops run only to `collectionIds.Length`
+(a vein collector has one ore), so **slot 1 is never written and keeps its default `max` of 0**:
+zero capacity, nothing can go in it, and the station window shows a dead cell. The measured log
+line is the whole story, and it reads as success until you look at the last number:
+
+```
+storage 长度 2，collectionIds 长度 1，isVeinCollector=True
+  储物格 0：铁矿(1001) 本地 Supply 远程 None 数量 546666/10005000
+  储物格 1：（空） 本地 None 远程 None 数量 0/0
+```
+
+`EnsureBitSlot` therefore fills the slot in itself — capacity, item id, `localLogic = Demand` —
+from the tick path, the standard trap-1 runtime fix-up. **It runs only for miners standing on the
+alien vein**, so a miner on any other vein correctly has no bit slot; the first-miner survey prints
+which vein it is standing on, because "why has this machine no bit slot" is almost always answered
+there and cannot be read off a screenshot. **It must call
+`RefreshStationTraffic()` when it changes something**, or the demand table never learns the slot
+wants anything; and only when it changes something, since that walks every station on the planet.
+
+**There were two independent gates with the identical symptom, and fixing the first changed
+nothing visible.** After `EnsureBitSlot` was in and the data verified correct, the window still
+showed one row — because **our own** `StationExpandPatches.StorageCount` returns
+`collectionIds.Length` for a collector, and a miner collects one ore. The row was discarded a
+layer above the slot. That line was right when written (it is the 气体采集器 lesson: do not draw a
+collector's uninitialised spare slots, or the 30-slot paging UI lands on it) and stopped being
+right the moment our miner deliberately owned a slot past `collectionIds`. The test is now
+**"is this slot usable"** — scan back from the end for `max > 0` — which is provably identical for
+vanilla collectors, since `TargetProtoIds` is `{2103, 2104}` plus mega buildings and `kind:
+station` machines, so nothing ever writes `max` on a miner's or gas collector's spare slots.
+
+**The general shape: when a fix that the data says is correct produces no visible change, look for
+a second gate rather than re-checking the first.** Both gates here answer "how many slots does this
+station have", one from `StationComponent.Init` and one from our own window patch, and neither
+errors when it disagrees with the other. It is also worth noting the second gate was *ours* — a
+rule this repo added for one building silently constrained another one added later.
+
+**Consumption must be derived from vanilla’s own production expression, term for term.** The bit
+cost was computed as `miningSpeed * perTick / period`, where `perTick` is `speed × veinCount`.
+Vanilla’s actual per-tick production (IL 0032–0056) is
+`time += (int)(power × speedDamper × speed × miningSpeed × veinCount)`, and it does not run at all
+when `power < 0.1f` (IL 0000) or when the buffer is full (`productCount >= GetCapacity(...)`, the
+transpiled 50-gates). Three terms were missing, each silently over-charging: a full buffer burned
+bits while mining nothing (**what the player reported**), an unpowered miner did the same, and a
+browned-out one paid double. None of it errors — a hook that runs *before* vanilla decides whether
+to act must reproduce that decision, not the nominal rate. Both gates copy vanilla’s own threshold
+rather than inventing one, so the two cannot diverge at the boundary.
+
+**And "the buffer is full" is the wrong gate once you have raised the buffer.** The first fix used
+`productCount >= GetCapacity(...)` — vanilla’s own back-pressure, and correct there, because
+vanilla’s buffer is 50 and fills instantly. This mod sets it to **10,000,000**, which at 240k/min
+takes ~42 minutes to fill, so that gate essentially never fires and the player still saw
+「矿满了，钻头照烧」. What actually decides whether the ore has anywhere to go is
+`StationComponent.UpdateVeinCollection`’s own first line (IL 001D–0035):
+`if (storage[0].localSupplyCount >= storage[0].max) return;` — a full station slot accepts nothing
+and the ore just piles into the miner. **Raising a vanilla limit silently disables every piece of
+logic that used it as a signal**, and the replacement signal has to come from whatever still
+reflects reality. It stops mining (`miningSpeed = 0`) rather than only stopping the charge: charging
+nothing while still producing would turn a display complaint into an ore exploit.
+
+The power check sits deliberately **after** `EnsureBitSlot`: putting it first means an unpowered
+new miner never gets its Demand slot laid out, and "no power" then looks exactly like "needs no
+drill bit" in the panel.
+
+**A local Demand slot asks the network for `max`, so capacity is a starvation lever, not a
+comfort setting.** The obvious implementation copies `storage[0].max` — which
+`StationCapacityPatches` has already raised to **10,005,000**. That would have the first miner
+built demand ten million drill bits and starve every later one, presenting as
+「我别的采矿机全停了」— a symptom pointing nowhere near the cause. `bitSlotCapacity`
+is its own config value (default 3000 ≈ 12 min at full speed), clamped against slot 0 as a floor-guard.
+
+**"Extremely rare" and "statistically absent" look identical in the config, and this one shipped.**
+`placement.chance` is the per-qualifying-planet probability, but *how many planets qualify* depends
+on the theme table and this galaxy's roll — both of which live in `resources.assets` and a random
+seed, so neither is readable offline. Moissanite was given `chance: 0.02` on three themes, argued
+as "the thinnest floor in the table". Measured against its siblings (钨 0.09, 钒 0.06) that is an
+expectation **below one planet per galaxy**: a player started a fresh save, swept everything
+reachable, and reported 没找到 — while registration, theme matching and the vein table were all
+correct and the log carried no warning at all. **Every step succeeded and the feature was absent**,
+which is this repo's worst failure shape.
+
+Two things came out of it. `RareVeinSurvey` now prints, once per session, how many planets carry
+each rare ore's themes, the resulting expected count, and **what `chance` would be needed for a
+target of 2** — so tuning does not cost a round trip of "change a number, restart, fly around,
+still nothing". It reads the end state (scanning `ThemeProto.RareVeins` back out) rather than what
+`ExtendRareSlots` thinks it wrote, so a write that silently failed still counts as zero.
+
+And the rule the number now follows: **rarity is `chance` × candidate planets, and only the first
+half is in the config.** Measured on one cluster: 钴 25 planets × 0.25 = 6.3, 钒 37 × 0.06 = 2.2,
+钨 33 × 0.09 = 3.0, 莫桑石 **18** × 0.06 = 1.1. Moissanite’s three themes carry barely half the
+candidate planets the others do, so the same probability buys half the ore — which is why matching
+vanadium’s `chance` did not match its findability. It is now **0.12**, anchored on vanilla’s own
+rarest rare vein (光栅石 0.1 on 熔岩/戈壁/冰原冻土; 金伯利 0.18), for ~2.2 expected. Its rarity is
+carried by *where* it can be rather than by a small number: 18 planets in the cluster and none in the
+birth system. The original reasoning ("tungsten's absence kills the whole cemented-carbide line, this
+one is only a late-game nicety, so its floor can be thinner") was **wrong on its own terms**: when
+moissanite is absent the drill bit, its four forging recipes, `ERecipeType` 12 and the miner's bit
+slot all have nothing to act on. *The consequence of absence being mild* is not the same claim as
+*near-absence being acceptable* — and here the first was false anyway.
+
+**Finding where a rare vein actually is: borrow the game’s scan, never re-roll its RNG.**
+Expectation ("about 3 planets this cluster") does not answer the player’s question ("*which* 3"), and
+an unvisited planet has no vein data to read. Re-deriving the roll looked cheap — `GenerateVeins` uses
+`DotNet35Random(planet.seed)` and the rare draws sit at IL 048C / 04B8 — but between the constructor and
+those draws lies a **data-dependent** number of draws (the up-to-12, break-on-failure loop at IL
+03A4–03CD). A simulation that slips by one draw does not throw; **it confidently names the wrong
+planet**, which is worse than reporting nothing. `RareVeinProspector` therefore calls
+`PlanetModelingManager.RequestScanPlanet` — the star map’s own path — and reads `veinGroups` back. The
+scan thread works on `GetUnloadedCopy`, copies the result home with `CopyScannedDataFrom` and then
+`ReleaseCopy`, so peak memory is one planet regardless of how many are queued, and the answer is
+identical to what the player would see on arrival. **Prefer the engine’s own implementation over a
+reimplementation whenever the reimplementation can be silently out of step.**
+
+**The forge got its own `ERecipeType` (12), and what made that cheap is worth recording.**
+The bit should be forged, not assembled, but 锤锻精工厂 was `recipeType 4` — the *same*
+Assemble type as 天工装配厂, with an identical description, speed and port count. By this repo's
+own dominance rule that is two copies of one building, i.e. dead content. Since
+`UIRecipePicker` filters on a single `recipe.Type`, **"only in the forge" is expressible only as a
+new type**; re-pointing it to 12 costs it the vanilla Assemble recipes, and that cost is zero
+here because its twin still takes every one of them. A duplicate building became a real one.
+(Existing forges running an Assemble recipe keep running it — `SetRecipe` does not validate the
+type — they just cannot switch back to one.) **Do not generalise the trade**: it was paid for by
+the duplication, and would not be worth it for a building that was actually distinct.
+
 ### Logistics — `src/Patches/Station/`
 
 - `StationCapacityPatches` — slot capacity/count and max charging power on prefabDesc + per-tick fix-up for existing stations. Also hosts `StationsConfig`. Charging power is a three-hop chain: `PrefabDesc.workEnergyPerTick` → `PowerConsumerComponent.workEnergyPerTick` (**saved**) → `SetPCState` scales it by `1.05 - energy/energyMax` into `requiredEnergy` → `StationComponent.energyPerTick`. Only the middle hop needs fixing at runtime, and that fix-up must be a **one-time bootstrap, not a per-tick force** — the station panel's 最大充能功率 slider (`UIStationWindow.OnMaxChargePowerSliderValueChange`) writes the very same field, so overwriting it every tick makes the slider snap back the instant you let go. The patch therefore only raises stations still sitting at the vanilla value it recorded before editing `prefabDesc`. That slider's range is derived from the prefab too: min `prefabDesc/2`, max `prefabDesc×5`, value `= 50000 × slider`.
 - `StationExpandPatches` — 30 slots. Vanilla unrolls `AddItem` and the four supply/demand queries over `storage[0..5]`, so **beyond 6 slots items vanish on delivery**; all five are replaced with full scans. Adds paging + a scrollbar to `UIStationWindow` (widgets rebound by index, layout untouched), resizes `UIEntityBriefInfo.icons` in `_OnCreate`, and grows existing stations' arrays on `GameData.Import`.
+  **Showing a row vanilla never shows costs two more fixes, and both are "vanilla only writes what it
+  needs".** Giving the 大型采矿机 a second storage row (the drill-bit slot) exposed them in order.
+  (1) **Position.** `UIStationWindow.OnStationIdChange` IL 08A4 reads
+  `if (!station.isVeinCollector) { storageUIs[0].anchoredPosition = new Vector2(40f, -90f); … }` — a
+  vein collector draws one row, so vanilla skips positioning entirely and row 1 stays wherever the
+  prefab left it, **overlapping row 0**. It reads as a rendering glitch and is really "nobody owns
+  that value". Same shape as `MultiProductUIPatches`’ `RestoreSlot1`: *read the vanilla path for its
+  **writes**, not its reads.* (2) **Window height.** `RefreshTrans` recomputes it every frame as
+  `100 + 76 * slots + 36`, where `slots` is `collectionIds.Length` for collectors and
+  `storage.Length` otherwise (IL 00B2–00D4) — the very rule `StorageCount` overrides. The old postfix
+  only ever **shrank** (`if (count <= visible) return;`), which is right for a 30-slot station
+  (vanilla assumes 30, we draw 5) and silently wrong for the miner, which needs to **grow** by one row
+  (vanilla assumes 1, we draw 2) and took that early return. It is now a signed delta between "rows we
+  draw" and "rows vanilla assumed", which reproduces the 30-slot result exactly, is 0 for gas
+  collectors, and is +1 for the miner. Row height 76 is vanilla’s own constant from that formula, not
+  a measurement. (3) **The block below the rows.** The same branch ends with
+  `panelDownTrans.anchoredPosition = new Vector2(x, 80f|60f)` — a **constant**, while the window height
+  right above it scales with `slots`. So vanilla’s vein-collector layout is hardcoded for exactly one
+  row: the window grows but 物流站设置 stays put and the second row lands on top of it. Both lines run
+  every frame, so the correction has to run every frame too.
+
+  **The panel did not need moving at all, and finding that out took three wrong fixes.** The
+  measured rects settle it: `panelDownTrans` has `anchorMin/Max.y = 0` and `pivot.y = 0` — it is
+  pinned to the window’s **bottom** edge, while the storage rows are pinned to the top. **Growing
+  the window separates them by itself.** Worse, its rect top is ~110 units above where it actually
+  draws (in vanilla’s 1-row layout the panel rect spans 80–230 above the bottom while row 0 ends at
+  120, and it looks fine), so "measure the rect overlap" over-counts by that padding every time —
+  which is exactly how attempt three pushed the whole block out through the bottom of the window.
+  With the window grown by one row the panel’s *visible* top lands at 120 against a row bottom of
+  121.6: already flush. The shipped fix is therefore to grow the window by `RowHeight * delta + 16`
+  and touch nothing else; the 16 is read off those measurements, not tuned by eye.
+
+  **The process lesson is the expensive one.** Three attempts, three different wrong models, all
+  estimated from screenshots — which cannot distinguish a rect edge from a drawn edge and cannot
+  show canvas scale, the two things that were actually wrong. This file already says not to
+  diagnose layout from screenshots; **the one-shot rect dump should have been the second step, not
+  the fifth.** When a UI fix fails twice, stop adjusting the formula and print the rects.
 - `PilerLevelPatches` — rewrites the stacking techs' `UnlockValues` (trap 3) and replaces the hardcoded 4s in `PilerComponent` and `MinerComponent`.
 
   **`PilerComponent.InternalUpdate` has *four* hardcoded 4s and they must all move together** (verified by enumeration: 3 × `ldc.i4.4` + 1 × `ldc.r4 4f`, and no other `4.0` float in the method):
@@ -354,7 +522,9 @@ The clone finds its source by **type + product** rather than a hardcoded recipe 
 
 **Ore placement is per-theme and has two modes** (`ores.json`'s `placement`). `normal` adds a **regular vein spot** (`ThemeProto.VeinSpot`, density = `veinRarity` × that theme's iron); `rare` claims a **rare slot** (`ThemeProto.RareVeins`), which is the "a whole planet either has it or doesn't" mechanic kimberlite uses. `themes` filters by display name (substring; `熔岩` also matches `潮汐锁定熔岩`), and a filter that matches nothing loud-fails. **The theme table lives in `resources.assets` and cannot be read offline**, so `OreRegistry.DumpThemes` prints it at startup — that log is the only source for what to write in `themes`.
 
-**`RareSettings` has stride 4**, read out of `PlanetAlgorithm.GenerateVeins`: `[i*4+0]` chance outside the birth system, **`[i*4+1]` the chance used when `star.index == 0`**, `[i*4+2]` the per-extra-spot chance (rolled up to 11 more times), `[i*4+3]` richness. So **"none in the starting system" is a vanilla data slot, not something to patch** — put 0 in `[+1]`. Normal vein spots have no such slot; `birthSystem: false` on a `normal` ore warns and is ignored.
+**`RareSettings` has stride 4**, read out of `PlanetAlgorithm.GenerateVeins` at IL 03F6: `ldfld StarData::index ; brfalse.s IL_0417` — so **`[i*4+0]` is the chance used when `star.index == 0` (the birth system) and `[i*4+1]` is the chance everywhere else**; `[i*4+2]` the per-extra-spot chance (rolled up to 11 more times), `[i*4+3]` richness. So **"none in the starting system" is a vanilla data slot, not something to patch** — put 0 in `[+0]`.
+
+**This line said the opposite for a long time, and the inverted claim shipped.** `ExtendRareSlots` was written from it, so `birthSystem: false` wrote the *outside* chance to 0 and the birth-system chance to the configured value: **all four custom rare ores spawned only in the starting system and nowhere else** — the exact inverse of the design. It surfaced as a player starting a fresh save, sweeping everything outside the birth system, and reporting 「没找到」 while registration, theme matching, the vein table and the placement log line were all correct. Two habits would have caught it: **re-read the IL rather than trusting a prose summary of it** (the two slots are one `brfalse` apart and the summary had them backwards), and **check a vanilla theme’s own numbers** — vanilla rare veins do not spawn in the birth system, so whichever slot is 0 in vanilla data *is* the birth-system slot. `DumpThemes` now prints all four values per rare slot, before this mod writes any of its own, precisely so that evidence is in every log. Normal vein spots have no such slot; `birthSystem: false` on a `normal` ore warns and is ignored.
 
 **GS2 changes what `veinRarity` costs, so the conversion must be capped.** The vanilla path *adds* vein spots and leaves iron alone; `OreGalacticScaleCompat` *converts* iron groups, so every point of rarity is taken from iron at `Σr / (1 + Σr)`. With seven ores tuned for vanilla semantics Σr reached 7.58 — **88% of iron gone**. `BuildBuckets` now weights `rare`-mode ores by their `chance` (the right order of magnitude) instead of `veinRarity`, and scales the whole set down to a 50% conversion cap, preserving relative ratios.
 
@@ -377,6 +547,20 @@ Vanadium takes no carbon route at all, so it takes **aluminothermic** reduction 
 
 The config has four levels: `items` (extra protos belonging to no vein — 二氧化碳, 氧气, plus the C1 chain's 一氧化碳 / 甲醇 / 甲醛 / 乙烯), `ores`, each ore's `recipes[]`, and a **top-level `recipes[]`** for recipes owned by no ore (电解水, plus the six-recipe C1 chain: 水煤气 → 甲醇 → 甲醛 / 乙烯, and 费托合成 → 精炼油). In that top-level list `ref: "ore"` / `"ingot"` are errors — there is no owning ore — and the recipe has no ingot icon to inherit, so it must set `icon` or `iconFrom` or its replicator cell renders blank. **Recipe ingredients reference mod items by name, not id** — `{"ref": "ore"}` / `{"ref": "ingot"}` for the owning ore, an `items` entry's `key`, or `<other ore key>.ore` / `.ingot`; `{"id": 1006}` means a vanilla item. Writing a raw id would break the moment `ResolveItemId` shifts a colliding id. `items` are registered first and recipes last, so every `ref` resolves regardless of declaration order.
 
+**`ExtraItemEntry.iconFrom` is a misnomer: it is the proto *template*, not just the icon source,
+and it is mandatory even when the entry brings its own `icon`.** `RegisterExtraItems` opens with
+`ItemProto source = LDB.items.Select(entry.iconFrom)` and **skips the whole item** when that is
+null; `source` is then what supplies `DescFields` and the fallback `StackSize`. Omit it and the
+item never reaches LDB, so every `ref` pointing at it fails and its recipes, its `metals.json`
+row and any build recipe naming it all collapse — a cascade of six errors whose single cause is
+one missing field. The silicon-carbide chain shipped that way once.
+
+Note this is the **same fact as the `DescFields` crash, seen from the other side**: `OreRegistry`
+items never had that bug precisely because they clone a vanilla proto, while `DrillBitRegistry`
+builds one by hand and had to fill the arrays itself. The error message now says "proto 模板"
+rather than "图标来源" and spells out that a custom `icon` does not excuse it — the old wording is
+what made it look optional.
+
 **Recipe names must lead with the product, because the replicator has no item cells.** `UIReplicatorWindow` draws recipes and only recipes — there is no cell for 钴块 itself, and vanilla papers over this by *naming the recipe after its product* (the cell that looks like "铁块" is the smelting recipe named 铁块; alternates get a suffix, e.g. 石墨烯 / 石墨烯（高效）). Naming a recipe after its **process** instead — 碳热还原钴, 氢还原钨 — is therefore not a cosmetic choice: the product becomes unfindable, and the panel reads as "a pile of formulas with the metal missing". That was reported twice as a missing-icon bug before the cause was found, and the log line that settles it is `配方「…」已注册`. All 33 `ores.json` recipes are now `<产物> · <工艺>` (钴块 · 碳热还原, 钨块 · 氢还原, 碳化钨 · 渗碳), which keeps the process visible without hiding the product. Renaming is safe: recipe IDs are pinned in the JSON and saves reference IDs, and LDBTool's name-keyed cfg entries hold 0 (no override).
 
 **The replicator grid is drawn from `LDB.recipes` alone.** `UIReplicatorWindow.RefreshRecipeIcons` iterates `recipeProtoArray` and places each entry by `RecipeProto.GridIndex`; an item with no recipe never appears there, and `ItemProto.GridIndex` only drives the item-picker style panels. Two independent grids, so `ResolveGridIndex` must check **both** proto sets for occupancy (`GridTaken`), and item/recipe cells no longer need to coincide the way vanilla's do.
@@ -386,6 +570,69 @@ The config has four levels: `items` (extra protos belonging to no vein — 二�
 **No preloader is needed to add a vein type, but the hardcoded loop bounds are.** The usual approach (ProjectGenesis) is a BepInEx patcher that deletes `EVeinType.Max` and adds named members; that part is avoidable, because `EVeinType` is byte-backed (`(EVeinType)15` is valid unnamed) and the arrays size themselves — `PlanetModelingManager.PrepareWorks` from the last `LDB.veins` proto's `ID + 1`, `PlanetAlgorithm.GenerateVeins` from `veinProtos.Length`. `PrepareWorks` runs from `PlanetModelingManager.Start`, long after LDBTool's `PostAddDataAction`, so ordering works out.
 
 What is **not** avoidable is `for (int type = 1; type < 15; type++)` — vanilla walks vein types against a literal 15 in seven places (`GenerateVeins` on `PlanetAlgorithm` + `PlanetAlgorithm7/11/12/13`, `UIPlanetDetail.OnPlanetDataSet`, `UIStarDetail.OnStarDataSet`). Types 15+ sit exactly outside, so registering the proto alone yields **zero veins generated and nothing in the planet panel**. `OreVeinRangePatches` transpiles the bound to `PlanetModelingManager.veinProtos.Length`, matching only a `15` immediately followed by an ordering branch — `UIPlanetDetail`/`UIStarDetail.RefreshDynamicProperties` also contain a 15, but it is a rare-vein id comparison and must not be touched. Raising the UI bound is safe: those panels' `veinCounts`/`veinAmounts` are `new [64]`, the body null-checks `LDB.veins.Select(type)`, and rows come from a pooled `List`, not a fixed widget array.
+
+**Raising that bound exposes vanilla assumptions that 14 vein types could never reach. Two of them, and the second is the one that actually crashed.**
+
+*(a) A latent 512-spot overflow — real, fixed, but NOT the crash below.*
+`PlanetAlgorithm..ctor` hardcodes `veinVectors = new Vector3[512]` (plus a parallel
+`veinVectorTypes`). `GenerateVeins` fills it from two nested loops — outer over vein *type*
+(that very `15` at IL 086C), inner over that type’s spots — and the capacity guard is
+`if (++veinVectorCount == veinVectors.Length) goto <outer increment>` (IL 0853 → 0864).
+**It breaks only the inner loop.** The outer loop then moves to the next vein type and writes
+`veinVectors[512]` straight away. Vanilla’s 14 types never accumulate 512 spots, so the hole is
+unreachable; at 23 types it opens, and the symptom is
+`Scanning Thread Error: IndexOutOfRangeException at PlanetAlgorithm.GenerateVeins` with
+`OreVeinRangePatches` named on the stack — accurate as the trigger, misleading as the cause.
+
+`VeinVectorCapacityPatches` fixes it by **enlarging the two arrays in a constructor postfix**,
+not by rewriting the branch: the guard compares against `veinVectors.Length` (a dynamic read, not
+the literal 512), so a bigger array keeps vanilla’s own stop behaviour intact and no control flow
+is touched. Capacity is derived rather than picked — vanilla budgets 512 spots for 14 types, so
+the same per-type allowance times the current type count, rounded up to a multiple of 64 (23
+types → 896). Cost is ~12 KB per `PlanetAlgorithm`, of which only a handful exist at once.
+
+**That fix was shipped and the crash came back, byte-identical.** The 512 hole is genuine and the
+guard is worth keeping, but it was never this crash — a reminder that *finding a real bug in the
+right method is not the same as finding the one you are chasing*.
+
+*(b) The actual crash: a type-indexed array sized from `veinProtos.Length`.*
+
+**A transpiled method’s IL offset must be reconstructed, not looked up.** The report said
+`IndexOutOfRangeException ... GenerateVeins (IL_04F9)`, and 0x04F9 in the *original* body lands in
+the middle of an `ldfld` — no array in sight, which is what sent the first two rounds chasing the
+wrong thing. The offset is from Harmony’s DMD, and two effects move it: Harmony’s
+`MethodBodyReader` rewrites **every short branch to its long form** (2→5 bytes), and our own
+transpiler swaps `ldc.i4.s 15` for a `call` (2→5). Replaying both offline over the real method
+body maps patched `04F9` to original **`0496`** exactly:
+
+```
+0496: ldloc.s V_11        // veinSpots = new int[veinProtos.Length]   (IL 00AE)
+0498: ldloc.s V_30        // vein type, straight out of theme.RareVeins[i]
+049A: ldelema System.Int32
+```
+
+— the `veinSpots[veinType]++` that runs **only when a rare vein roll succeeds**, which is why it
+appeared the moment the birth-system inversion was fixed and rare veins began rolling at all.
+`veinSpots` / `veinCount` / `veinOpacity` are all `new [veinProtos.Length]` and then indexed by
+vein **ID**, and `PrepareWorks` sizes `veinProtos` as `size = dataArray[i].ID + 1` — **assign, not
+max** — so the capacity is the *last* element’s ID + 1, not the largest.
+
+`OreRegistry` already sorts by ID and `VerifyVeinArrayOrder` already checks the last element — but
+**at `PostAddDataAction`**, while `PrepareWorks` runs much later, at
+`PlanetModelingManager.Start`, with LDBTool’s table build and every other mod in between.
+*"My step was correct" is not "the end state is correct"*, and the gap between those two is
+exactly where this landed. `VeinProtoArrayPatches` therefore checks the **end state** in a
+`PrepareWorks` postfix: it logs the measured lengths unconditionally, and when they are short it
+grows all four arrays and re-runs vanilla’s own fill loop verbatim
+(`veinProducts[p.ID] = p.MiningItem`, …), which is idempotent.
+
+**Process notes.** The crash surfaced through a *diagnostic* (`RareVeinProspector`) driving the
+scan thread over dozens of planets at once — work a player does slowly, one system at a time — so
+the tool compressed the exposure rather than inventing the bug. That tool now also (1) refuses to
+enqueue anything until `veinProtos.Length > MaxVeinId`, since it starts at
+`UniverseGen.CreateGalaxy` and would otherwise beat `PrepareWorks` to the queue, and (2) gives up
+after 30 s with no progress and prints `PlanetModelingManager.planetScanThreadError`, because a
+dead scan thread otherwise reads exactly like a slow one.
 
 **`ModuleDefinition.Types` does not include nested types.** A caller search that walks only top-level types silently reports "this method has no callers" whenever the call sits in a compiler-generated nested class — iterators/coroutines especially. `ItemProto.InitFluids` looked callerless for exactly this reason; its only caller is `VFPreload/<PreloadThread>d__51::MoveNext`. Recurse through `NestedTypes`.
 
@@ -434,7 +681,7 @@ The gas is in `collectionIds` and still never produced, silently. `OreRegistry.E
 
 The two transpiled sites are `PlanetModelingManager.LoadingPlanetFactoryMain` (`ldelema` → the helper takes `ref VeinData`) and `PlanetFactory.AddVeinData(VeinData)` (`ldarg.1` → by value); the differing stack shapes are why there are two helpers.
 
-**`PlanetData.runtimeVeinGroups` means two different things**, and conflating them produces the very convincing illusion that generation is broken: it is `factory == null ? veinGroups : factory.veinGroups`. With no factory (a planet never landed on) it returns the **freshly generated** groups, so the star-map panel happily shows cobalt; once the planet has a factory it returns the **saved** ones, which for any already-visited planet predate the mod and contain none. The result is a planet whose orbital panel lists 钴矿石 86,145 while the ground at those exact coordinates is empty — and the coordinates themselves come from the generated preview, so they don't correspond to anything real. Any vein diagnostic must say which of the two it read. (`data.veinPool` is a third source, empty unless the planet is loaded in memory — reading that one produced a bogus "0 cobalt veins, this planet has none" report.)
+**`PlanetData.runtimeVeinGroups` means two different things**, and conflating them produces the very convincing illusion that generation is broken: it is `factory == null ? veinGroups : factory.veinGroups`. With no factory (a planet never landed on) it returns `PlanetData.veinGroups` — **a plain field read, not a generation**: the getter is ten instructions and calls nothing (verified). That field is filled by `SummarizeVeinGroups()`, which the **scan thread** runs, so it is populated only for planets that have been scanned or visited and is otherwise null. (An earlier version of this file said the getter returns "freshly generated" groups; it does not, and a prospecting tool written on that belief would have silently read nulls.) Once the planet has a factory it returns the **saved** ones, which for any already-visited planet predate the mod and contain none. The result is a planet whose orbital panel lists 钴矿石 86,145 while the ground at those exact coordinates is empty — and the coordinates themselves come from the generated preview, so they don't correspond to anything real. Any vein diagnostic must say which of the two it read. (`data.veinPool` is a third source, empty unless the planet is loaded in memory — reading that one produced a bogus "0 cobalt veins, this planet has none" report.)
 
 `UIRecipePicker` also **remembers its tab across opens** (`currentType` is only defaulted when 0, in `_OnOpen`), so a machine whose recipes live on another page opens onto whatever tab was used last. The same patch adds an `_OnOpen` postfix: when the picker opens *with a type filter* and nothing is currently visible, it jumps to the tab and column page of the first matching unlocked recipe.
 
@@ -466,7 +713,7 @@ Machine follows reaction class as everywhere else: alloying is melting and mixin
 
 **A new machine and a new recipe type are the same feature.** `UIRecipePicker.RefreshIcons` filters on a single value (`filter != 0 && filter != recipe.Type → skip`), and `filter` comes from the machine's `prefabDesc.assemblerRecipeType` via `UIAssemblerWindow.OnSelectRecipeClick`. **One machine, one type** — there is no "this machine accepts types A and B". So "a class of recipes only the new machine can run" means allocating a type number and pointing a machine at it. (Making one machine accept *several* types — e.g. 量子化工厂 doing both 化学 and 电化学 — would require patching the picker and every `assemblerRecipeType` reader; GenesisBook does exactly that via a `ContainsRecipeType` helper transpiled into `BuildingParameters` and friends.)
 
-**No preloader needed, same as `EVeinType`.** `ERecipeType` is int-backed and `(ERecipeType)9` is valid unnamed; vanilla uses 1–8 and 15, leaving **9–14 free** (this repo has taken 9 and 10). `AssemblerComponent.SetRecipe` **does not validate the type at all** (its IL only checks `recipeId > 0` and a null lookup), so the type is a pure UI concern and no production logic changes.
+**No preloader needed, same as `EVeinType`.** `ERecipeType` is int-backed and `(ERecipeType)9` is valid unnamed; vanilla uses 1–8 and 15, leaving **9–14 free** (this repo has taken 9, 10, 11 and 12). `AssemblerComponent.SetRecipe` **does not validate the type at all** (its IL only checks `recipeId > 0` and a null lookup), so the type is a pure UI concern and no production logic changes.
 
 Only two strings leak: `RecipeProto.madeFromString` (a recipe's 制造于) and `ItemProto.typeString` (an item's 类型 row) both `switch` over known types and fall through to a default. `RecipeTypeNamePatches` fixes both with getter postfixes — the same approach as GenesisBook's `DisplayTextPatches`.
 
@@ -604,6 +851,23 @@ This feature took six round trips to land. Three of them are one mistake repeate
 
 Item/recipe/model id, replicator `GridIndex` and build-menu `BuildIndex` allocation, used by both `OreRegistry` and `MachineRegistry`. It exists because the pitfalls encoded in it (scan `dataArray` not `ProtoSet.Select`; never change replicator page; extend columns not rows; model id < `dataArray.Length + 64`) were duplicated once and would only ever get fixed on one side. Callers pass a `pending` predicate for protos allocated this session but not yet in `LDB`.
 
+**A hand-built proto with a null array field crashes vanilla, and the stack trace blames other mods.**
+Vanilla protos are deserialized from `resources.assets`, so every array field is a real array —
+possibly length 0, never null. Most registries here clone one (`DescFields = source.DescFields`);
+`DrillBitRegistry` builds its `ItemProto` from scratch and omitted `DescFields`. Registration,
+icon, recipes and localization were all fine — until a mouse hover reached
+`UIItemTip.SetTip`, whose `ldfld ItemProto::DescFields ; ldlen` threw
+`NullReferenceException`. **The error report named LDBTool and UXAssist and never mentioned this
+mod**, because both have patches on that call path while our contribution was a null *field*, not
+code. (Locating it needed the same offset reconstruction as the vein crash: Harmony expands every
+short branch to long form, so patched `IL_0255` is original `IL_01EE`.)
+
+`ProtoArrayCheck` (last on `PostAddDataAction`) now walks `ProtoSlots.OwnItemIds` /
+`OwnRecipeIds` and loud-fails on a null `DescFields`, `Upgrades`, or any of a recipe’s four
+arrays, printing a pass line when clean. **The value is not the assertion — it is converting a
+crash whose stack points at somebody else into one line at startup.** When building a proto by
+hand rather than cloning, assume every array field is load-bearing.
+
 **During `PreAddDataAction` the LDB contains no mod protos at all.** `LDBTool.PreAddProto` only queues a proto; it lands in `LDB.items` / `recipes` / `models` when LDBTool builds the tables, i.e. *after* every `PreAddDataAction` handler has run. So a registry that scans `dataArray` to find a free id, grid cell or build slot sees **only vanilla** — it cannot see what an earlier registry in the same pass already claimed. That is how 电化学厂 took build slot 1 of category 12, which 天空装配厂 already owned: the mega buildings were registered first but were still invisible. `ProtoSlots` keeps a reservation ledger (`ReserveItemId`/`ReserveGrid`/`ReserveBuildIndex`/…) that every occupancy check consults; `MegaBuildingRegistry` clears it at the top of its pass (it runs first) and each registry files what it claims. **A new registry must both consult and file, or it will collide with whatever ran before it.**
 
 ### Assets & config
@@ -619,13 +883,13 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
-The nineteen configs: `megabuildings.json` (tab, build category 12, the six buildings with their pinned model IDs 708 and 723–727, station block), `advancedminer.json` (miner/pump limits + the ore→ingot product map), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed + the lab↔station virtual feed), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate's hardness margin and yield formula, and the miner slot the bit goes in).
+The nineteen configs: `megabuildings.json` (tab, build category 12, the six buildings with their pinned model IDs 708 and 723–727, station block), `advancedminer.json` (miner/pump limits + the ore→ingot product map), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed + the lab↔station virtual feed), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
 **LDBTool re-binds proto IDs from its own config, after your code sets them.** `LDBTool.PreAddProto` → `Bind` → `IdBind` / `GridIndexBind` records every mod proto's ID and GridIndex in `BepInEx/config/LDBTool/LDBTool.CustomID.cfg` and `LDBTool.CustomGridIndex.cfg`, **keyed by the proto's display name**, and on every later launch it writes those stored values *back onto the proto*. So changing an ID in this repo's JSON has **no effect** on a proto that has already been registered once — the first ID a proto is ever given is sticky until that cfg entry is deleted. Cobalt sat on 电磁矩阵's 6001 through three config edits because of this. When an ID looks ignored, check that cfg before anything else, and delete the entry (both files) to let the new value take. `OreRegistry.VerifyIds` now checks the post-registration reality and names the file.
 
-**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001), and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599 and 6617–6618 (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592 and 6600–6604. Model IDs 708 and 723–727 (mega buildings), 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原 and 11 is 生化培养 (生物温室), leaving **12–14**.
+**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001), and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631 and 6636–6639 (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635 and 6640–6643. Model IDs 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室) and 12 is 锻造 (锤锻精工厂), leaving **13–14**.
 
 **PowerShell scripts for IL inspection must be pure ASCII.** Windows PowerShell reads `.ps1` as ANSI, so a heredoc-written script containing Chinese characters gets mangled into parser errors that look nothing like an encoding problem (`unexpected token 'case'`, `missing string terminator`).
 

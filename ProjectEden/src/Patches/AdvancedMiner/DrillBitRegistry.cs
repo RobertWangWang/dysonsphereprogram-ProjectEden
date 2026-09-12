@@ -24,6 +24,18 @@ namespace ProjectEden.Patches
 
         public int recipeType;
         public int timeSpend;
+
+        /// <summary>
+        /// 谓词够格但<b>不该给</b>的材料（按 metals.json 的 ref 或名字写）。
+        ///
+        /// <b>为什么需要一张手写名单——谓词答不了这个问题。</b>
+        /// 谓词问的是「够不够硬」，而这里要排除的理由是「<b>算下来没人会用</b>」：
+        /// 高纯碳化硅的四维和莫桑石矿石一模一样（同为 SiC），所以谓词照单全收，
+        /// 可一片晶圆要花 4 个莫桑石，直接拿矿做钻头反而更省——
+        /// 那条配方一进合成面板就是死内容。
+        /// **「物理上够格」和「经济上有人用」是两回事，前者能算，后者只能判。**
+        /// </summary>
+        public string[] exclude;
     }
 
     /// <summary>
@@ -137,6 +149,14 @@ namespace ProjectEden.Patches
 
                 if (itemId <= 0) continue;
 
+                if (Excluded(cfg.bit, metal))
+                {
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"  {metal.name} 被 exclude 名单挡掉，不生成钻头配方");
+
+                    continue;
+                }
+
                 // 矿石自己不能当做自己的钻头材料的前提是它够硬——这里不特判，
                 // 谓词说够格就够格（碳化硅本来就是磨料，这是自然结果不是特例）
                 if (!metal.values.TryGetValue("hardness", out int h)) continue;
@@ -180,6 +200,20 @@ namespace ProjectEden.Patches
             return true;
         }
 
+        /// <summary>在排除名单里吗。<c>ref</c> 和 <c>name</c> 都认，写哪个都行。</summary>
+        private static bool Excluded(AlienVeinBitEntry bit, MetalEntry metal)
+        {
+            if (bit.exclude == null) return false;
+
+            foreach (string x in bit.exclude)
+            {
+                if (string.IsNullOrEmpty(x)) continue;
+                if (x == metal.@ref || x == metal.name) return true;
+            }
+
+            return false;
+        }
+
         private static float AxisOf(MetalsConfig metals, string @ref, string axis)
         {
             foreach (MetalEntry metal in metals.metals)
@@ -216,6 +250,11 @@ namespace ProjectEden.Patches
                 // 只靠配方解锁的话物品在新档里是不可见的。-1 让 ItemUnlocked 直接返回 true
                 UnlockKey = -1,
                 PreTechOverride = 0,
+                // <b>必须给，不能留 null。</b> 原版 proto 是反序列化出来的，这个字段一定是数组；
+                // 手工 new 的漏了它就是 null，而 UIItemTip.SetTip 会 ldfld DescFields ; ldlen ——
+                // 鼠标一悬停就 NRE，报错栈还指向别的 mod（空的是数据不是代码）。
+                // 空数组 = 不额外加属性行，对一个普通组件正是想要的。
+                DescFields = new int[0],
                 prefabDesc = PrefabDesc.none,
             };
 

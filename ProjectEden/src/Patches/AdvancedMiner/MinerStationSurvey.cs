@@ -136,7 +136,7 @@ namespace ProjectEden.Patches
 
             if (Interlocked.Exchange(ref _liveLogged, 1) != 0) return;
 
-            var sb = new StringBuilder("── 已建成采矿机的物流站实况（第一台）──");
+            var sb = new StringBuilder("── 已建成采矿机实况（第一台跑起来的）──");
 
             sb.Append($"\n  实体 {entityId} / 站点 {stationId}")
               .Append($"，storage 长度 {station.storage.Length}")
@@ -154,18 +154,38 @@ namespace ProjectEden.Patches
                   .Append($" 数量 {s.count}/{s.max}");
             }
 
-            // 空格就是钻头槽能落脚的地方；一格不剩的话就得先抬 stationMaxItemKinds
-            var free = 0;
+            // 这台机器脚下是什么矿脉 —— 「为什么没有钻头槽」十有八九答在这里
+            int veinType = 0;
+            VeinData[] pool = factory.veinPool;
 
-            foreach (StationStore s in station.storage)
-                if (s.itemId <= 0)
-                    free++;
+            if (pool != null && miner.veins != null && miner.veinCount > 0)
+            {
+                int v = miner.veins[0];
 
-            sb.Append($"\n  空格 {free} 个 → ")
-              .Append(free > 0
-                  ? "可以直接拿一格当钻头槽（设成 Demand，无人机会自动送）"
-                  : "**一格不剩**，要先把 prefab 的 stationMaxItemKinds 抬高，"
-                    + "而且只对之后新建的采矿机有效（storage 在建造时固化进存档）");
+                if (v > 0 && v < pool.Length) veinType = (int)pool[v].type;
+            }
+
+            VeinProto vein = veinType > 0 ? LDB.veins.Select(veinType) : null;
+            bool alien = AlienVeinPatches.VeinType > 0 && veinType == AlienVeinPatches.VeinType;
+
+            sb.Append($"\n  脚下矿脉：{(vein != null ? vein.Name : "?")}（类型 {veinType}）")
+              .Append(alien ? " ← 这是吃钻头的那种" : "，不吃钻头");
+
+            int slot = AlienVeinPatches.Config?.bitSlotIndex ?? -1;
+
+            if (!alien)
+                // 这不是故障。钻头槽是挂在矿脉上的，不是挂在采矿机上的
+                sb.Append("\n  → 所以这台机器本来就没有钻头槽。")
+                  .Append($"钻头槽只出现在「{AlienVeinPatches.Config?.veinRef}」矿脉上的采矿机身上，")
+                  .Append("那种矿脉只在本功能启用之后新生成的星球上才有。");
+            else if (slot < 0 || slot >= station.storage.Length)
+                sb.Append($"\n  → **这台机器的 storage 只有 {station.storage.Length} 格，放不下第 {slot} 格**。")
+                  .Append("它是在本功能启用之前建的（storage 在建造时固化进存档）—— 拆掉重建一台即可。");
+            else if (station.storage[slot].max <= 0)
+                sb.Append($"\n  → **第 {slot} 格容量是 0，还没被布置过**。")
+                  .Append("正常情况下采矿机跑第一个 tick 时就会布置好；如果一直是 0，说明 Tick 没跑到。");
+            else
+                sb.Append($"\n  → 钻头槽（第 {slot} 格）已就位，容量 {station.storage[slot].max:N0}。");
 
             ProjectEdenPlugin.Log.LogInfo(sb.ToString());
         }

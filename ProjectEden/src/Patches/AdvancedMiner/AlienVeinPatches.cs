@@ -35,6 +35,12 @@ namespace ProjectEden.Patches
 
         /// <summary>钻头物品与它的配方模板。见 <see cref="DrillBitRegistry"/>。</summary>
         public AlienVeinBitEntry bit;
+
+        /// <summary>钻头槽囤多少个。见 <see cref="EnsureBitSlot"/> 里为什么不能抄第 0 格。</summary>
+        public int bitSlotCapacity;
+
+        /// <summary>开了就在后台把每颗候选星球扫一遍，报出稀有矿脉具体在哪。见 <see cref="RareVeinProspector"/>。</summary>
+        public bool prospectRareVeins;
     }
 
     /// <summary>
@@ -130,7 +136,7 @@ namespace ProjectEden.Patches
             ProjectEdenPlugin.Log.LogInfo(
                 $"外星矿脉已就绪：{Config.veinRef} 矿脉类型 {VeinType}，"
                 + $"钻头物品 {DrillBitRegistry.BitItemId}，一个能挖 {BitCapacity:N0} 矿，"
-                + $"钻头槽是第 {Config.bitSlotIndex} 格");
+                + $"钻头槽是第 {Config.bitSlotIndex} 格（本 mod 自己布置成「钻头」的 Demand 槽，囤 {(Config.bitSlotCapacity > 0 ? Config.bitSlotCapacity : DefaultBitSlotCapacity):N0} 个）");
         }
 
         private static bool ResolveVein()
@@ -242,7 +248,7 @@ namespace ProjectEden.Patches
         /// <c>perTick</c> 是调用方已经算好的「每 tick 的 time 累加量除以 miningSpeed」，
         /// 不在这里重算一遍。
         /// </summary>
-        internal static void Tick(ref MinerComponent miner, PlanetFactory factory,
+        internal static void Tick(ref MinerComponent miner, PlanetFactory factory, float power,
             ref float miningSpeed, float perTick)
         {
             if (!Ready || miner.period <= 0) return;
@@ -268,6 +274,55 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // 这一格是我们加出来的，游戏自己不会初始化它 —— 见 EnsureBitSlot
+            if (EnsureBitSlot(station, slot)) factory.transport.RefreshStationTraffic();
+
+            // <b>没电也别扣。</b> 原版 InternalUpdate 第一行就是
+            // <c>if (power &lt; 0.1f) return false;</c>（IL 0000）——没电一件都不挖。
+            // 阈值抄它的，不另定一个，否则两边会在 0.1 附近分叉。
+            //
+            // <b>这个判断故意排在 EnsureBitSlot 之后。</b> 放前面的话，
+            // 一台还没接电的新采矿机永远不会被布置出钻头槽，
+            // 玩家打开面板看不到「需求 钻头」那一行，也就无从知道该运什么过来——
+            // 而「没电」和「不需要钻头」在界面上长得一模一样。
+            if (power < 0.1f) return;
+
+            // <b>缓存满了就别扣钻头。</b> 本方法是在原版挖矿逻辑<u>之前</u>跑的，
+            // 按 miningSpeed 推算这一 tick「会」挖多少件——但那是<b>名义速率</b>，
+            // 原版真正决定挖不挖的是 <c>productCount >= GetCapacity(...)</c> 那道门
+            // （被 <see cref="AdvancedMinerPatches"/> 从原版的 50 转译过来的三处之一）。
+            // 机内缓存顶满、站点仓位也满的时候，原版一件都不挖，而我们照扣——
+            // 玩家看到的就是「矿采满了，钻头还在烧」。
+            //
+            // <b>算消耗要跟着真实产出走，不能跟着速率参数走。</b>
+            // 这和仓库里那条「面板读 speed、吞吐读 miningSpeed，改一个另一个不动」是同一类：
+            // 同一件事有两个来源，挑错了不会报错，只会静悄悄地算错账。
+            // <b>判据是「站点仓位收不收得下」，不是「机内缓存满没满」。</b>
+            // 上一版判的是 productCount >= GetCapacity()，那道门在原版是有效的
+            // （原版缓存只有 50，一满就停），但本 mod 把它抬到了 1000 万——
+            // 按 24 万/分钟要四十多分钟才填满，于是那道门<b>几乎永远不成立</b>，
+            // 玩家看到的仍然是「矿满了，钻头照烧」。
+            //
+            // 真正决定矿有没有去处的是原版 <c>StationComponent.UpdateVeinCollection</c>
+            // 的第一道门（IL 001D–0035）：
+            // <code>if (storage[0].localSupplyCount >= storage[0].max) return;</code>
+            // 仓位满了它直接返回、一件都不收，矿只会堆在机内缓存里。
+            //
+            // <b>这里选择连挖矿一起停（miningSpeed 归零），而不是只停扣钻头。</b>
+            // 只停扣的话，玩家把仓位堵满就能<b>白挖</b>一缓存的矿再放出来——
+            // 那是把一个显示问题变成一个刷矿手法。没矿出去就没钻头消耗，两边都停才是一致的。
+            // 和没钻头时一样<b>只碰 miningSpeed，不碰 speed</b>（后者是面板上那个数）。
+            bool outFull = station.storage[0].localSupplyCount >= station.storage[0].max;
+            bool bufferFull = miner.productCount >= AdvancedMinerPatches.GetCapacity(ref miner, factory);
+
+            if (outFull || bufferFull)
+            {
+                miningSpeed = 0f;
+                ReportFullOnce(entityId, outFull);
+
+                return;
+            }
+
             bool isBit = station.storage[slot].itemId == DrillBitRegistry.BitItemId;
             float per = BitCapacity;
 
@@ -278,8 +333,14 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            // 这一 tick 会挖出多少件
-            float items = miningSpeed * perTick / miner.period;
+            // 这一 tick 会挖出多少件。
+            //
+            // <b>逐项对齐原版的产量算式</b>（InternalUpdate IL 0032–0056）：
+            // <code>time += (int)(power × speedDamper × speed × miningSpeed × veinCount);</code>
+            // 传进来的 perTick 只有 <c>speed × veinCount</c>（<c>MiningMultiplier</c> 那一项），
+            // <b>power 和 speedDamper 原来都漏了</b>。漏 power 的后果是没电照扣、半电多扣一倍；
+            // 漏 speedDamper 的后果是原版节流时多扣——两者都不会报错，只会静悄悄地算错账。
+            float items = miningSpeed * perTick * power * miner.speedDamper / miner.period;
 
             if (items <= 0f) return;
 
@@ -302,6 +363,93 @@ namespace ProjectEden.Patches
             Progress[key] = progress;
         }
 
+        /// <summary>
+        /// 配置没给时的钻头槽容量。
+        ///
+        /// <b>按满速开采推的：</b> 大型采矿机在本 mod 里约 20 万矿/秒
+        /// （设计稿 外星矿脉V1.md §一；advancedminer.json 里没有这个数——speed 是按防溢出限幅逐台倒推的），一个钻头能挖 <see cref="BitCapacity"/> 矿，
+        /// 实测 47,970 —— 也就是每秒烧掉约 4.2 个钻头。
+        /// 3000 个够满速挖 12 分钟，足以扛过一次产线波动，
+        /// 又不至于让一台机器把物流网里的钻头全吸走。
+        /// </summary>
+        private const int DefaultBitSlotCapacity = 3000;
+
+        /// <summary>
+        /// 把钻头槽布置好：给容量、指定物品、设成 Demand。返回是否真的改了。
+        ///
+        /// <b>这一步必不可少，而且正是「槽有了却还是看不到钻头」的原因。</b>
+        /// <c>StationComponent.Init</c> 的矿脉分支只铺到 <c>collectionIds.Length</c> 为止
+        /// （矿脉采集器就一种矿，所以只有第 0 格），多出来的格子留在默认值 ——
+        /// <b><c>max</c> 是 0，也就是容量为零，什么都装不下</b>，物流站窗口里那一格自然是死的。
+        /// 实测日志：<c>storage 长度 2</c>、<c>储物格 1：（空）本地 None 远程 None 数量 0/0</c>
+        /// —— 数组确实是 2 格，容量却是 0。<b>「格子数够了」不等于「格子能用」。</b>
+        ///
+        /// <b>容量是单独一个配置值，<u>不能</u>抄第 0 格。</b> 那一格的 max 已经被
+        /// <see cref="StationCapacityPatches"/> 放大到 1000 万（实测 10,005,000），
+        /// 而本地 Demand 槽是<b>照着 max 要货</b>的
+        /// （<c>localDemandCount = max - (count + localOrder)</c>）——
+        /// 抄过来就等于第一台采矿机向物流网索要一千万个钻头，
+        /// 把后面每一台都饿死。症状会是「我别的采矿机全停了」，
+        /// 而那句话指向的地方离真正的原因很远。
+        /// 所以这里只囤一个够用的缓冲，多出来的产能留给别的机器。
+        ///
+        /// <b>物品和 Demand 由本 mod 直接写，不留给玩家。</b> 配置里原来那句
+        /// 「槽里放什么全由玩家定，那正是谓词的意义」，在钻头还是「一堆合格材料」时是对的；
+        /// 谓词后来搬到了配方那一头（见 <see cref="DrillBitRegistry"/>），
+        /// 钻头<b>只剩一种物品</b>，这一格没有第二种可能了，
+        /// 再让玩家自己去物流站窗口里翻出来只是多一道谜题。
+        ///
+        /// <b>改完要刷物流网。</b> 需求是 <c>RefreshStationTraffic</c> 建的表算出来的，
+        /// 只写 <c>localLogic</c> 不刷表，运输机不知道这里要货 —— 那一格会一直空着。
+        /// 它要遍历整颗星球的物流站，所以只在真的改了的时候调（同
+        /// <see cref="MegaStationPatches"/>）。
+        /// </summary>
+        private static bool EnsureBitSlot(StationComponent station, int slot)
+        {
+            var changed = false;
+
+            int want = Config.bitSlotCapacity > 0 ? Config.bitSlotCapacity : DefaultBitSlotCapacity;
+
+            // 兜底：真配了个比整格还大的数，仍然不许超过第 0 格的量级
+            if (station.storage[0].max > 0 && want > station.storage[0].max)
+                want = station.storage[0].max;
+
+            if (station.storage[slot].max != want)
+            {
+                station.storage[slot].max = want;
+                changed = true;
+            }
+
+            if (station.storage[slot].itemId <= 0)
+            {
+                station.storage[slot].itemId = DrillBitRegistry.BitItemId;
+                station.storage[slot].localLogic = ELogisticStorage.Demand;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private static int _fullLogged;
+
+        /// <summary>
+        /// 缓存满了导致停挖，报一次。
+        ///
+        /// <b>这条要报，因为「不扣钻头」这件事本身是看不见的。</b>
+        /// 玩家只会看到钻头数量不动，而那既可能是修好了，也可能是消耗逻辑整个没跑。
+        /// </summary>
+        private static void ReportFullOnce(int entityId, bool outFull)
+        {
+            if (Interlocked.Exchange(ref _fullLogged, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"外星矿脉：实体 {entityId} 的采矿机停机 —— "
+                + (outFull
+                    ? "站点仓位已满，矿没地方去（原版 UpdateVeinCollection 这时一件都不收）"
+                    : "机内缓存已满")
+                + "，所以这一 tick 既不挖矿也不扣钻头。（这条只报一次）");
+        }
+
         /// <summary>没钻头就停。<b>只把 miningSpeed 归零，不碰 speed</b>——
         /// <c>speed</c> 是面板上那个数，改它会让玩家以为机器坏了。</summary>
         private static void Block(ref float miningSpeed, int entityId, bool hasSlotButEmpty)
@@ -314,10 +462,10 @@ namespace ProjectEden.Patches
             ProjectEdenPlugin.Log.LogInfo(
                 $"外星矿脉：实体 {entityId} 的采矿机停在这种矿脉上——"
                 + (hasSlotButEmpty
-                    ? "钻头槽空了。把槽设成 Demand，物流网会自动补。"
-                    : "钻头槽里放的不是钻头。在物流站窗口把第 "
-                      + Config.bitSlotIndex + " 格设成 Demand 并指定「钻头」；"
-                      + "钻头在制造台合成，启动日志里「钻头」那一段列出了每种材料要投几个。")
+                    ? "钻头槽空了。这一格已经是 Demand，物流网里有钻头就会自动补。"
+                    : "钻头槽里放的不是钻头 —— 玩家把第 "
+                      + Config.bitSlotIndex + " 格改成别的物品了。改回「钻头」即可；"
+                      + "启动日志里「钻头」那一段列出了每种材料要投几个。")
                 + "（这条只报一次）");
         }
     }
