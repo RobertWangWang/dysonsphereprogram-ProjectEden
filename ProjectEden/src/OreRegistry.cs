@@ -223,6 +223,22 @@ namespace ProjectEden
                 Ores.Add(ore);
             }
 
+            // **按矿种编号升序排，不跟 ores.json 的书写顺序。**
+            //
+            // 原版 PlanetModelingManager.PrepareWorks 的定容循环是
+            //     for (i = 0; i &lt; veinProtos.Length; i++) size = veinProtos[i].ID + 1;
+            // 注意那是<b>赋值不是取最大值</b>——数组长度取决于 dataArray 里<b>最后一个</b>
+            // 元素的 ID。紧接着它又拿 veinProducts[proto.ID] 逐个写，
+            // 于是任何 ID 大于「最后一个的 ID」的矿脉都会越界。
+            //
+            // 本 mod 的注册顺序就是 dataArray 顺序，而注册顺序原本跟着配置文件的书写顺序走。
+            // 把新矿脉写在 ores.json 开头（一个再自然不过的动作）就会让 dataArray 变成
+            // …14, 23, 15…22，定容 23 格、写到 23 号时 IndexOutOfRange，
+            // 而堆栈只指向 PrepareWorks，不指向本仓库任何代码。**实测踩过。**
+            //
+            // 排一下序就结构性地不可能发生，代价是一次 O(n log n)。
+            Ores.Sort((a, b) => a.VeinId.CompareTo(b.VeinId));
+
             // 配方要等所有矿石和锭都拿到 ID 之后才能解析 ref——
             // 跨矿种引用（比如 A 的锭当 B 的原料）也就跟着能用了
             foreach (Ore ore in Ores) AddRecipes(ore.Entry.recipes, ore);
@@ -350,6 +366,57 @@ namespace ProjectEden
 
                 return;
             }
+        }
+
+        /// <summary>
+        /// 核对 <c>LDB.veins.dataArray</c> 的<b>最后一个</b>元素是不是 ID 最大的那个。
+        ///
+        /// <b>这是在验最终状态，不是验我们自己排过序。</b> 排序只保证本 mod 内部有序，
+        /// 但别的 mod 也可能往这张表里塞矿脉，而且 LDBTool 的合并顺序不归我们管。
+        ///
+        /// <b>为什么这一条值得单独查。</b> 原版 <c>PlanetModelingManager.PrepareWorks</c>
+        /// 的定容循环是
+        /// <code>
+        /// for (i = 0; i &lt; veinProtos.Length; i++) size = veinProtos[i].ID + 1;   // 赋值，不是 Max
+        /// </code>
+        /// 数组长度因此取决于最后一个元素的 ID；接着它又按 <c>proto.ID</c> 逐个写进去。
+        /// 表一旦不是按 ID 递增排列，游戏就在 <c>GameMain.Start</c> 里
+        /// <c>IndexOutOfRangeException</c>，而堆栈只指向 <c>PrepareWorks</c>——
+        /// <b>不指向本仓库任何一行代码</b>。所以宁可在这里先吼一声。
+        /// </summary>
+        private static void VerifyVeinArrayOrder()
+        {
+            VeinProto[] arr = LDB.veins?.dataArray;
+
+            if (arr == null || arr.Length == 0) return;
+
+            var max = 0;
+            var last = 0;
+
+            foreach (VeinProto v in arr)
+            {
+                if (v == null) continue;
+
+                if (v.ID > max) max = v.ID;
+
+                last = v.ID;
+            }
+
+            if (last >= max)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"矿脉表核对通过：共 {arr.Length} 条，最大编号 {max}，末位 {last}，"
+                    + $"PrepareWorks 会按 {max + 1} 定容");
+
+                return;
+            }
+
+            ProjectEdenPlugin.Log.LogError(
+                $"矿脉表的末位是 {last} 而最大编号是 {max}——**游戏会在启动时崩**。"
+                + "原版 PlanetModelingManager.PrepareWorks 按<b>最后一个</b>元素的 ID+1 定容"
+                + "（那一句是赋值不是取最大值），然后按 ID 逐个写，"
+                + $"写到 {max} 号时越界，堆栈只指向 PrepareWorks 不指向本 mod。"
+                + "检查 ores.json 里 veinId 的顺序，或者是否有别的 mod 往矿脉表里加了东西。");
         }
 
         // ── 矿脉模型：克隆铁矿脉再染色 ────────────────────────
@@ -858,6 +925,8 @@ namespace ProjectEden
                 ExtendThemes(ore);
                 TintIcons(ore);
             }
+
+            VerifyVeinArrayOrder();
         }
 
         /// <summary>
