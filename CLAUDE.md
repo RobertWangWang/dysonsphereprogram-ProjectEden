@@ -608,6 +608,15 @@ Item/recipe/model id, replicator `GridIndex` and build-menu `BuildIndex` allocat
 
 ### Assets & config
 
+**Editing `data/*.json` does nothing until you rebuild.** They are embedded resources, so the
+running game reads the copy inside `ProjectEden.dll`, not the one on disk. A script that validates
+the design by reading `ProjectEden/data/*.json` is therefore reading a *different file* from the one
+the game loaded — and the two silently diverge the moment you edit the JSON without `dotnet build`.
+This cost a launch on the combustible-liquid chain: two fuels' temperatures were swapped in the
+JSON, the validation script reported the new order, and the game logged the old one. Either rebuild
+before every launch, or put the file in `BepInEx/config/ProjectEden/` and use the disk-override path
+(which logs a WARNING every time, precisely so it cannot be forgotten).
+
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
 The fifteen configs: `megabuildings.json` (tab, build category 12, the six buildings with their pinned model IDs 708 and 723–727, station block), `advancedminer.json` (miner/pump limits + the ore→ingot product map), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed + the lab↔station virtual feed), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe).
