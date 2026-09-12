@@ -41,6 +41,13 @@ namespace ProjectEden.Patches
 
         /// <summary>开了就在后台把每颗候选星球扫一遍，报出稀有矿脉具体在哪。见 <see cref="RareVeinProspector"/>。</summary>
         public bool prospectRareVeins;
+
+        /// <summary>
+        /// 这种矿脉是否只有<b>大型采矿机</b>能采。见 <see cref="AlienVeinMinerGatePatches"/>：
+        /// 钻头槽是物流站仓位，普通采矿机结构上就没有，所以它本来也挖不动——
+        /// 这个开关决定的只是「在建造时就说清楚」还是「建好之后干转」。
+        /// </summary>
+        public bool advancedMinerOnly;
     }
 
     /// <summary>
@@ -136,7 +143,10 @@ namespace ProjectEden.Patches
             ProjectEdenPlugin.Log.LogInfo(
                 $"外星矿脉已就绪：{Config.veinRef} 矿脉类型 {VeinType}，"
                 + $"钻头物品 {DrillBitRegistry.BitItemId}，一个能挖 {BitCapacity:N0} 矿，"
-                + $"钻头槽是第 {Config.bitSlotIndex} 格（本 mod 自己布置成「钻头」的 Demand 槽，囤 {(Config.bitSlotCapacity > 0 ? Config.bitSlotCapacity : DefaultBitSlotCapacity):N0} 个）");
+                + $"钻头槽是第 {Config.bitSlotIndex} 格（本 mod 自己布置成「钻头」的 Demand 槽，囤 {(Config.bitSlotCapacity > 0 ? Config.bitSlotCapacity : DefaultBitSlotCapacity):N0} 个）；"
+                + (Config.advancedMinerOnly
+                       ? "普通采矿机<b>在建造时</b>就会被拦下"
+                       : "普通采矿机可以盖上去，但它没有钻头槽，建好也挖不动"));
         }
 
         private static bool ResolveVein()

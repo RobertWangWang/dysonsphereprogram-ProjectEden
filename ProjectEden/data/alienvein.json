@@ -18,6 +18,8 @@
   "//bitSlotCapacity": "钻头槽囤多少个。**别填成储物格上限**：本地 Demand 槽照着 max 要货（localDemandCount = max - (count + localOrder)），而这个 mod 把物流站格位放大到了 1000 万，抄过来就是第一台采矿机向全网索要一千万个钻头、把后面每一台饿死，症状还是「我别的采矿机全停了」，指不到真正的原因。默认 3000 是按满速推的：20 万矿/秒 ÷ 每钻头 47,970 矿 ≈ 每秒 4.2 个，3000 个够挖 12 分钟。",
   "bitSlotCapacity": 3000,
   "//prospectRareVeins": "开了就在后台用**游戏自己的星图扫描**（PlanetModelingManager.RequestScanPlanet）把每颗候选星球扫一遍，逐条报出「哪个星系哪颗行星出什么稀有矿」。扫描跑在副本上（GetUnloadedCopy → 算完 → CopyScannedDataFrom → ReleaseCopy），所以内存开销是一颗星球、不是几十颗，结果也和玩家自己飞过去看到的完全一致。**不自己复算随机数**：GenerateVeins 里稀有矿那两次抽取之前，还有一段次数取决于数据的循环，复算一旦错开一次**不会报错、只会自信地报出错的星球**，那比不报还糟。找到东西之后可以关掉，省那几十次后台扫描。",
+  "//advancedMinerOnly": "这种矿脉是否**只有大型采矿机能采**。注意这不是一条新规则，而是把一条本来就成立的规则提前到建造时：钻头槽是**物流站仓位**，普通采矿机连 StationComponent 都没有，结构上就不可能有那一格，AlienVeinPatches.Tick 里会直接 Block 它。关掉的后果不是「普通采矿机能挖了」，而是回到「盖得下去、通了电、一件不出、面板上看不出原因」。判据用 PrefabDesc.isVeinCollector（大型采矿机为 true）而不是物品号：它和「有没有物流站仓位」是同一件事，写物品号只是碰巧对。",
+  "advancedMinerOnly": true,
   "prospectRareVeins": true,
   "//bit": "钻头物品与它的配方模板。**谓词在注册时展开成一条条具体配方**（每种合格材料一条），而不是运行时求值——这正是 CLAUDE.md 里写着「设计了但还没写」的那一条，RecipeProto.Items 是 int[]，表达不了谓词。好处：不用第六种面板模式、不用逐台存档状态，而且每种材料各占一个合成格、更好发现。",
   "//bit-count": "**四维的差别从「钻头好不好」搬到了「做一个钻头花多少料」。** 钻头本身统一：一个能挖 capacity 矿，而 capacity 就是合格材料里最高的那个产量（所以最好的材料投 1 个，是算出来的不是定出来的）；其余材料投 ceil(capacity / 它的产量) 个。",

@@ -279,6 +279,19 @@ One vein type (莫桑石, type 23) consumes a **drill bit** per N ore mined. Onl
 existing saves are untouched and "no bit → the miner simply stops" is an acceptable failure mode.
 Three findings are worth keeping; the first two are about the same station slot.
 
+**A plain 采矿机 is refused at build time, and that rule is a consequence rather than a choice.**
+The bit slot is a *station* slot, so a miner with no `StationComponent` structurally cannot have
+one — `AlienVeinPatches.Tick` already `Block`ed such a miner, which meant it built, powered up and
+produced nothing with no visible cause. `AlienVeinMinerGatePatches` moves that refusal to
+`CheckBuildConditions` (postfix on the same three tools `MinerBuildRulePatches` uses), reading the
+vein ids vanilla already wrote into `BuildPreview.parameters` / `paramCount` rather than re-running
+the geometry. It discriminates on **`PrefabDesc.isVeinCollector`, not a proto id** — that flag *is*
+"has a station slot", i.e. the same fact as "can hold drill bits"; a proto id would only be
+accidentally right. The condition it sets is `NeedResource`, which has a vanilla precedent: a plain
+miner next to an oil seep gets exactly that, because oil is filtered out of its vein list.
+**It sets `__result = false` itself** rather than relying on `MinerBuildRulePatches`' postfix, which
+recomputes the return value only `if (cleared)` and whose relative order is not guaranteed.
+
 **An array slot that exists is not a slot that works.** Raising the miner's
 `prefabDesc.stationMaxItemKinds` from 1 to 2 does make `StationComponent.Init` allocate
 `storage[2]` — and that is all it does. Both fill loops run only to `collectionIds.Length`

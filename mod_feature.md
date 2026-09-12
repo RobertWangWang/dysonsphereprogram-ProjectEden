@@ -2230,9 +2230,25 @@ at the repo root.
 |---|---|
 | Vein | Moissanite Vein (type 23), yields **Moissanite**; it is not smelted into a metal |
 | Where | **None at all in the home system**; Barren Desert / Ashen Gelisol / Halite Flats, 12% per planet |
-| How | Advanced Mining Machine, **storage slot 1 holds drill bits** |
+| How | **Advanced Mining Machine only**, with **storage slot 1 holding drill bits** |
 | One bit | mines **47,970** ore |
 | Bits made in | the **Forgeworks Fabricator** (this mod's `ERecipeType` 12, Forging) |
+
+### A plain Mining Machine cannot be placed, and it says so up front
+
+**Only the Advanced Mining Machine can work moissanite.** Placing a plain Mining Machine on a
+moissanite vein is refused outright, with the same message as "no vein nearby" — which is exactly
+how vanilla treats oil seeps: oil is filtered out of a plain miner's vein list, so as far as that
+machine is concerned there is no usable resource there.
+
+**This restriction was not added for balance; it was already true.** The drill-bit slot is a
+**logistics station slot**, and a plain Mining Machine has no StationComponent at all, so it
+structurally cannot have one — meaning it could never mine the vein anyway. What you got before
+was a machine that built fine, drew power, produced nothing, and gave no hint why. All that
+changed is that the refusal now happens at build time.
+
+The test is "is this a station-style miner", not a proto id, because that flag and "does it have a
+drill-bit slot" are the same fact; a proto id would only be accidentally right.
 
 ### What it solves
 
