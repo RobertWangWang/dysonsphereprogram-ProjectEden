@@ -28,9 +28,17 @@ namespace ProjectEden.Patches
     /// 它在 prefab 里，也就是 <c>resources.assets</c>，离线读不到——和燃料位、
     /// 增产剂参数是同一种情况，做法照抄 <c>FuelSurvey</c> / <c>ProliferatorSurvey</c>。
     ///
-    /// 顺带报 <c>StationCapacityPatches</c> 认不认得它：那边的格数提升按
-    /// <c>isStation || isCollectStation</c> 过滤，<b>而采矿机是 <c>isVeinCollector</c></b>，
-    /// 两个标志都不带的话它现在是被整个跳过的。
+    /// <b>实测答案（2316 大型采矿机）：<c>stationMaxItemKinds = 1</c>，而且那一格被矿占满。</b>
+    /// 所以钻头槽必须靠抬高这个字段来腾，抬到 <b>2</b> 就够——
+    /// 别抬到 30，多出来的空格会把 30 格的物流站界面拖上来（气体采集器那条老教训）。
+    ///
+    /// <b>它现在没被 <see cref="StationCapacityPatches"/> 改过，但原因不是标志。</b>
+    /// 采矿机的 <c>isStation</c> 其实是 <c>true</c>，能过那边 <c>Apply()</c> 的守卫；
+    /// 真正的原因是 <c>Apply()</c> <b>只对一份固定名单调用</b>（stations.json 的
+    /// <c>itemIds</c>、巨型建筑、machines.json 里 kind 为 station 的，
+    /// 外加按 <c>isCollectStation</c> 发现的采集器），采矿机一个都不在里面。
+    /// 本类头一版就是按标志推的，报出「覆盖得到它」而实测是 1 格，结论正好反了——
+    /// <b>验最终状态，不验自己那一步。</b>
     /// </summary>
     internal static class MinerStationSurvey
     {
@@ -63,6 +71,16 @@ namespace ProjectEden.Patches
 
                 found++;
 
+                // <b>报测出来的结果，不报「按标志推应该怎样」。</b>
+                // 头一版这里写的是 isStation || isCollectStation ? "覆盖得到它" : ... ——
+                // 那是 StationCapacityPatches 内部 Apply() 的守卫条件，可它遍历的是一份
+                // <b>固定名单</b>（stations.json 的 itemIds + 巨型建筑 + machines.json 的
+                // station，外加按 isCollectStation 发现的采集器），采矿机一个都不在里面，
+                // Apply 根本没被调用。于是探针报「覆盖得到」而实测是 1 格，结论正好反了。
+                // <b>这就是仓库那条「验最终状态，不验自己那一步」。</b>
+                int want = ProjectEdenPlugin.StationsConfig?.stationMaxItemKinds ?? 0;
+                bool raised = want > 0 && desc.stationMaxItemKinds >= want;
+
                 ProjectEdenPlugin.Log.LogInfo(
                     $"── 矿脉采集建筑：{proto.Name}({proto.ID}) ──\n"
                     + $"  储物格数 stationMaxItemKinds = {desc.stationMaxItemKinds}"
@@ -72,8 +90,14 @@ namespace ProjectEden.Patches
                     + $" isStation={desc.isStation}"
                     + $" isCollectStation={desc.isCollectStation}"
                     + $" isStellarStation={desc.isStellarStation}\n"
-                    + $"  → StationCapacityPatches 的格数提升{(desc.isStation || desc.isCollectStation ? "覆盖得到它" : "**覆盖不到它**（那边按 isStation || isCollectStation 过滤）")}\n"
-                    + $"  → 要加钻头槽，得把 stationMaxItemKinds 抬到 {desc.stationMaxItemKinds + 1} 或更高");
+                    + $"  → stations.json 要 {want} 格，实测 {desc.stationMaxItemKinds} 格："
+                    + (raised
+                        ? "已被 StationCapacityPatches 改过"
+                        : "**没被改过** —— 那边遍历的是固定名单（stations.json 的 itemIds、"
+                          + "巨型建筑、machines.json 的 station，加按 isCollectStation 发现的采集器），"
+                          + "本建筑不在其中")
+                    + $"\n  → 要加钻头槽，把 stationMaxItemKinds 抬到 {desc.stationMaxItemKinds + 1} 就够；"
+                    + "**别抬到 30** —— 多出来的空格会把 30 格的物流站界面拖上来（气体采集器那条老教训）");
             }
 
             if (found == 0)
