@@ -38,6 +38,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XIX. The Biodome: a light-bound biological chain](#xix-the-biodome-a-light-bound-biological-chain)
 - [XX. Living Composite: hyphae growing metal into a solid](#xx-living-composite-hyphae-growing-metal-into-a-solid)
 - [XXI. Combustible Liquid Power Plant: what you burn decides how much you get out](#xxi-combustible-liquid-power-plant-what-you-burn-decides-how-much-you-get-out)
+- [XXII. Living Proliferators: two tiers above vanilla, each in two characters](#xxii-living-proliferators-two-tiers-above-vanilla-each-in-two-characters)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -2118,6 +2119,102 @@ behind the numbers are all in `可燃液体发电V1.md` at the repository root. 
 
 ---
 
+## XXII. Living Proliferators: two tiers above vanilla, each in two characters
+
+One recipe, **any two Living Composites**, and the pair decides which proliferator comes out.
+Like alloy ammo the **recipe is not documented** — the replicator shows a single
+"Proliferator · Mycelial Coating", and which pair gives which is yours to find.
+
+| | |
+|---|---|
+| Machine | Chemical Plant |
+| Input | any two Living Composites, 4 each (the same one twice is allowed) |
+| Output | **Proliferator Mk.IV / Mk.V**, each in an Extensive and a Concentrated form — four in all |
+
+### Two properties doing two different jobs
+
+Vanilla's three proliferators are a single upgrade line: each tier gives both a bigger per-item
+bonus and more sprays per unit. These four split that into two directions:
+
+| Property | What it decides |
+|---|---|
+| **Spray Level** | how much extra product / speed a sprayed item gets |
+| **Sprays** | how many items one unit covers — i.e. how big your proliferator line has to be |
+
+**Within a tier, the higher level always sprays fewer.** That is not a tuning choice: both
+variants split the same total-charge budget, so it falls out.
+
+### The numbers
+
+Vanilla's top tier, Mk.III, is level 4, 60 sprays, +25% products / +100% speed, ×2.5 power.
+
+| | Spray Level | Sprays | Products | Speed | Coater power |
+|---|---|---|---|---|---|
+| **Mk.IV Extensive** | 4 | **112** | +25% | +100% | ×2.5 |
+| **Mk.IV Concentrated** | 5 | 90 | +27.5% | +125% | ×2.9 |
+| **Mk.V Extensive** | 5 | **151** | +27.5% | +125% | ×2.9 |
+| **Mk.V Concentrated** | **6** | 126 | **+30%** | **+150%** | ×3.3 |
+
+Mk.IV Extensive gives **exactly** the vanilla top tier's per-item bonus; what it wins is 112
+sprays per unit instead of 60. What it saves is not electricity — it is the proliferator line itself.
+
+> **Higher levels are actually less power-efficient.** Per watt, level 6 is worse than level 4
+> (1.30/3.3 against 1.25/2.5, and the same for speed). What it sells is **output per machine** —
+> in this mod power is cheap and floor space and building count are the bottleneck, so the
+> direction is right, but do not expect it to save electricity.
+
+### The panel
+
+Select the recipe and two picker rows appear below the Chemical Plant window.
+**Click the left half to step back, the right half to step forward:**
+
+```
+【Living Proliferator】
+Feedstock A   ◀  Living Composite II  ▶
+Feedstock B   ◀  Living Composite II  ▶
+
+Character 0.29  Grade 110.0  →  Proliferator Mk.V · Extensive ×2   Spray Level 5 / Sprays 151
+```
+
+The result line prints **both scores**, because the outcome is two-dimensional: report only the
+result and you cannot tell whether that last click moved the grade or the character.
+
+- **Character** = hardness / toughness. Hardness-dominant → Concentrated
+- **Grade** = corrosion + conductivity. Higher → Mk.V
+
+This is also the first time the Living Composite's four property axes are **actually read** by
+anything — until now they were displayed in the tooltip and fed no calculation at all.
+
+### A hint: the best material is not the answer
+
+The instinct is to shovel in two of the top grade, **Living Composite IV Rigidized**.
+**That gives the second-weakest of the four.**
+
+The rigidized phase is absurdly hard, so its character score lands firmly on the Concentrated
+side — but its corrosion + conductivity is only 93, **just short of the grade threshold**.
+Conversely the humblest of them, **II Percolating**, doubled up gives Mk.V Extensive: it is the
+only one of the four grades that conducts, and "electrical percolation precedes mechanical
+percolation" finally has a consequence.
+
+The rest is yours to find. Each pair you discover gets a line in the log.
+
+### Why it stops at level 6
+
+The engine's proliferator tables actually run to **level 10**; vanilla only ever uses 4. What
+stops us is not the table — it is the **belt**:
+
+```
+spraying does      a cargo stack's proliferator charge = stack size × spray level
+this mod's preloader widened that field to Int16 (max 32767)
+belt stacking 5000  →  level 6 at most
+```
+
+**Belt stacking and proliferator level are two charges against the same budget.** Getting to
+level 10 would mean dropping stacking below 3276, which is plainly a bad trade. The startup log
+computes the ceiling for your current config and spells out the derivation.
+
+---
+
 ## Config Quick Reference
 
 | File | What it controls |
@@ -2138,6 +2235,7 @@ behind the numbers are all in `可燃液体发电V1.md` at the repository root. 
 | `composite.json` | Living Composite: the filler shortlist, the ratio bands for the four grades, yield and percolation parameters |
 | `ammo.json` | Alloy ammo: the five tiers' damage/rounds multipliers, the pair-conversion weights, the yield curve |
 | `combustibles.json` | Combustible liquid power: each liquid's working temperature, the Carnot cold side and second-law efficiency, the fuel type bit, the property row's field id |
+| `proliferator.json` | Living proliferators: the candidate list for both feedstock slots, the thresholds for the character and grade scores, and each outcome's level / sprays / yield |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 
 > Before adding an item or recipe to `ores.json`, read the standard in section XII — **properties are derived from
