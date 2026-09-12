@@ -133,6 +133,10 @@ namespace ProjectEden
             // 炮塔弹药白名单是同一族的另一张预加载期静态表，LDBTool 同样没有替我们重跑
             LDBTool.PostAddDataAction += RefreshTurretNeeds;
 
+            // 燃料普查：纯诊断，不改任何东西。
+            // FuelType 位和发电建筑的 prefab 参数都在 resources.assets 里，离线读不到
+            LDBTool.PostAddDataAction += FuelSurvey.OnPostAddData;
+
             // 漏译核对也排在最后：要等所有 proto 都进了 LDB 才数得清
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
 
@@ -156,6 +160,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= CompositeRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
+            LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= I18N.VerifyCoverage;
 
             _harmony?.UnpatchSelf();
