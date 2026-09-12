@@ -131,6 +131,23 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // 烧结析出：只有一行选择器 —— 放哪一级进去，就出哪一样原版材料
+            if (CompositeOutputPatches.Current(__instance.factory, entityId, out int[] outState))
+            {
+                if (!EnsurePanel(__instance)) return;
+
+                _panel.SetActive(true);
+
+                HandleOutputInput(__instance.factory, entityId, outState);
+
+                if (CompositeOutputPatches.Current(__instance.factory, entityId, out int[] nowOut))
+                    outState = nowOut;
+
+                RefreshOutput(outState);
+
+                return;
+            }
+
             // 这台机器跑的不是可配比的合金就整块收起来，
             // 别在别的配方下面挂一条看不懂的面板
             if (!AlloyRatioPatches.Current(__instance.factory, entityId,
@@ -347,6 +364,85 @@ namespace ProjectEden.Patches
                 + $"  →  {t.Entry.name} ×{yield}   {"伤害".Translate()} {t.Damage}";
 
             _resultText.color = new Color(0.72f, 0.82f, 0.92f);
+        }
+
+        private static bool _outputClickLatch;
+
+        /// <summary>烧结析出的输入：一行选择器，点左右半边换等级。</summary>
+        private static void HandleOutputInput(PlanetFactory factory, int entityId, int[] state)
+        {
+            if (!Input.GetMouseButton(0))
+            {
+                _outputClickLatch = false;
+
+                return;
+            }
+
+            if (_outputClickLatch) return;
+
+            List<CompositeRegistry.Output> pool = CompositeRegistry.Outputs;
+
+            if (pool.Count < 2 || !InRow(0, out Vector2 hit)) return;
+
+            _outputClickLatch = true;
+
+            Rect rect = Rows[0].Track.rect;
+            int step = hit.x < rect.center.x ? -1 : 1;
+
+            var at = 0;
+
+            for (var i = 0; i < pool.Count; i++)
+                if (pool[i].GradeItemId == state[0])
+                    at = i;
+
+            var next = new[] { pool[((at + step) % pool.Count + pool.Count) % pool.Count].GradeItemId };
+
+            if (!CompositeOutputPatches.Apply(factory, entityId, next)) return;
+
+            AlloyRatioStore.SetPlayerDefault(CompositeRegistry.OutputRecipeId, next);
+        }
+
+        private static void RefreshOutput(int[] state)
+        {
+            _titleText.text = "烧结析出面板标题".Translate();
+
+            _panelTrs.sizeDelta = new Vector2(0f, HeadHeight + RowHeight + FootHeight);
+
+            for (var i = 0; i < MaxRows; i++)
+            {
+                var on = i == 0;
+
+                if (Rows[i].Root.activeSelf != on) Rows[i].Root.SetActive(on);
+            }
+
+            Rows[0].Root.transform.localPosition = new Vector3(0f, -HeadHeight, 0f);
+            Rows[0].Label.text = "投入等级".Translate();
+
+            LayoutRow(Rows[0], true);
+
+            CompositeRegistry.Output pick = CompositeRegistry.FindOutput(state[0])
+                                            ?? CompositeRegistry.Outputs[0];
+
+            ItemProto grade = LDB.items.Select(pick.GradeItemId);
+
+            Rows[0].Value.text = "◀  " + (grade != null ? grade.name : "?") + "  ▶";
+            Rows[0].Fill.anchorMin = Vector2.zero;
+            Rows[0].Fill.anchorMax = new Vector2(0f, 1f);
+            Rows[0].Fill.offsetMin = Vector2.zero;
+            Rows[0].Fill.offsetMax = Vector2.zero;
+            Rows[0].TrackImage.color = new Color(1f, 1f, 1f, 0.12f);
+
+            _resultText.rectTransform.anchoredPosition =
+                new Vector2(SidePad, -(HeadHeight + RowHeight + 4f));
+
+            ItemProto target = LDB.items.Select(pick.TargetItemId);
+
+            _resultText.text =
+                $"{(grade != null ? grade.name : "?")} ×{pick.Entry.input}"
+                + $"  →  {(target != null ? target.name : "?")} ×{pick.Entry.count}"
+                + $"   {pick.Entry.timeSpend / 60f:0.##}s";
+
+            _resultText.color = new Color(0.92f, 0.86f, 0.70f);
         }
 
         private static bool _compositeClickLatch;

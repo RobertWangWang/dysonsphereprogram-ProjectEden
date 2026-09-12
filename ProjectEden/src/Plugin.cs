@@ -419,6 +419,7 @@ namespace ProjectEden
             AlloyRatioPatches.ReapplyAll("存档块读回后");
             AmmoPairPatches.ReapplyAll();
             CompositePatches.ReapplyAll();
+            CompositeOutputPatches.ReapplyAll();
         }
 
         public void IntoOtherSave()

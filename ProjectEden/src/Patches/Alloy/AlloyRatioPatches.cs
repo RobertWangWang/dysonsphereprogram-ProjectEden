@@ -709,6 +709,7 @@ namespace ProjectEden.Patches
             // 这里和 Plugin.Import 各调一次，理由见上面 ReapplyAll 的注释——两个入口顺序是反的
             AmmoPairPatches.ReapplyAll();
             CompositePatches.ReapplyAll();
+            CompositeOutputPatches.ReapplyAll();
         }
 
         /// <summary>玩家在装配器窗口里选了配方：贴这台建筑记着的配比，没记过就贴当前默认。</summary>

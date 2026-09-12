@@ -1970,11 +1970,34 @@ told apart at a glance in the inventory. What is drawn inside the disc *is* the 
 islands, then one spanning path, then the full web, then triangulated and filled — plus one
 to four grade notches on the mounting ring.
 
-### Nothing consumes them yet
+### Downstream: Directed Exsolution
 
-**This is the one gap left on this chain.** All four grades can be made, but no recipe uses
-them yet — the next step is either to feed them into a vanilla late-game item, or into the
-alloy ammunition line.
+Send the grown composite into a **Smelter** (or the mega Foundry Smelter). The mycelial matrix
+chars away and the metal skeleton left behind exsolves along whatever way it was connected —
+**which grade you put in decides what comes out**:
+
+| Feed in | Get out | Why |
+|---|---|---|
+| **I Dispersed** | **Frame Material** | The highest-volume structural part for a Dyson sphere; light and tough is exactly what it wants |
+| **II Percolating** | **Particle Broadband** | Broadband is transmission, and this is the only grade in the game that is a *soft* conductor |
+| **III Connected** | **Titanium Crystal** | All-rounder for an all-rounder |
+| **IV Rigidized** | **Diamond** | See below |
+
+Another one-cell recipe with a panel: select it and click the left or right half of the row to
+change which grade goes in.
+
+**All four grades are wanted at once** — which is the point of their being mutually
+non-dominated. This is not an upgrade ladder you save up for: you make grade I because you want
+Frame Material, and grade IV because you want Diamond.
+
+> **The IV → Diamond pairing has a real basis.** HPHT synthetic diamond is grown from a
+> **iron/nickel/cobalt metal solvent-catalyst plus a carbon source**, and grade IV happens to be
+> cobalt-chrome or carbide grains in a carbon-rich organic matrix — catalyst and carbon source in
+> the same block. The other three pairings are **flavour, not mechanism**: DSP does not model
+> material properties, and the engine only knows "this recipe wants that item ID".
+
+The numbers are a first cut and still need tuning against the vanilla routes. The startup log
+prints `平衡对照 · …` lines giving the ingredients and time of each target's existing route.
 
 The full design, with the paper citations behind every number, is `活性复合材料V1.md` at the
 repository root.

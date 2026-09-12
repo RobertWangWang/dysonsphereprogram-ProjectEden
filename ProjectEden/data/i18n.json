@@ -268,6 +268,10 @@
     "把合金粉和菌丝基体拌在一起，让菌丝顺着颗粒之间的缝长过去，把金属锁成一块料。**放哪种合金、放多少，在下面的面板里选**——合金决定它的性格，配比决定菌丝网络连到什么程度，也就决定出哪一级。": "Alloy powder is folded into the mycelial matrix and the hyphae grow through the gaps between the grains, locking the metal into one solid. **Which alloy, and how much, is chosen in the panel below** — the alloy sets its character, and the ratio sets how far the hyphal network connects, which is to say which grade comes out.",
     "活性复合材面板标题": "Living Composite — filler and ratio",
     "填料合金": "Filler alloy",
-    "合金配比": "Alloy ratio"
+    "合金配比": "Alloy ratio",
+    "活性复合材 · 烧结析出": "Living Composite · Directed Exsolution",
+    "把长好的复合材送进熔炉。菌丝基体在高温下炭化退场，留下的金属骨架按它自己的连通方式定向析出——**放进去哪一级，出来就是哪一样东西**。选哪一级，在下面的面板里点。": "The grown composite goes into the furnace. The mycelial matrix chars away at temperature and the metal skeleton left behind exsolves along whatever way it was connected — **which grade you put in decides what comes out**. Pick the grade in the panel below.",
+    "烧结析出面板标题": "Directed Exsolution — which grade goes in",
+    "投入等级": "Grade fed in"
   }
 }

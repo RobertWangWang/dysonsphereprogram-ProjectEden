@@ -180,6 +180,164 @@ namespace ProjectEden.Patches
                 $"活性复合材已就绪：{Candidates.Count} 种填料 × {Grades.Count} 个等级 = " +
                 $"{Candidates.Count * Grades.Count} 种组合，共用配方 {RecipeId}「{recipe.Name}」；" +
                 $"可选填料：{string.Join("、", names.ToArray())}");
+
+            ResolveOutputs();
+        }
+
+        // ── 下游：烧结析出 ────────────────────────────────
+
+        internal class Output
+        {
+            internal CompositeOutputEntry Entry;
+            internal int GradeItemId;
+            internal int TargetItemId;
+        }
+
+        internal static readonly List<Output> Outputs = new List<Output>();
+
+        internal static int OutputRecipeId { get; private set; }
+
+        internal static bool OutputReady => Ready && Outputs.Count > 0 && OutputRecipeId > 0;
+
+        internal static Output FindOutput(int gradeItemId)
+        {
+            for (var i = 0; i < Outputs.Count; i++)
+                if (Outputs[i].GradeItemId == gradeItemId)
+                    return Outputs[i];
+
+            return null;
+        }
+
+        /// <summary>
+        /// 解析烧结析出。<b>每个原版目标都做名字交叉核对</b>——写死原版物品 ID 是有风险的：
+        /// 数字打错会静默指向别的物品，做出一条产物不对的配方，而且什么都不报。
+        /// </summary>
+        private static void ResolveOutputs()
+        {
+            Outputs.Clear();
+            OutputRecipeId = 0;
+
+            CompositeOutputs cfg = Config?.outputs;
+
+            if (cfg?.entries == null || cfg.entries.Length == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo("活性复合材：composite.json 里没有配 outputs，下游不启用");
+
+                return;
+            }
+
+            foreach (CompositeOutputEntry e in cfg.entries)
+            {
+                if (e == null) continue;
+
+                int gid = OreRegistry.FindItemIdByRef(e.gradeRef);
+                ItemProto target = LDB.items.Select(e.targetItemId);
+
+                if (gid <= 0 || target == null)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"烧结析出：「{e.gradeRef}」→ {e.targetItemId} 解析不出物品，下游停用");
+
+                    Outputs.Clear();
+
+                    return;
+                }
+
+                // 比的是 Name（原始键）不是 name（翻译后）——英文环境下才不会全部误报
+                if (!string.IsNullOrEmpty(e.targetName) && target.Name != e.targetName)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"烧结析出：物品 {e.targetItemId} 实际是「{target.Name}」，" +
+                        $"配置里写的是「{e.targetName}」—— 原版 ID 写错了，下游停用");
+
+                    Outputs.Clear();
+
+                    return;
+                }
+
+                Outputs.Add(new Output { Entry = e, GradeItemId = gid, TargetItemId = e.targetItemId });
+            }
+
+            RecipeProto recipe = LDB.recipes.Select(cfg.recipeId);
+
+            if (recipe == null)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"烧结析出：找不到配方 {cfg.recipeId}（配方本体在 ores.json 里），下游停用");
+
+                Outputs.Clear();
+
+                return;
+            }
+
+            if (recipe.Items == null || recipe.Items.Length != 1
+                || recipe.Results == null || recipe.Results.Length != 1)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"烧结析出：配方「{recipe.Name}」的原料数与产物数都应为 1，" +
+                    $"实际 {recipe.Items?.Length ?? 0} / {recipe.Results?.Length ?? 0}，下游停用");
+
+                Outputs.Clear();
+
+                return;
+            }
+
+            OutputRecipeId = cfg.recipeId;
+
+            recipe.Items[0] = Outputs[0].GradeItemId;
+            recipe.Results[0] = Outputs[0].TargetItemId;
+
+            var lines = new List<string>();
+
+            foreach (Output o in Outputs)
+                lines.Add($"{LDB.items.Select(o.GradeItemId)?.name}×{o.Entry.input}"
+                          + $"→{LDB.items.Select(o.TargetItemId)?.name}×{o.Entry.count}");
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"烧结析出已就绪：配方 {OutputRecipeId}「{recipe.Name}」，"
+                + $"{Outputs.Count} 条 —— {string.Join("、", lines.ToArray())}");
+
+            ReportVanillaRoutes();
+        }
+
+        /// <summary>
+        /// 把每个目标物品的<b>原版配方</b>打进日志。
+        ///
+        /// <b>这不是装饰，是给平衡用的唯一数据源。</b> 原版配方存在 resources.assets 里，
+        /// 离线读不到，所以"这条替代路线是不是比原版划算"没法在写配置的时候判断。
+        /// 打出来之后照着调 input / count 就行。
+        /// </summary>
+        private static void ReportVanillaRoutes()
+        {
+            foreach (Output o in Outputs)
+            {
+                RecipeProto[] all = LDB.recipes.dataArray;
+
+                if (all == null) continue;
+
+                foreach (RecipeProto r in all)
+                {
+                    if (r?.Results == null || r.ID == OutputRecipeId) continue;
+
+                    var hit = false;
+
+                    for (var i = 0; i < r.Results.Length; i++)
+                        if (r.Results[i] == o.TargetItemId)
+                            hit = true;
+
+                    if (!hit) continue;
+
+                    var parts = new List<string>();
+
+                    for (var i = 0; i < (r.Items?.Length ?? 0); i++)
+                        parts.Add($"{LDB.items.Select(r.Items[i])?.name}×{r.ItemCounts[i]}");
+
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"  平衡对照 · {LDB.items.Select(o.TargetItemId)?.name} 的现有路线"
+                        + $"「{r.name}」：{string.Join(" + ", parts.ToArray())} → ×{r.ResultCounts[0]}"
+                        + $"，{r.TimeSpend / 60f:0.##} 秒");
+                }
+            }
         }
 
         /// <summary>合金份数 → 等级下标。取「份数够得着」的最高一级。</summary>

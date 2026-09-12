@@ -45,6 +45,20 @@
   "percolationStart": 0.25,
   "percolationSpan": 0.45,
 
+  "//outputs": "下游：烧结析出。**一条配方，放哪一级进去就出哪一样原版后期材料。** 为什么是四个不同的产物而不是一样东西的四档——四级复合材是互不支配的（见 活性复合材料V1.md 9.5），下游只要「想要最好那一级」，另外三级立刻变回死内容。接四样你都缺的东西，四级才会被同时需要。",
+  "//outputs-machine": "走**冶炼厂（type 1）**：四条都是热处理——烧结成型、抽拉、结晶、高温高压析出。机器跟反应类别走，和「酯交换不是氧化还原所以留在化工厂」是同一条判据。顺带巨型建筑里的冶铸熔炉也做得了。",
+  "//outputs-pairing": "**IV → 金刚石这条有真实依据**：HPHT 人造金刚石用的就是铁镍钴金属触媒 + 碳源，而 IV 恰好是钴铬 / 硬质合金颗粒 + 大量有机碳基体，触媒和碳源在同一块料里。**另外三条是味道不是机制**——DSP 不建模材料属性，引擎只认「这条配方要哪个物品 ID」，理由是给玩家读的。",
+  "//outputs-balance": "input / count 是第一版取值，**需要拿原版路线对照着调**。原版配方读不到离线数据，所以 CompositeRegistry 会在启动时把每个目标物品的原版配方打进日志，照着那几行调。",
+  "outputs": {
+    "recipeId": 6610,
+    "entries": [
+      { "gradeRef": "living-composite-1", "targetItemId": 1125, "targetName": "框架材料", "input": 3, "count": 2, "timeSpend": 180 },
+      { "gradeRef": "living-composite-2", "targetItemId": 1402, "targetName": "粒子宽带", "input": 3, "count": 2, "timeSpend": 240 },
+      { "gradeRef": "living-composite-3", "targetItemId": 1118, "targetName": "钛晶石", "input": 3, "count": 2, "timeSpend": 240 },
+      { "gradeRef": "living-composite-4", "targetItemId": 1112, "targetName": "金刚石", "input": 3, "count": 2, "timeSpend": 300 }
+    ]
+  },
+
   "//rigidize": "刚化惩罚：配比越高，网络越接近三角化，韧性掉得越快。硬度与韧性的反相关不是这条链引入的，是材料本来的性格（表里现成的例子：碳化钨 95/10 对锰钢 50/80）。",
   "rigidizePenalty": 0.55
 }

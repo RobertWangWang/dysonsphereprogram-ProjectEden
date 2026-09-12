@@ -44,6 +44,36 @@ namespace ProjectEden.Patches
 
         /// <summary>刚化惩罚强度：配比越高，韧性掉得越快。</summary>
         public float rigidizePenalty;
+
+        /// <summary>下游：烧结析出。放哪一级进去就出哪一样原版后期材料。</summary>
+        public CompositeOutputs outputs;
+    }
+
+    [Serializable]
+    internal class CompositeOutputs
+    {
+        public int recipeId;
+        public CompositeOutputEntry[] entries;
+    }
+
+    [Serializable]
+    internal class CompositeOutputEntry
+    {
+        /// <summary>放进去的那一级（ores.json items 段的 key）。</summary>
+        public string gradeRef;
+
+        /// <summary>产出的<b>原版</b>物品 ID。</summary>
+        public int targetItemId;
+
+        /// <summary>
+        /// 原版物品的中文名，用来交叉核对。**写死原版 ID 是有风险的**——
+        /// 数字打错会静默指向别的物品，做出一条产物不对的配方而且不报错。
+        /// </summary>
+        public string targetName;
+
+        public int input;
+        public int count;
+        public int timeSpend;
     }
 
     [Serializable]
