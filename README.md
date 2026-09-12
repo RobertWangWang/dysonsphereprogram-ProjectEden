@@ -7,6 +7,8 @@
 
 > 开发与测试基于游戏版本 **0.10.34.28529** ／ BepInEx **5.4.17**
 
+💬 **交流群（QQ）：789720138** —— 报 bug、提需求、聊平衡都在这里。
+
 **完整特性说明** —— 每一样新物品、新配方、新建筑，以及每个数值是怎么推出来的：
 
 - 📘 **[中文：mod特性.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md)**
