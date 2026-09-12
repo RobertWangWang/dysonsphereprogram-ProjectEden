@@ -29,11 +29,9 @@
       "isFluid": true,
       "fuelType": 16,
       "heatValue": 12000000,
-      "iconFrom": 1007,
-      "iconHue": 278.0,
-      "iconSaturationScale": 0.85,
-      "iconMinSaturation": 0.18,
-      "iconValueScale": 0.55
+      "//icon": "自绘。**不能走改色那条路**：原油的图标本来就暗，再乘 0.55 明度就黑成一团，在 DSP 的深色界面上直接消失（报上来的症状就是「物品没出现」）。自绘的那张是暗底 + 亮边 + 亮颗粒：形体仍读作「很黑很稠」，但轮廓和内容物是亮的。橙黄是 V₂O₅ 的颜色——正是它让这种燃料只能低温烧。",
+      "icon": "vanadium-residue-oil",
+      "iconFrom": 1007
     },
     {
       "//": "碳热还原铝的尾气。目前没有下游用途，先当副产物存着。图标由『氢』的气瓶图改成灰调。",
@@ -1685,6 +1683,8 @@
       "type": 3,
       "timeSpend": 480,
       "gridIndex": 1601,
+      "//icon": "配方图标跟着产物走（和「精炼油 · 费托合成」用 iconFrom 1114 是同一个惯例）。先前指着原油，合成面板上那一格看着就是一条原油配方，更找不着。",
+      "icon": "vanadium-residue-oil",
       "iconFrom": 1007,
       "items": [
         {

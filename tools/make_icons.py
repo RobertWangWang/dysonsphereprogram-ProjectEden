@@ -1001,6 +1001,58 @@ def algal_oil():
     return d
 
 
+def vanadium_residue_oil():
+    """钒渣油：一坨挂得住的黑渣，边缘和悬浮颗粒用钒的橙黄。
+
+    <b>不能画成纯黑。</b> 它本来该是沥青那种黑，但 DSP 的界面底色就是深色——
+    上一版把原油图标的明度乘 0.55，结果整格看不见了。所以这里的做法是
+    <b>暗底 + 亮边 + 亮颗粒</b>：形体仍然读作「很黑很稠」，但轮廓和内容物是亮的。
+
+    橙黄不是随便挑的：五氧化二钒（V₂O₅）就是橙黄色，而它正是这种燃料
+    「能量最高但只能低温烧」的原因——熔点低于热通道温度，熔了直接腐蚀热端。
+    图标上那几颗亮点画的就是它。
+
+    形状上和藻油刻意分开：藻油是一滴轻快的泪滴，这个是<b>坠着的、底部摊开的稠块</b>，
+    右下还挂一条将落未落的丝。两张图并排要一眼分得出「稀」和「稠」。
+    """
+    d = canvas()
+
+    body = "#2b2334"          # 暗紫黑：留住「渣油」的黑，但不是纯黑
+    body_hi = "#453a52"       # 顶部提亮，给一点体积
+    rim = "#e59a1f"           # V₂O₅ 的橙黄，轮廓靠它读出来
+    speck = "#f5bf47"
+
+    # 主体：上窄下宽的稠块，底部摊开——和泪滴的「下圆上尖」相反
+    d.append(dw.Path(fill=body, stroke=rim, stroke_width=2.6, stroke_linejoin="round")
+             .M(0, -38).C(11, -16, 26, -4, 30, 10)
+             .C(33, 22, 20, 30, 0, 30)
+             .C(-20, 30, -33, 22, -30, 10)
+             .C(-26, -4, -11, -16, 0, -38).Z())
+
+    # 沿左缘的一道弧光。**不能画成左右对称的顶部提亮**：
+    # 那样会在体内押出一个硬三角，整张图读成漏斗而不是稠液。
+    # 弧光和下面那点白高光同一个光源（左上）。
+    d.append(dw.Path(fill=body_hi, fill_opacity=0.75)
+             .M(0, -36).C(-10, -17, -22, -5, -25, 6)
+             .C(-17, 4, -9, -3, -3, -14)
+             .C(-1, -22, 0, -30, 0, -36).Z())
+
+    # 悬在渣里的 V₂O₅ 颗粒：这才是它「脏」的来源
+    for cx, cy, r in ((-11, 9, 3.6), (7, 15, 2.9), (13, 2, 2.2), (-3, 19, 2.0)):
+        d.append(dw.Circle(cx, cy, r, fill=speck, fill_opacity=0.92))
+        d.append(dw.Circle(cx - r * 0.3, cy - r * 0.3, r * 0.4, fill="#fff0c4", fill_opacity=0.75))
+
+    # 将落未落的一滴：说明它稠，倒不干净
+    d.append(dw.Path(fill=body, stroke=rim, stroke_width=2.0, stroke_linejoin="round")
+             .M(22, 27).C(26, 33, 27, 38, 24, 41)
+             .C(21, 38, 20, 33, 22, 27).Z())
+
+    # 高光：液体的标志，没有它读起来像块矿石
+    d.append(dw.Ellipse(-11, -13, 4.6, 7.5, fill="#ffffff", fill_opacity=0.42))
+
+    return d
+
+
 def photosynthesis():
     """光合育林：叶片 + 落在它上面的日光。
 
@@ -1354,3 +1406,6 @@ if __name__ == "__main__":
         render(living_composite(_g), "living-composite-%d" % _g)
     render(algal_oil(), "algal-oil")
     render(photosynthesis(), "photosynthesis")
+
+    # 可燃液体发电：钒渣油
+    render(vanadium_residue_oil(), "vanadium-residue-oil")
