@@ -151,6 +151,10 @@ namespace ProjectEden
             // resources.assets 里，离线读不到；等级上限还要按集装层数现算
             LDBTool.PostAddDataAction += ProliferatorSurvey.OnPostAddData;
 
+            // 采矿机物流站普查：外星矿脉要给它加一个钻头槽，
+            // 而 stationMaxItemKinds 在 prefab 里，离线读不到
+            LDBTool.PostAddDataAction += MinerStationSurvey.OnPostAddData;
+
             // 漏译核对也排在最后：要等所有 proto 都进了 LDB 才数得清
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
 
@@ -178,6 +182,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
             LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorSurvey.OnPostAddData;
+            LDBTool.PostAddDataAction -= MinerStationSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= I18N.VerifyCoverage;
 
             _harmony?.UnpatchSelf();

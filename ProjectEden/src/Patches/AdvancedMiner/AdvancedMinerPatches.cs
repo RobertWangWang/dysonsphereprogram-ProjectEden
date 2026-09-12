@@ -287,6 +287,7 @@ namespace ProjectEden.Patches
             SyncStationStorage(ref __instance, factory);
             ApplyFixedPower(ref __instance, factory);
             ReportCeilingOnce(ref __instance, factory, miningSpeed);
+            MinerStationSurvey.ReportOnce(ref __instance, factory);
 
             // MinerComponent 每 tick 往 int 型的 time 上累加 speed * miningSpeed * veinCount，
             // 越过 int 上限会掉进原版兜底反而被钳死，所以先行限幅
