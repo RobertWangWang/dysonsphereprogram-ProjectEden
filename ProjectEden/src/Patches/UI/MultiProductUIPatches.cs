@@ -133,7 +133,6 @@ namespace ProjectEden.Patches
         private static Vector2 _asmPos0;
         private static Vector2 _asmPos1;
         private static string _pIcon, _pProg, _pExtra, _pCount, _pButton;
-        private static bool _asmGaveUp;
         private static bool _asmReported;
         private static bool _asmProbed;
         private static bool _asmPieces;
@@ -232,8 +231,6 @@ namespace ProjectEden.Patches
 
         private static bool EnsureAsmSlots(UIAssemblerWindow w, int n)
         {
-            if (_asmGaveUp) return false;
-
             if (!_asmPieces && (_asmRoot0 == null || _asmRoot1 == null))
             {
                 if (!ResolveAsmTemplate(w)) return false;
