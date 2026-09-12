@@ -1182,6 +1182,67 @@ def moissanite_ore():
     return d
 
 
+def drill_bit():
+    """钻头：聚晶金刚石复合片（PDC）钻冠。
+
+    <b>画的是真实构造。</b> PDC 钻头就是「碳化钨基体 + 表面镶的聚晶金刚石齿」——
+    金刚石负责切削，基体负责撑住它并接钻杆。所以图上是一个灰钢色的冠体，
+    上面嵌着几颗亮青白的切削齿。
+
+    <b>形制和其它三族刻意分开：</b> 合金是等距锭块、活性复合材是抛光截面圆片、
+    增产剂是发光孢子囊，这一族是<b>带齿的机械件</b>——有轴对称、有齿、有排屑槽，
+    一眼看出是个工具而不是一块料。
+
+    颜色取冷灰配青白齿：既不撞莫桑石那身蓝绿（那是矿石），也不撞增产剂的青紫。
+    """
+    d = canvas()
+
+    body = "#5a6470"       # 碳化钨基体：冷灰
+    body_hi = "#7d8794"
+    body_lo = "#39424c"
+    edge = "#222a33"
+    tooth = "#cfeef0"      # 聚晶金刚石齿
+    tooth_hi = "#ffffff"
+
+    # 钻杆：上半截，比冠体细
+    d.append(dw.Lines(-11, -42, 11, -42, 11, -14, -11, -14,
+                      close=True, fill=body_lo, stroke=edge,
+                      stroke_width=2.4, stroke_linejoin="round"))
+    d.append(dw.Lines(-11, -42, -3, -42, -3, -14, -11, -14,
+                      close=True, fill=body_hi, fill_opacity=0.55))
+
+    # 冠体：下宽上窄的钻冠，底缘是齿所在的切削面
+    d.append(dw.Path(fill=body, stroke=edge, stroke_width=2.6, stroke_linejoin="round")
+             .M(-15, -16).L(15, -16)
+             .C(27, -10, 31, 6, 28, 20)
+             .L(-28, 20)
+             .C(-31, 6, -27, -10, -15, -16).Z())
+
+    # 左侧提亮：给冠体一点圆柱感
+    d.append(dw.Path(fill=body_hi, fill_opacity=0.5)
+             .M(-15, -16).C(-27, -10, -31, 6, -28, 20)
+             .L(-16, 20).C(-18, 6, -14, -8, -6, -16).Z())
+
+    # 排屑槽：两道竖直凹槽，钻头的标志性特征
+    for x in (-8, 8):
+        d.append(dw.Lines(x, -12, x, 18, stroke=body_lo,
+                          stroke_width=3.4, stroke_opacity=0.85,
+                          stroke_linecap="round", fill="none"))
+
+    # 切削齿：底缘一排聚晶金刚石，中间两颗略高（钻冠是弧面）
+    for cx, cy, r in ((-21, 17, 5.0), (-7, 21, 5.4), (7, 21, 5.4), (21, 17, 5.0)):
+        d.append(dw.Circle(cx, cy, r, fill=tooth, stroke=edge, stroke_width=1.8))
+        d.append(dw.Circle(cx - r * 0.28, cy - r * 0.3, r * 0.38,
+                           fill=tooth_hi, fill_opacity=0.9))
+
+    # 冠体上的高光：一道斜的，说明它是金属不是陶瓷
+    d.append(dw.Lines(-19, -6, -14, 8, stroke=tooth_hi,
+                      stroke_width=2.6, stroke_opacity=0.45,
+                      stroke_linecap="round", fill="none"))
+
+    return d
+
+
 def photosynthesis():
     """光合育林：叶片 + 落在它上面的日光。
 
@@ -1547,3 +1608,4 @@ if __name__ == "__main__":
 
     # 外星矿脉
     render(moissanite_ore(), "moissanite-ore")
+    render(drill_bit(), "drill-bit")

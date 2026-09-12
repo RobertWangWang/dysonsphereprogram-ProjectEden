@@ -32,6 +32,9 @@ namespace ProjectEden.Patches
         public float toughnessRef;
         public float toughnessExponent;
         public float @base;
+
+        /// <summary>钻头物品与它的配方模板。见 <see cref="DrillBitRegistry"/>。</summary>
+        public AlienVeinBitEntry bit;
     }
 
     /// <summary>
@@ -72,10 +75,15 @@ namespace ProjectEden.Patches
         private static float _oreHardness;
 
         /// <summary>
-        /// 物品 ID → 一个它能挖多少矿，0 表示不够格当钻头。
-        /// <b>下标就是物品 ID</b>：tick 路径上要 O(1) 而且不能分配。
+        /// 一个钻头能挖多少矿。
+        ///
+        /// <b>钻头是统一的</b>——四维的差别搬到了「做一个钻头花多少料」那一头
+        /// （见 <see cref="DrillBitRegistry"/>）。这个数取自合格材料里最高的那个产量，
+        /// 所以最好的材料投 1 个是<b>算出来的</b>，不是定出来的。
         /// </summary>
-        private static float[] _bitYield = new float[0];
+        internal static float BitCapacity { get; private set; }
+
+        internal static void SetBitCapacity(float capacity) => BitCapacity = capacity;
 
         /// <summary>
         /// 逐台采矿机的消耗进度。
@@ -89,7 +97,9 @@ namespace ProjectEden.Patches
 
         private static int _blockedLogged;
 
-        internal static bool Ready => Config != null && Config.enabled && VeinType > 0 && _bitYield.Length > 0;
+        internal static bool Ready =>
+            Config != null && Config.enabled && VeinType > 0
+            && BitCapacity > 0f && DrillBitRegistry.BitItemId > 0;
 
         internal static void Load() => Config = JsonHelper.Load<AlienVeinConfig>("alienvein");
 
@@ -98,7 +108,6 @@ namespace ProjectEden.Patches
         internal static void OnPostAddData()
         {
             VeinType = 0;
-            _bitYield = new float[0];
             Progress.Clear();
 
             // 报无聊的那一面：三种「没生效」在日志里要分得清
@@ -116,8 +125,12 @@ namespace ProjectEden.Patches
 
             if (!ResolveVein()) return;
 
-            BuildBitTable();
             RaiseMinerSlots();
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"外星矿脉已就绪：{Config.veinRef} 矿脉类型 {VeinType}，"
+                + $"钻头物品 {DrillBitRegistry.BitItemId}，一个能挖 {BitCapacity:N0} 矿，"
+                + $"钻头槽是第 {Config.bitSlotIndex} 格");
         }
 
         private static bool ResolveVein()
@@ -151,63 +164,6 @@ namespace ProjectEden.Patches
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// 把谓词在<b>全部物品</b>上跑一遍，结果存成一张按物品 ID 索引的表。
-        ///
-        /// 这一步是注册时做的，tick 路径上只查表——谓词本身可以运行时求值，
-        /// 但没必要每 tick 都重算一遍四维。
-        /// </summary>
-        private static void BuildBitTable()
-        {
-            ItemProto[] items = LDB.items?.dataArray;
-
-            if (items == null) return;
-
-            var maxId = 0;
-
-            foreach (ItemProto proto in items)
-                if (proto != null && proto.ID > maxId)
-                    maxId = proto.ID;
-
-            _bitYield = new float[maxId + 1];
-
-            float floor = _oreHardness - Config.slack;
-            var qualified = 0;
-
-            ProjectEdenPlugin.Log.LogInfo(
-                $"── 外星矿脉：{Config.veinRef} 矿脉类型 {VeinType}，矿石硬度 {_oreHardness:0}，"
-                + $"钻头硬度下限 {floor:0}（余量 slack {Config.slack:0}）──");
-
-            foreach (ItemProto proto in items)
-            {
-                if (proto == null || !MetalPropertyPatches.Has(proto.ID)) continue;
-
-                float h = MetalPropertyPatches.Axis(proto.ID, "hardness");
-                float t = MetalPropertyPatches.Axis(proto.ID, "toughness");
-                float margin = h - floor;
-
-                if (margin <= 0f || t <= 0f) continue;
-
-                var y = (float)(Config.@base
-                                * Math.Pow(margin, Config.hardExponent)
-                                * Math.Pow(t / Config.toughnessRef, Config.toughnessExponent));
-
-                if (y < 1f) continue;
-
-                _bitYield[proto.ID] = y;
-                qualified++;
-
-                ProjectEdenPlugin.Log.LogInfo(
-                    $"  {proto.Name}({proto.ID})  硬度 {h:0} 韧性 {t:0}  余量 {margin:0}"
-                    + $"  → 一个能挖 {y:N0} 矿");
-            }
-
-            if (qualified == 0)
-                ProjectEdenPlugin.Log.LogWarning(
-                    "外星矿脉：**没有任何材料够格当钻头**，这种矿脉将完全挖不动。"
-                    + "检查 alienvein.json 的 slack，或给候选材料补 metals.json 的四维行");
         }
 
         /// <summary>
@@ -312,12 +268,12 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            int bitId = station.storage[slot].itemId;
-            float per = bitId > 0 && bitId < _bitYield.Length ? _bitYield[bitId] : 0f;
+            bool isBit = station.storage[slot].itemId == DrillBitRegistry.BitItemId;
+            float per = BitCapacity;
 
-            if (per <= 0f || station.storage[slot].count <= 0)
+            if (!isBit || station.storage[slot].count <= 0)
             {
-                Block(ref miningSpeed, entityId, per > 0f);
+                Block(ref miningSpeed, entityId, isBit);
 
                 return;
             }
@@ -359,9 +315,9 @@ namespace ProjectEden.Patches
                 $"外星矿脉：实体 {entityId} 的采矿机停在这种矿脉上——"
                 + (hasSlotButEmpty
                     ? "钻头槽空了。把槽设成 Demand，物流网会自动补。"
-                    : "钻头槽里没有合格的材料。在物流站窗口把第 "
-                      + Config.bitSlotIndex + " 格设成 Demand 并指定一种够硬的材料；"
-                      + "启动日志里「外星矿脉」那一段列出了全部合格材料和各自能挖多少。")
+                    : "钻头槽里放的不是钻头。在物流站窗口把第 "
+                      + Config.bitSlotIndex + " 格设成 Demand 并指定「钻头」；"
+                      + "钻头在制造台合成，启动日志里「钻头」那一段列出了每种材料要投几个。")
                 + "（这条只报一次）");
         }
     }

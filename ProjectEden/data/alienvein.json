@@ -27,6 +27,22 @@
   "//bitSlot": "钻头槽用第几格。第 0 格是矿（StationComponent.Init 的矿脉分支按 collectionIds 铺，UpdateVeinCollection 也只碰 storage[0]），所以第 1 格是空的。**槽里放什么、设不设成 Demand 全由玩家在物流站窗口里定** —— 本 mod 不替他选，那正是谓词的意义。",
   "bitSlotIndex": 1,
 
+  "//bit": "钻头物品与它的配方模板。**谓词在注册时展开成一条条具体配方**（每种合格材料一条），而不是运行时求值——这正是 CLAUDE.md 里写着「设计了但还没写」的那一条，RecipeProto.Items 是 int[]，表达不了谓词。好处：不用第六种面板模式、不用逐台存档状态，而且每种材料各占一个合成格、更好发现。",
+  "//bit-count": "**四维的差别从「钻头好不好」搬到了「做一个钻头花多少料」。** 钻头本身统一：一个能挖 capacity 矿，而 capacity 就是合格材料里最高的那个产量（所以最好的材料投 1 个，是算出来的不是定出来的）；其余材料投 ceil(capacity / 它的产量) 个。",
+  "//bit-machine": "制造台（Assemble）。把切削齿锼上钻冠、接钻杆是装配，不是化学反应——机器跟反应类别走，和 MTO 脱水留在化工厂是同一条判据。",
+  "bit": {
+    "itemId": 6631,
+    "name": "钻头",
+    "description": "碳化钨钻冠，切削面上镶着一圈聚晶金刚石齿。普通矿脉用不着它，碰上比钻头还硬的东西才需要——而那种东西也会把它一点点磨掉。做它花多少料，取决于你用什么做。",
+    "icon": "drill-bit",
+    "gridIndex": 1601,
+    "stackSize": 300,
+    "produceFrom": "制造台",
+    "recipeIdBase": 6632,
+    "recipeType": 4,
+    "timeSpend": 120
+  },
+
   "slack": 12.0,
   "hardExponent": 2.0,
   "toughnessRef": 10.0,

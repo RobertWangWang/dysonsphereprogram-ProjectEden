@@ -110,6 +110,10 @@ namespace ProjectEden
             LDBTool.PreAddDataAction += OreRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += OreRegistry.OnPostAddData;
 
+            // 钻头：排在 OreRegistry 之后——它要按 metals.json 的四维展开配方，
+            // 而那里的 ref 得等矿石和锭拿到 ID 才解析得出来
+            LDBTool.PreAddDataAction += DrillBitRegistry.OnPreAddData;
+
             // 新生产设备同理：图标也是改色出来的，得排在 ProtoPreload 之后
             LDBTool.PreAddDataAction += MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MachineRegistry.OnPostAddData;
