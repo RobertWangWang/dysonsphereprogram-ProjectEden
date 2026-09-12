@@ -2,10 +2,15 @@
 
 把《戴森球计划》的后期产线整体拉满的 BepInEx mod。
 
-五座万倍速巨型建筑、满级采矿机与物流站、八种新矿脉与一整条从煤到合金的化工链、
+六座万倍速巨型建筑、满级采矿机与物流站、八种新矿脉与一整条从煤到合金的化工链、
 逐台建筑可调的合金配比、5000 层传送带集装——**所有数值都写在 JSON 里，装完就能改。**
 
 > 开发与测试基于游戏版本 **0.10.34.28529** ／ BepInEx **5.4.17**
+
+**完整特性说明** —— 每一样新物品、新配方、新建筑，以及每个数值是怎么推出来的：
+
+- 📘 **[中文：mod特性.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md)**
+- 📗 **[English: mod_feature.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod_feature.md)**
 
 ---
 
@@ -67,7 +72,7 @@ Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 
 | | |
 |---|---|
-| **五座巨型建筑** | 建造栏新增一页：天工装配厂、冶铸熔炉、燔石化工厂、锤锻精工厂、观微对撞机。10000 倍速，12 个传送带口直连，自带行星内物流站；外形是**代码生成**的，五座各不相同 |
+| **六座巨型建筑** | 建造栏新增一页：天工装配厂、冶铸熔炉、燔石化工厂、锤锻精工厂、观微对撞机、生物温室。10000 倍速，12 个传送带口直连，自带行星内物流站；外形是**代码生成**的，六座各不相同。生物温室还多一条规矩：**整座建筑受日照约束**，满日照满产、背光面停工 |
 | **大型采矿机 / 抽水站 / 原油萃取站** | 速度拉满、矿脉不消耗、机内缓存 1000 万；部分矿石直接产出冶炼后的锭 |
 | **物流** | 物流站 30 格 × 1000 万，星际站充能 30 GW，运载与集装拉满 |
 | **矩阵研究站** | 只改生产侧（造矩阵），科研速度没动；与物流站双向直通，不用铺传送带 |
@@ -94,10 +99,7 @@ Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 > 哪种还原剂能炼哪种矿，是按 Ellingham 图判的，不是按平衡感：
 > 一氧化碳还原不了氧化铝，乙烯可以——判据是裂解后给不给得出**单质碳**。
 
-完整说明（含每条配方的化学依据）：
-
-- 📘 **[中文：mod特性.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md)**
-- 📗 **[English: mod_feature.md](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod_feature.md)**
+每条配方的化学依据都逐条写在特性文档里（[中文](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md) ／ [English](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod_feature.md)）。
 
 ---
 
@@ -179,7 +181,7 @@ JSON 配置，采用 **[GNU GPL v3.0](LICENSE)**。
 
 **本仓库不含任何第三方美术资源。**
 
-> 五座巨型建筑的图标刻意做成和它们的 3D 模型同一个轮廓——
+> 六座巨型建筑的图标刻意做成和它们的 3D 模型同一个轮廓——
 > 建造栏里认出来的，就是地上那一座。
 
 ## 关于创世之书

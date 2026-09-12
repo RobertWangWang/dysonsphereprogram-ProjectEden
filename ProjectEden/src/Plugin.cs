@@ -82,6 +82,7 @@ namespace ProjectEden
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
             AmmoRegistry.Load();
+            CompositeRegistry.Load();
 
             // 英文本地化：表要在任何 proto 注册之前载好，注册本身挂在
             // Localization.LoadSettings 上（那时 namesIndexer 才有内容，防撞检查才做得了）
@@ -123,6 +124,8 @@ namespace ProjectEden
             // （要等合金本身进了 LDB 才拿得到它们的物品 ID）
             LDBTool.PreAddDataAction += AmmoRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += AmmoRegistry.OnPostAddData;
+            // 复合材只解析不注册（物品和配方都在 ores.json 里），所以只挂 PostAdd
+            LDBTool.PostAddDataAction += CompositeRegistry.OnPostAddData;
 
             // 排在最后：要等所有注册器都把物品塞进 LDB 之后，才重建流体白名单
             LDBTool.PostAddDataAction += RefreshFluidList;
@@ -150,6 +153,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= AlloyRatioPatches.OnPostAddData;
             LDBTool.PreAddDataAction -= AmmoRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= AmmoRegistry.OnPostAddData;
+            LDBTool.PostAddDataAction -= CompositeRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
             LDBTool.PostAddDataAction -= I18N.VerifyCoverage;
@@ -414,6 +418,7 @@ namespace ProjectEden
             // 会在读档时被静默丢掉。到了这里配方数据已经恢复完，正是补贴的时机。
             AlloyRatioPatches.ReapplyAll("存档块读回后");
             AmmoPairPatches.ReapplyAll();
+            CompositePatches.ReapplyAll();
         }
 
         public void IntoOtherSave()

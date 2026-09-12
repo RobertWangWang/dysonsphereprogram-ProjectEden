@@ -465,6 +465,102 @@
       "iconSaturationScale": 1.0,
       "iconMinSaturation": 0.0,
       "iconValueScale": 1.0
+    },
+    {
+      "//": "四级活性复合材共同的基体。紫色非硫细菌在光照下以氢为电子供体积累的聚酯，与菌丝缠成一团。**它自己不结实**，价值在于能把金属颗粒黏住并长进缝隙里。",
+      "//ref": "光合-氢营养（photohydrogenotrophic）是有专名的真实培养模式，Rhodomicrobium 在该条件下的电子产率最高达 58.89%，四种光合条件里最高。Conners et al. 2024, Microbial Biotechnology, DOI: 10.1111/1751-7915.14552",
+      "//fuel": "**故意不给热值。** 聚羟基丁酸酯按质量折算约 2.4 MJ（PHB 约 21 MJ/kg，煤约 24 MJ/kg）——数字记在这里省得重推。但配了它，整条链就多一条「氢→基体→烧掉」的绕路，而直接烧氢（原版 8 MJ）永远更划算，那条支路一出生就是死的。它是结构材料不是柴火。",
+      "key": "mycelial-matrix",
+      "enabled": true,
+      "name": "菌丝基体",
+      "description": "紫色非硫细菌在光照下以氢为电子供体积累的聚酯，和菌丝缠成一团。它本身软塌塌的，价值在于能把金属颗粒黏在一起、并顺着缝隙长进去——四级活性复合材共用这一个基体。",
+      "itemId": 6619,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "生物温室",
+      "isFluid": false,
+      "icon": "mycelial-matrix",
+      "iconFrom": 1117,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "散生相。四级只差一件事：菌丝网络把金属连通到什么程度。分级依据是载荷传递的四种模式，由交联密度的三个临界阈值（渗流/连接/饱和）划分——Ji et al. 2022, ACS Nano, DOI: 10.1021/acsnano.2c03003",
+      "//filler": "本级填料是锨钢，占比 20%。**四轴数值受填料约束**：硬度与导电不得超过填料（复合材不可能比它的增强相更硬或更导电），韧性则必须**高于**填料——那是基体唯一确定贡献的一维，也是这材料存在的理由。",
+      "key": "living-composite-1",
+      "enabled": true,
+      "name": "活性复合材 I",
+      "description": "散生相。锰钢颗粒在菌丝基体里还是一座座孤岛，载荷传不过去。它轻、软、吸能，而且因为金属彼此不连通，腐蚀无处蔓延——是四级里最耐蚀的一级。四轴是标称值，实际随所用合金与配比变化。",
+      "itemId": 6620,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "生物温室",
+      "isFluid": false,
+      "icon": "living-composite-1",
+      "iconFrom": 1103,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "渗流相。四级只差一件事：菌丝网络把金属连通到什么程度。分级依据是载荷传递的四种模式，由交联密度的三个临界阈值（渗流/连接/饱和）划分——Ji et al. 2022, ACS Nano, DOI: 10.1021/acsnano.2c03003",
+      "//filler": "本级填料是镀铬铜，占比 40%。**四轴数值受填料约束**：硬度与导电不得超过填料（复合材不可能比它的增强相更硬或更导电），韧性则必须**高于**填料——那是基体唯一确定贡献的一维，也是这材料存在的理由。",
+      "key": "living-composite-2",
+      "enabled": true,
+      "name": "活性复合材 II",
+      "description": "渗流相。镀铬铜的颗粒刚好连成第一条贯穿整块的通路。电导率跳了一个数量级，硬度却几乎没动——导电只需要一条路，承载需要每个方向都有路。四轴是标称值，实际随所用合金与配比变化。",
+      "itemId": 6621,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "生物温室",
+      "isFluid": false,
+      "icon": "living-composite-2",
+      "iconFrom": 1103,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "贯通相。四级只差一件事：菌丝网络把金属连通到什么程度。分级依据是载荷传递的四种模式，由交联密度的三个临界阈值（渗流/连接/饱和）划分——Ji et al. 2022, ACS Nano, DOI: 10.1021/acsnano.2c03003",
+      "//filler": "本级填料是钴铬合金，占比 60%。**四轴数值受填料约束**：硬度与导电不得超过填料（复合材不可能比它的增强相更硬或更导电），韧性则必须**高于**填料——那是基体唯一确定贡献的一维，也是这材料存在的理由。",
+      "key": "living-composite-3",
+      "enabled": true,
+      "name": "活性复合材 III",
+      "description": "贯通相。钴铬颗粒被菌丝连成一张网，载荷完整传递，铬带来的耐蚀也整块接管了。四轴是标称值，实际随所用合金与配比变化。",
+      "itemId": 6622,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "生物温室",
+      "isFluid": false,
+      "icon": "living-composite-3",
+      "iconFrom": 1103,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
+    },
+    {
+      "//": "刚化相。四级只差一件事：菌丝网络把金属连通到什么程度。分级依据是载荷传递的四种模式，由交联密度的三个临界阈值（渗流/连接/饱和）划分——Ji et al. 2022, ACS Nano, DOI: 10.1021/acsnano.2c03003",
+      "//filler": "本级填料是硬质合金，占比 80%。**四轴数值受填料约束**：硬度与导电不得超过填料（复合材不可能比它的增强相更硬或更导电），韧性则必须**高于**填料——那是基体唯一确定贡献的一维，也是这材料存在的理由。",
+      "key": "living-composite-4",
+      "enabled": true,
+      "name": "活性复合材 IV",
+      "description": "刚化相。硬质合金粉把网络填到三角化，刚度饱和。硬得像陶瓷，也脆得像陶瓷——网络刚化之后，再没有耗散能量的机制了。四轴是标称值，实际随所用合金与配比变化。",
+      "itemId": 6623,
+      "gridIndex": 1601,
+      "stackSize": 300,
+      "produceFrom": "生物温室",
+      "isFluid": false,
+      "icon": "living-composite-4",
+      "iconFrom": 1103,
+      "iconHue": 0.0,
+      "iconSaturationScale": 1.0,
+      "iconMinSaturation": 0.0,
+      "iconValueScale": 1.0
     }
   ],
   "ores": [
@@ -2218,6 +2314,68 @@
         {
           "id": 1114,
           "count": 6
+        }
+      ]
+    },
+    {
+      "//": "碳源来自菌落，氢是**电子供体不是碳源**。紫细菌走光合异养时还原力过剩，必须找地方排——文献称之为 electron sinking，而聚酯合成正是其中一条。所以加氢会**促进**基体产量而不是稀释它。Alloul et al. 2022, Trends in Biotechnology, DOI: 10.1016/j.tibtech.2022.06.010",
+      "//stoich": "纯光合自养产 PHB 的总反应是配平的：4 CO₂ + 9 H₂ --光--> C₄H₆O₂ + 6 H₂O（C 4/4，H 18=6+12，O 8=2+6）。游戏里碳源不是 CO₂ 而是菌落，所以**保留氢与水的系数 9 和 6，把 4 份 CO₂ 换成 4 份菌落**——碳的来源变了，电子账没变。和藻菌共培养那条一样，这不是严格配平的方程式：生物量不是化合物，没有固定化学式。",
+      "enabled": true,
+      "name": "菌丝基体 · 光合氢营养",
+      "description": "通氢、给光，让培养体把多余的还原力堆成聚酯。氢在这里不是原料而是电子供体——碳来自菌落，氢只负责把电子账压满，逼着细胞把碳往聚酯里堆。",
+      "recipeId": 6605,
+      "type": 11,
+      "timeSpend": 300,
+      "gridIndex": 1601,
+      "icon": "mycelial-matrix",
+      "items": [
+        {
+          "ref": "microbial-consortium",
+          "count": 4
+        },
+        {
+          "id": 1120,
+          "count": 9
+        }
+      ],
+      "results": [
+        {
+          "ref": "mycelial-matrix",
+          "count": 2
+        },
+        {
+          "id": 1000,
+          "count": 6
+        }
+      ]
+    },
+    {
+      "//": "**一条配方吃任意一种合金。** requires[i] 是 int，逐台建筑改它就能让同一条配方吃不同原料——技术和合金弹药同一套（src/Patches/Ammo/）。6 种填料 × 4 个等级 = 24 种组合，合成面板上只占一格。",
+      "//why-one": "合成面板加不了行（RefreshRecipeIcons 里 row >= 8 直接跳过），24 条配方是个分页问题，1 条不是；物品格位也只付 4 个产物而不是 24 个。",
+      "//ui": "组装机窗口下面会多出一块面板：第一行点左右半边换填料合金，第二行拖动条调配比。**等级由配比推出来**，不单独选——Halpin–Tsai 在高刚度比下对填料模量钝化，硬度 50 与 90 的合金在同一配比下综合分差不到 5%，配比才是主要杠杆。参数在 composite.json。",
+      "//values": "这里写的原料/产物只是**默认值**，每台建筑会被 CompositePatches.Apply 覆盖。**但长度不能动**：AssemblerComponent.Export 按 requires / products 的长度决定写几个 served / produced，长度一变就坏档。CompositeRegistry 启动时会核对长度必须是 2 / 1。",
+      "enabled": true,
+      "name": "活性复合材 · 菌丝共生",
+      "description": "把合金粉和菌丝基体拌在一起，让菌丝顺着颗粒之间的缝长过去，把金属锁成一块料。**放哪种合金、放多少，在下面的面板里选**——合金决定它的性格，配比决定菌丝网络连到什么程度，也就决定出哪一级。",
+      "recipeId": 6606,
+      "type": 11,
+      "timeSpend": 360,
+      "gridIndex": 1601,
+      "icon": "living-composite-3",
+      "items": [
+        {
+          "ref": "mycelial-matrix",
+          "count": 5
+        },
+        {
+          "ref": "manganese-steel",
+          "count": 5
+        }
+      ],
+      "results": [
+        {
+          "ref": "living-composite-3",
+          "count": 2
         }
       ]
     }

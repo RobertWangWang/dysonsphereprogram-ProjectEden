@@ -216,6 +216,30 @@
         "corrosion": 88,
         "conductivity": 10
       }
+    },
+    {
+      "//": "散生相，填料锰钢（50/80/15/10）。韧性 88 > 填料的 80——基体贡献的那一维，也是复合材存在的理由。耐蚀 68 接近基体：金属被有机物包住、彼此不连通，一处生锈传不到别处。导电 4：孤岛之间没有路。",
+      "ref": "living-composite-1",
+      "name": "活性复合材 I",
+      "values": { "hardness": 15, "toughness": 88, "corrosion": 68, "conductivity": 4 }
+    },
+    {
+      "//": "渗流相，填料镀铬铜（25/60/75/80）。硬度只比 I 高 7 点而导电从 4 跳到 38——**电学渗流先于力学渗流**：导电只需要一条贯穿路径，刚度需要承载连通性。导电 38 远低于填料的 80，因为填了金属的聚合物相对聚合物跳几个数量级，但永远赶不上金属本身。",
+      "ref": "living-composite-2",
+      "name": "活性复合材 II",
+      "values": { "hardness": 22, "toughness": 76, "corrosion": 72, "conductivity": 38 }
+    },
+    {
+      "//": "贯通相，填料钴铬合金（65/55/95/15）。硬度 55 ≤ 填料 65，导电 12 ≤ 填料 15，韧性 62 > 填料 55，三条约束都满足。耐蚀 85 是四级最高，铬的功劳。",
+      "ref": "living-composite-3",
+      "name": "活性复合材 III",
+      "values": { "hardness": 55, "toughness": 62, "corrosion": 85, "conductivity": 12 }
+    },
+    {
+      "//": "刚化相，填料硬质合金（90/11/82/14）。硬度 82 ≤ 90、导电 13 ≤ 14、韧性 18 > 11。韧性塌到 18 是刚化的代价：网络三角化之后再没有耗散能量的机制。",
+      "ref": "living-composite-4",
+      "name": "活性复合材 IV",
+      "values": { "hardness": 82, "toughness": 18, "corrosion": 80, "conductivity": 13 }
     }
   ]
 }

@@ -1084,7 +1084,7 @@ A thousand wind turbines pressed into one tower array.
 | | |
 |---|---|
 | Appearance | The Wind Turbine's model and icon, **tinted teal** (hue 158°) |
-| Location | The **Mega Structures** tab in the build bar, slot 6, after the five mega buildings |
+| Location | The **Mega Structures** tab in the build bar, slot 7, after the six mega buildings |
 | Output | **300 MW**, exactly a thousand wind turbines (300 kW each) |
 | Build | Wind Turbine ×1000 + Energy Matrix ×1000, **10 s, hand-craft only** |
 
@@ -1313,7 +1313,7 @@ It now has a horizontal scrollbar too, and **jumps to the first usable recipe wh
 is remembered across windows, so opening the picker for a machine that only accepts a custom recipe type would very
 likely land on the previous tab and show nothing).
 
-### The five mega buildings now have distinct shapes
+### The six mega buildings now have distinct shapes
 
 They used to clone one vanilla model (the logistics station) and differ only by colour — five of the same
 building in five paints. Each one's geometry is now **generated in code**, with a silhouette of its own:
@@ -1868,6 +1868,119 @@ needed. To drop the light constraint entirely, set the Biodome's `lightDependent
 
 ---
 
+## XX. Living Composite: hyphae growing metal into a solid
+
+The Biodome's second production line. **One recipe eats any alloy** — six of the nine finally
+have somewhere to go, where before they could be made and nothing wanted them.
+
+```
+Consortium + Hydrogen (+ light) ──→ Mycelial Matrix ──+ alloy──→ Living Composite I–IV
+```
+
+### Two recipes, both in the Biodome
+
+| Recipe | Inputs | Products |
+|---|---|---|
+| Mycelial Matrix · Photohydrogenotrophy | Consortium x4 + Hydrogen x9 | Matrix x2 + Water x6 |
+| Living Composite · Mycelial Symbiosis | Matrix + **the alloy you pick** | Living Composite I–IV |
+
+**The second one occupies a single replicator cell and makes 24 different things.** Select it
+and a panel appears under the assembler window:
+
+- **Row one**: click the left or right half to cycle the filler alloy — **six** to choose from:
+  Manganese Steel, Stainless Steel, Chrome-plated Copper, Chrome-Vanadium Tool Steel,
+  Cobalt-Chrome, Vanadium-Titanium
+- **Row two**: drag to set how many parts of alloy go in (1–9 out of 10)
+
+**You do not pick the grade; the ratio decides it:**
+
+| Alloy parts | 1–2 | 3–4 | 5–6 | 7–9 |
+|---|---|---|---|---|
+| You get | I Dispersed | II Percolating | III Connected | IV Rigidized |
+
+Six fillers x four grades = **24 combinations**. The panel shows the live four-axis values and
+the yield for the current combination, so dragging the slider shows hardness climbing and
+toughness falling as it happens.
+
+The choice is stored per building in the save, and newly built or blueprint-pasted machines
+inherit the last combination you picked.
+
+> The whole Biodome is bound to sunlight, so all five recipes **stop at night**.
+
+### The four fields in plain words
+
+| Field | Plain meaning |
+|---|---|
+| Hardness | How much force before it deforms |
+| Toughness | How much of a beating without breaking |
+| Corrosion | How long it lasts in water |
+| Conductivity | Whether it can be a wire |
+
+(These apply to Iron Ingot, Manganese Steel and the rest just the same.)
+
+### What each grade is
+
+| Grade | Hard. | Tough. | Corr. | Cond. | In one image |
+|---|---|---|---|---|---|
+| **I Dispersed** | 15 | **88** | 68 | 4 | **Bread with walnuts** — however hard the walnuts, the bite is bread |
+| **II Percolating** | 22 | 76 | 72 | **38** | **Sesame scattered until you can just step across** — connected, still soft |
+| **III Connected** | 55 | 62 | **85** | 12 | **The walnuts glued into one block** — load finally transfers |
+| **IV Rigidized** | **82** | 18 | 80 | 13 | **Locked into triangles** — as hard as a ceramic, and as brittle |
+
+**I Dispersed**: the metal is still a scatter of islands. Soft, but its **toughness is the
+highest in the whole table** — running-shoe midsole, helmet liner: not hard, but it eats the
+impact. The metal is wrapped in organic matter and not connected to itself, so **rust in one
+spot cannot reach another**.
+
+**II Percolating**: the least intuitive grade — **it conducts, and it is still almost soft**
+(hardness only 15 to 22). Conduction needs **one** spanning path; load bearing needs a path
+in **every** direction. A wire conducts; you cannot use it as a beam. This is "rubber that
+carries current", and nothing else in the game is that.
+
+**III Connected**: the hyphae tie every grain into one network, load transfers in full, and
+chromium's corrosion resistance takes over the whole block — **the most corrosion-resistant
+of the four**.
+
+**IV Rigidized**: a triangle cannot deform, and once everything is triangulated the material
+can no longer move. Hardness 82, toughness collapsed to 18. **Hard and tough are opposites**
+— glass is hard but shatters; rubber survives the drop but dents under a thumb.
+
+### The one thing that matters most: no grade is a downgrade
+
+I is not a worse IV — **I's toughness is nearly five times IV's**, and IV's hardness is over
+five times I's. Every pair among the four has something it wins on.
+
+So this is not a four-step upgrade ladder. They are **four different materials**: I to absorb
+impact, IV for hardness, II if you want a wire that bends, III if it is going to sit in water.
+
+### A nice consequence: a composite never beats its own filler
+
+Except on toughness. Hardness and conductivity **cannot exceed the filler** — the matrix is
+near zero on both, so mixing only pulls the value down — which is why every grade's numbers
+sit under the ceiling of its own alloy. **The one axis it reliably wins is toughness**, which
+is what the mycelial matrix contributes, and the entire reason the material exists.
+
+IV against Cemented Carbide: hardness 82 vs 90, only 8 lower; toughness 18 vs 11, 64% higher.
+
+### Icons
+
+The four are **polished cross-sections** (the kind you mount for metallography), deliberately
+a different form from the nine alloys' isometric ingots, so an ingot and a stock material are
+told apart at a glance in the inventory. What is drawn inside the disc *is* the network:
+islands, then one spanning path, then the full web, then triangulated and filled — plus one
+to four grade notches on the mounting ring.
+
+### Nothing consumes them yet
+
+**This is the one gap left on this chain.** All four grades can be made, but no recipe uses
+them yet — the next step is either to feed them into a vanilla late-game item, or into the
+alloy ammunition line.
+
+The full design, with the paper citations behind every number, is `活性复合材料V1.md` at the
+repository root.
+
+---
+
 ## Config Quick Reference
 
 | File | What it controls |
@@ -1885,6 +1998,7 @@ needed. To drop the light constraint entirely, set the Biodome's `lightDependent
 | `alloys.json` | Per-building alloy ratios: adjustable slots, total parts, property weights, yield and time multiplier bands |
 | `cheats.json` | **Cheat switches**, all off by default: instant build / build without condition / no build collision / collider pool off / no power spacing / pump anywhere |
 | `i18n.json` | The English localization table, Chinese → English. Forgetting the English for a new item raises a WARNING at startup |
+| `composite.json` | Living Composite: the filler shortlist, the ratio bands for the four grades, yield and percolation parameters |
 | `ammo.json` | Alloy ammo: the five tiers' damage/rounds multipliers, the pair-conversion weights, the yield curve |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 

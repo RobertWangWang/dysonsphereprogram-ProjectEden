@@ -1,0 +1,50 @@
+{
+  "//": "活性复合材：**一条配方吃任意一种合金**。技术和合金弹药同一套——requires[i] 是 int，逐台建筑改它就能让同一条配方吃不同原料，产物从预注册的小集合里选。所以 6 种合金 × 4 个等级 = 24 种组合，合成面板上只占**一格**。",
+  "//why": "合成面板加不了行（RefreshRecipeIcons 里 row >= 8 直接跳过），24 条配方是个分页问题，1 条不是。物品格位同理：只付 4 个产物物品，不是 24 个。",
+  "//ui": "组装机窗口下面那块面板复用合金配比那一块，两行：第一行是**选料行**（点轨道左右半边换合金），第二行是**配比滑条**（拖，决定合金占几份）。等级由配比推出来，不单独选——这是物理口径：Halpin–Tsai 在高刚度比下对填料模量钝化，硬度 50 与 90 的合金在同一配比下综合分差不到 5%，**配比才是等级的主要杠杆**。",
+  "//save": "逐台建筑的选择存在 AlloyRatioStore 里——它本来就是「每台建筑一个 int[]」，这里存的是 { 合金物品 ID, 合金份数 }，形状一样，**SaveVersion 不用动**。",
+  "enabled": true,
+
+  "//recipeId": "配方本体写在 ores.json 里（那样图标、描述、中英文都走现成的管线），这里只记 ID 用来认它。两边对不上会在启动时报 ERROR。",
+  "recipeId": 6606,
+
+  "//totalParts": "基体 + 合金的总份数。滑条的分辨率就是 1/totalParts。",
+  "totalParts": 10,
+
+  "matrixRef": "mycelial-matrix",
+
+  "//matrixAxes": "菌丝基体自己的四维。它不进 metals.json —— 那张表是给金属的，而基体是有机物。硬度 10 / 导电 2 接近零，这正是「复合材的硬度和导电不可能超过填料」的原因；韧性 92 高于任何金属，这是它唯一确定贡献的一维，也是这材料存在的理由。",
+  "matrixAxes": { "hardness": 10, "toughness": 92, "corrosion": 72, "conductivity": 2 },
+
+  "//candidates": "六种可选填料。**硬质合金不在其中**——它自己有一套 WC:Co 配比面板，再叠一层选料会有两块面板抢同一个窗口。碳钢（原版钢材）和钛合金是原版物品，留给原版产线。",
+  "candidates": [
+    "manganese-steel",
+    "stainless-steel",
+    "chrome-plated-copper",
+    "chrome-vanadium-steel",
+    "cobalt-chrome",
+    "vanadium-titanium"
+  ],
+
+  "//grades": "四个等级对应载荷传递的四种模式，由交联密度的三个临界阈值（渗流 / 连接 / 饱和）划分。Ji et al. 2022, ACS Nano, DOI: 10.1021/acsnano.2c03003。minParts 是进入该级所需的最小合金份数，滑条落在哪一段就出哪一级。",
+  "grades": [
+    { "ref": "living-composite-1", "name": "活性复合材 I", "minParts": 1, "timeSpend": 240 },
+    { "ref": "living-composite-2", "name": "活性复合材 II", "minParts": 3, "timeSpend": 300 },
+    { "ref": "living-composite-3", "name": "活性复合材 III", "minParts": 5, "timeSpend": 360 },
+    { "ref": "living-composite-4", "name": "活性复合材 IV", "minParts": 7, "timeSpend": 420 }
+  ],
+
+  "//yield": "产量按填料韧性的**递减回报**算，和合金弹药同一条判据：脆料成形时崩得多，一炉出的成品就少。指数 < 1 让「韧性再高一点」的收益逐步变小。",
+  "baseYield": 2,
+  "toughnessAnchor": 55.0,
+  "toughnessExponent": 0.5,
+  "yieldMin": 0.5,
+  "yieldMax": 2.0,
+
+  "//percolation": "导电走**渗流曲线**而不是线性混合：低于 percolationStart 时金属是孤岛，复合材基本不导电；越过之后陡升，再逐步逼近填料自身的值（永远到不了——填了金属的聚合物相对聚合物跳几个数量级，但赶不上金属本身）。这条曲线是 II 级「能导电但还是软的」的全部来源。",
+  "percolationStart": 0.25,
+  "percolationSpan": 0.45,
+
+  "//rigidize": "刚化惩罚：配比越高，网络越接近三角化，韧性掉得越快。硬度与韧性的反相关不是这条链引入的，是材料本来的性格（表里现成的例子：碳化钨 95/10 对锰钢 50/80）。",
+  "rigidizePenalty": 0.55
+}

@@ -74,7 +74,11 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(UIAssemblerWindow), "_OnUpdate")]
         private static void UIAssemblerWindow_OnUpdate(UIAssemblerWindow __instance)
         {
-            if (AlloyRatioPatches.Count == 0 || __instance?.factory == null)
+            // 三种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
+            // 只判 AlloyRatioPatches.Count 的话，关掉 alloys.json 会连带让
+            // 弹药和复合材的面板一起消失——那是两个不相干的功能。
+            if (__instance?.factory == null
+                || (AlloyRatioPatches.Count == 0 && !AmmoRegistry.Ready && !CompositeRegistry.Ready))
             {
                 Hide();
 
@@ -105,6 +109,24 @@ namespace ProjectEden.Patches
                 if (AmmoPairPatches.Current(__instance.factory, entityId, out int[] nowPair)) pair = nowPair;
 
                 RefreshAmmo(pair);
+
+                return;
+            }
+
+            // 活性复合材：同一块面板的第三种模式。第一行是**选料行**（点左右半边换合金），
+            // 第二行是**配比滑条**（拖，决定合金占几份）。两种控件同屏是这块面板此前
+            // 没组合过的用法——LayoutRow 本来就是按行切的，所以不用改它。
+            if (CompositePatches.Current(__instance.factory, entityId, out int[] comp))
+            {
+                if (!EnsurePanel(__instance)) return;
+
+                _panel.SetActive(true);
+
+                HandleCompositeInput(__instance.factory, entityId, comp);
+
+                if (CompositePatches.Current(__instance.factory, entityId, out int[] nowComp)) comp = nowComp;
+
+                RefreshComposite(comp);
 
                 return;
             }
@@ -325,6 +347,156 @@ namespace ProjectEden.Patches
                 + $"  →  {t.Entry.name} ×{yield}   {"伤害".Translate()} {t.Damage}";
 
             _resultText.color = new Color(0.72f, 0.82f, 0.92f);
+        }
+
+        private static bool _compositeClickLatch;
+
+        /// <summary>
+        /// 复合材面板的输入。<b>两行两种交互</b>：
+        ///
+        /// 第 0 行选合金，用<b>点</b>不用拖——选的是离散的一种合金，
+        /// 拖动会一路扫过中间那些值，每扫过一个都触发一次 Apply（弹药那边同理）。
+        ///
+        /// 第 1 行调配比，用<b>拖</b>不用点——它是连续量，而且拖到哪一段就出哪一级，
+        /// 手感上要能一路扫过去看等级怎么变。
+        /// </summary>
+        private static void HandleCompositeInput(PlanetFactory factory, int entityId, int[] state)
+        {
+            if (!Input.GetMouseButton(0))
+            {
+                _compositeClickLatch = false;
+                _dragging = -1;
+
+                return;
+            }
+
+            List<int> pool = CompositeRegistry.Candidates;
+            int total = CompositeRegistry.TotalParts;
+
+            // ── 第 1 行：配比滑条。按下那一帧抓住它，之后即使划出轨道也继续跟随 ──
+            if (_dragging == 1 || (_dragging < 0 && Input.GetMouseButtonDown(0)
+                                   && InRow(1, out Vector2 _)))
+            {
+                _dragging = 1;
+
+                if (!UIRoot.ScreenPointIntoRect(Input.mousePosition, Rows[1].Track, out Vector2 p)) return;
+
+                Rect r = Rows[1].Track.rect;
+
+                if (r.width <= 0f) return;
+
+                float f = Mathf.Clamp01((p.x - r.xMin) / r.width);
+
+                // 两端各留一份：全是基体或全是合金的配方没有意义
+                int parts = Mathf.Clamp(1 + Mathf.RoundToInt(f * (total - 2)), 1, total - 1);
+
+                if (parts == state[1]) return;
+
+                var next = new[] { state[0], parts };
+
+                if (!CompositePatches.Apply(factory, entityId, next)) return;
+
+                AlloyRatioStore.SetPlayerDefault(CompositeRegistry.RecipeId, next);
+
+                return;
+            }
+
+            // ── 第 0 行：选料。左半格往前、右半格往后 ──
+            if (_compositeClickLatch || pool.Count == 0) return;
+
+            if (!InRow(0, out Vector2 hit)) return;
+
+            _compositeClickLatch = true;
+
+            Rect rect = Rows[0].Track.rect;
+            int step = hit.x < rect.center.x ? -1 : 1;
+            int at = pool.IndexOf(state[0]);
+
+            if (at < 0) at = 0;
+
+            var pick = new[] { pool[((at + step) % pool.Count + pool.Count) % pool.Count], state[1] };
+
+            if (!CompositePatches.Apply(factory, entityId, pick)) return;
+
+            AlloyRatioStore.SetPlayerDefault(CompositeRegistry.RecipeId, pick);
+        }
+
+        /// <summary>鼠标是不是落在第 i 行的轨道里。</summary>
+        private static bool InRow(int i, out Vector2 hit)
+        {
+            hit = Vector2.zero;
+
+            if (Rows[i]?.Track == null) return false;
+            if (!UIRoot.ScreenPointIntoRect(Input.mousePosition, Rows[i].Track, out hit)) return false;
+
+            Rect rect = Rows[i].Track.rect;
+
+            return hit.x >= rect.xMin && hit.x <= rect.xMax && hit.y >= rect.yMin && hit.y <= rect.yMax;
+        }
+
+        private static void RefreshComposite(int[] state)
+        {
+            _titleText.text = "活性复合材面板标题".Translate();
+
+            _panelTrs.sizeDelta = new Vector2(0f, HeadHeight + 2 * RowHeight + FootHeight);
+
+            int total = CompositeRegistry.TotalParts;
+            int parts = Mathf.Clamp(state[1], 1, total - 1);
+
+            for (var i = 0; i < MaxRows; i++)
+            {
+                var on = i < 2;
+
+                if (Rows[i].Root.activeSelf != on) Rows[i].Root.SetActive(on);
+
+                if (!on) continue;
+
+                Rows[i].Root.transform.localPosition = new Vector3(0f, -(HeadHeight + i * RowHeight), 0f);
+            }
+
+            // 第 0 行：选料
+            Rows[0].Label.text = "填料合金".Translate();
+
+            LayoutRow(Rows[0], true);
+
+            ItemProto alloy = LDB.items.Select(state[0]);
+
+            Rows[0].Value.text = "◀  " + (alloy != null ? alloy.name : "?") + "  ▶";
+            Rows[0].Fill.anchorMin = Vector2.zero;
+            Rows[0].Fill.anchorMax = new Vector2(0f, 1f);
+            Rows[0].Fill.offsetMin = Vector2.zero;
+            Rows[0].Fill.offsetMax = Vector2.zero;
+            Rows[0].TrackImage.color = new Color(1f, 1f, 1f, 0.12f);
+
+            // 第 1 行：配比滑条
+            Rows[1].Label.text = "合金配比".Translate();
+
+            LayoutRow(Rows[1], false);
+
+            float frac = total > 2 ? (parts - 1) / (float)(total - 2) : 0f;
+
+            Rows[1].Fill.anchorMin = Vector2.zero;
+            Rows[1].Fill.anchorMax = new Vector2(Mathf.Clamp01(frac), 1f);
+            Rows[1].Fill.offsetMin = Vector2.zero;
+            Rows[1].Fill.offsetMax = Vector2.zero;
+            Rows[1].TrackImage.color = new Color(1f, 1f, 1f, 0.12f);
+            Rows[1].Value.text = parts + " / " + total;
+
+            _resultText.rectTransform.anchoredPosition =
+                new Vector2(SidePad, -(HeadHeight + 2 * RowHeight + 4f));
+
+            int gi = CompositeRegistry.GradeIndex(parts);
+            CompositeRegistry.Grade grade = CompositeRegistry.Grades[gi];
+
+            CompositePatches.Mix(state[0], CompositePatches.Vf(parts),
+                out float h, out float t, out float c, out float e);
+
+            _resultText.text =
+                $"{AlloyRatioPatches.AxisName("hardness")} {h:0.0}  {AlloyRatioPatches.AxisName("toughness")} {t:0.0}  "
+                + $"{AlloyRatioPatches.AxisName("corrosion")} {c:0.0}  {AlloyRatioPatches.AxisName("conductivity")} {e:0.0}"
+                + $"  →  {grade.Entry.name} ×{CompositePatches.Yield(state[0])}";
+
+            _resultText.color = new Color(0.72f, 0.92f, 0.78f);
         }
 
         /// <summary>

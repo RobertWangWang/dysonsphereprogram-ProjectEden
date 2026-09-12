@@ -13,6 +13,7 @@ resvg 是 Rust 写的，wheel 里自带，还原生支持透明通道。
 """
 
 import math
+import random
 import pathlib
 
 import drawsvg as dw
@@ -1040,6 +1041,229 @@ def photosynthesis():
     return d
 
 
+# ── 活性复合材：抛光截面圆片 ──────────────────
+#
+# <b>形制刻意和合金分开。</b> 九种合金画的是等距锭块（alloy() / ingot()），
+# 复合材画的是**金相试样那样的抛光截面**——一个圆片，把内部结构直接剖给你看。
+# 两套东西在物品栏里并排时，一眼能分出"锭"和"料"。
+#
+# 四级的差别全在<b>网络连通度</b>上，这也正是它们四轴属性差异的来源：
+#   I  散生   金属颗粒是孤岛，菌丝只在近处搭几根
+#   II 渗流   出现第一条贯穿整片的通路（画成高亮的一条）
+#   III 贯通  所有颗粒被连成一张网
+#   IV 刚化   连接三角化、网眼填实，接近一块整料
+#
+# 颗粒位置用<b>固定种子</b>的伪随机生成：可重现，换台机器跑出来一模一样。
+
+COMPOSITE_MATRIX = "#1e2f1d"   # 基体：暗绿，和菌落 / 藻油同一条色系
+COMPOSITE_HYPHA = "#b8dcae"    # 菌丝：淡青绿
+
+# 每一级用自己的填料合金，颜色跟着填料走——属性上界也是按填料定的
+COMPOSITE_FILLER = {
+    1: ("#9aa0b4", "#5d6274", "#c6cbdb"),   # 锰钢     钢灰带紫
+    2: ("#dd8f4b", "#8c5120", "#f3bf87"),   # 镀铬铜   铜橙
+    3: ("#a6bdd0", "#5b7387", "#d6e6f2"),   # 钴铬合金 冷蓝白
+    4: ("#565b64", "#23262b", "#8b9099"),   # 硬质合金 近黑钨
+}
+
+
+def _grain_points(seed, count, radius):
+    """圆片里的颗粒位置。固定种子 → 可重现，每一级用不同种子。"""
+    rng = random.Random(seed)
+    pts = []
+
+    for _ in range(count * 8):
+        if len(pts) >= count:
+            break
+
+        a = rng.uniform(0, math.pi * 2)
+        # 开方是为了让点在圆面上均匀，不开方会全挤在圆心
+        r = radius * math.sqrt(rng.uniform(0.02, 1.0))
+        x, y = math.cos(a) * r, math.sin(a) * r
+
+        # 最小间距，免得颗粒糊成一团
+        if all((x - px) ** 2 + (y - py) ** 2 > 62 for px, py in pts):
+            pts.append((x, y))
+
+    return pts
+
+
+def _grain(d, x, y, size, pal, rng):
+    """一颗金属颗粒。用多边形不用圆——磨面上的晶粒是有棱角的。"""
+    face, edge, hi = pal
+    n = rng.choice((5, 6))
+    pts = []
+
+    for i in range(n):
+        a = math.pi * 2 * i / n + rng.uniform(-0.25, 0.25)
+        r = size * rng.uniform(0.72, 1.15)
+        pts += [x + math.cos(a) * r, y + math.sin(a) * r]
+
+    d.append(dw.Lines(*pts, close=True, fill=face, stroke=edge,
+                      stroke_width=1.0, stroke_linejoin="round"))
+
+    # 一小道高光，让它读起来是金属而不是石子
+    d.append(dw.Lines(x - size * 0.45, y - size * 0.30,
+                      x + size * 0.10, y - size * 0.62,
+                      x + size * 0.30, y - size * 0.32,
+                      close=True, fill=hi, fill_opacity=0.55))
+
+
+def living_composite(grade):
+    """活性复合材 I~IV：抛光截面圆片，四级只差一个网络连通度。"""
+    d = canvas()
+    pal = COMPOSITE_FILLER[grade]
+    R = 40.0
+
+    # 镶嵌环（金相试样的镶料），顺便把圆片和背景分开
+    d.append(dw.Circle(0, 0, R, fill="#454b52", stroke="#23262b", stroke_width=2.0))
+    d.append(dw.Circle(0, 0, R - 4.5, fill=COMPOSITE_MATRIX,
+                       stroke="#101c10", stroke_width=1.6))
+
+    inner = R - 8.0
+    rng = random.Random(9000 + grade)
+    pts = _grain_points(4200 + grade, (10, 13, 17, 22)[grade - 1], inner)
+
+    # 菌丝网络：先画线，颗粒盖上去
+    if grade == 1:
+        # 散生：只在很近的邻居之间搭，连不成片
+        links = [(i, j) for i in range(len(pts)) for j in range(i + 1, len(pts))
+                 if (pts[i][0] - pts[j][0]) ** 2 + (pts[i][1] - pts[j][1]) ** 2 < 330]
+    else:
+        k = {2: 2, 3: 3, 4: 4}[grade]
+        links = []
+
+        for i in range(len(pts)):
+            near = sorted(range(len(pts)),
+                          key=lambda j: (pts[i][0] - pts[j][0]) ** 2
+                          + (pts[i][1] - pts[j][1]) ** 2)[1:k + 1]
+            links += [(i, j) for j in near]
+
+    for i, j in links:
+        (x1, y1), (x2, y2) = pts[i], pts[j]
+        mx, my = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        nx, ny = -(y2 - y1), (x2 - x1)
+        L = max(1e-6, (nx * nx + ny * ny) ** 0.5)
+        bow = 3.2 if grade < 4 else 1.2   # 菌丝不是直的，中点拱一下
+
+        d.append(dw.Path(fill="none", stroke=COMPOSITE_HYPHA,
+                         stroke_width=1.5 if grade < 3 else 2.0,
+                         stroke_opacity=(0.28 + 0.16 * grade) if grade < 4 else 0.35,
+                         stroke_linecap="round")
+                 .M(x1, y1).Q(mx + nx / L * bow, my + ny / L * bow, x2, y2))
+
+    # II 渗流：一条贯穿整片的通路——这一级的全部意义就在这条线上。
+    #
+    # <b>不能按 x 排序顺序连。</b> 第一版就是那么做的，结果线在圆片里上下乱窜，
+    # 看着像一道闪电而不是一条路，还把铜颗粒全盖住了。改成贪心地向右走：
+    # 每步只在"更靠右、且纵向跳得不远"的点里挑最近的一个。
+    if grade == 2:
+        cur = min(pts, key=lambda p: p[0])
+        route, used = [cur], {cur}
+
+        while True:
+            cand = [p for p in pts
+                    if p not in used and p[0] > cur[0] and abs(p[1] - cur[1]) < 22]
+
+            if not cand:
+                break
+
+            cur = min(cand, key=lambda p: (p[0] - route[-1][0]) ** 2
+                      + (p[1] - route[-1][1]) ** 2)
+            route.append(cur)
+            used.add(cur)
+
+        path = (dw.Path(fill="none", stroke="#ffe08a", stroke_width=3.0,
+                        stroke_opacity=0.92, stroke_linecap="round",
+                        stroke_linejoin="round")
+                .M(-inner - 5, route[0][1]))
+
+        for x, y in route:
+            path.L(x, y)
+
+        path.L(inner + 5, route[-1][1])
+        d.append(path)
+
+    # IV 刚化：网眼填实成三角面，读起来就是"锁死了"
+    if grade == 4:
+        for i in range(len(pts) - 2):
+            a, b, c = pts[i], pts[i + 1], pts[i + 2]
+
+            if max((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2,
+                   (b[0] - c[0]) ** 2 + (b[1] - c[1]) ** 2) < 900:
+                # 描边也上：只填色在 80px 下会糊成一片，边缘才是"三角化"的证据
+                d.append(dw.Lines(a[0], a[1], b[0], b[1], c[0], c[1],
+                                  close=True, fill=pal[2], fill_opacity=0.72,
+                                  stroke=pal[1], stroke_width=1.1,
+                                  stroke_linejoin="round"))
+
+    for x, y in pts:
+        _grain(d, x, y, (3.6, 3.9, 4.3, 4.8)[grade - 1], pal, rng)
+
+    # 磨面高光：一道斜的亮弧，圆片才像"抛光过的"而不是一张贴纸
+    d.append(dw.Path(fill="#ffffff", fill_opacity=0.10)
+             .M(-R + 8, -R + 17).A(R - 6, R - 6, 0, 0, 1, R - 19, -R + 7)
+             .A(R - 6, R - 6, 0, 0, 0, -R + 8, -R + 17).Z())
+
+    # 等级刻痕：镶嵌环上 1~4 道。80px 下这是最可靠的区分手段
+    for i in range(grade):
+        a = math.radians(-66 + i * 15)
+        d.append(dw.Line(math.cos(a) * (R - 4.6), math.sin(a) * (R - 4.6),
+                         math.cos(a) * (R + 0.6), math.sin(a) * (R + 0.6),
+                         stroke="#ffe08a", stroke_width=3.4, stroke_linecap="round"))
+
+    return d
+
+
+def mycelial_matrix():
+    """菌丝基体：一团聚酯化的菌丝絮。
+
+    <b>不做成圆片</b>——它是原料不是成品，形制要和四级复合材分开：
+    软塌塌的一团，边缘散着毛丝。
+    """
+    d = canvas()
+    body = "#d8e6c2"
+    edge = "#6f8a52"
+    rng = random.Random(7331)
+
+    # 外围散出去的菌丝，先画，被主体压住一半
+    for i in range(26):
+        a = math.pi * 2 * i / 26 + rng.uniform(-0.08, 0.08)
+        r0 = 26 + rng.uniform(-3, 3)
+        r1 = r0 + rng.uniform(8, 17)
+
+        d.append(dw.Line(math.cos(a) * r0, math.sin(a) * r0 * 0.82,
+                         math.cos(a) * r1, math.sin(a) * r1 * 0.82,
+                         stroke="#a8c489", stroke_width=1.7,
+                         stroke_opacity=0.85, stroke_linecap="round"))
+
+    # 主体：一团不规则的絮，不是正圆
+    pts = []
+
+    for i in range(14):
+        a = math.pi * 2 * i / 14
+        r = 28 + rng.uniform(-4.5, 4.5)
+        pts += [math.cos(a) * r, math.sin(a) * r * 0.84]
+
+    d.append(dw.Lines(*pts, close=True, fill=body, stroke=edge,
+                      stroke_width=2.2, stroke_linejoin="round"))
+
+    # 内部纹理：菌丝的走向
+    for rr, op in ((20, 0.55), (13, 0.45), (7, 0.35)):
+        d.append(dw.Ellipse(0, 0, rr, rr * 0.84, fill="none",
+                            stroke="#8fae6f", stroke_width=1.6, stroke_opacity=op))
+
+    # 聚酯颗粒：细胞里堆起来的那些油滴状内含物，这是"基体"而非"菌丝"的部分
+    for cx, cy, rr in ((-9, -5, 4.2), (6, -9, 3.4), (10, 4, 3.8),
+                       (-3, 8, 3.0), (0, -1, 2.4)):
+        d.append(dw.Ellipse(cx, cy, rr, rr * 0.86, fill="#f2f7e4",
+                            stroke=edge, stroke_width=1.0, stroke_opacity=0.6))
+
+    d.append(dw.Ellipse(-10, -12, 9, 5, fill="#ffffff", fill_opacity=0.28))
+
+    return d
+
+
 def tab_mega():
     """建造栏的「巨型建筑」页签图标。
 
@@ -1123,5 +1347,10 @@ if __name__ == "__main__":
 
     # 生物温室的产物与配方图标
     render(microbial_consortium(), "microbial-consortium")
+    render(mycelial_matrix(), "mycelial-matrix")
+
+    # 活性复合材：形制与合金锭刻意分开，理由见 living_composite() 的注释
+    for _g in (1, 2, 3, 4):
+        render(living_composite(_g), "living-composite-%d" % _g)
     render(algal_oil(), "algal-oil")
     render(photosynthesis(), "photosynthesis")
