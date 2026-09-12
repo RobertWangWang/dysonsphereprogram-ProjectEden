@@ -14,6 +14,34 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 
 *This document is the English version of `mod特性.md`. Both are kept in step; if they ever disagree, the Chinese one is the original.*
 
+<!-- toc -->
+**Contents**
+
+- [I. Mega Structures](#i-mega-structures)
+- [II. Advanced Mining Machine](#ii-advanced-mining-machine)
+- [III. Water Pumps and Oil Extractors](#iii-water-pumps-and-oil-extractors)
+- [IV. Logistics](#iv-logistics)
+- [V. Orbital Collectors](#v-orbital-collectors)
+- [VI. Matrix Labs](#vi-matrix-labs)
+- [VII. Power](#vii-power)
+- [VIII. Extra Recipes](#viii-extra-recipes)
+- [IX. Custom Ores and Gases](#ix-custom-ores-and-gases)
+- [X. New Buildings](#x-new-buildings)
+- [XI. The C1 Chemistry Chain (syngas → methanol → downstream)](#xi-the-c1-chemistry-chain-syngas--methanol--downstream)
+- [XII. The standard for new items: follow real chemistry and physics](#xii-the-standard-for-new-items-follow-real-chemistry-and-physics)
+- [XIII. Interface Changes](#xiii-interface-changes)
+- [XIV. Cheat Switches (all off by default)](#xiv-cheat-switches-all-off-by-default)
+- [XV. Alloy Ammo: one product, different raw materials](#xv-alloy-ammo-one-product-different-raw-materials)
+- [XVI. English Localization](#xvi-english-localization)
+- [XVII. Known Trade-offs](#xvii-known-trade-offs)
+- [XVIII. Compatibility](#xviii-compatibility)
+- [XIX. The Biodome: a light-bound biological chain](#xix-the-biodome-a-light-bound-biological-chain)
+- [XX. Living Composite: hyphae growing metal into a solid](#xx-living-composite-hyphae-growing-metal-into-a-solid)
+- [XXI. Combustible Liquid Power Plant: what you burn decides how much you get out](#xxi-combustible-liquid-power-plant-what-you-burn-decides-how-much-you-get-out)
+- [Config Quick Reference](#config-quick-reference)
+
+> Each section stands on its own — no need to read in order. For config file names, jump to the last section.
+<!-- /toc -->
 ---
 
 ## I. Mega Structures
@@ -2004,6 +2032,92 @@ repository root.
 
 ---
 
+## XXI. Combustible Liquid Power Plant: what you burn decides how much you get out
+
+A hundred thermal power plant combustors sharing one turbine set and one grid connection, **216 MW**,
+burning combustible liquids only.
+
+It sits in the **leftmost build category (Power Facilities), slot 10**, next to the Thermal Power Plant,
+Solar Panel and Accumulator — *not* on this mod's own "Mega Structures" tab, where the Wind Turbine
+Cluster lives. The inconsistency is deliberate: power buildings are easier to find among power buildings.
+
+### A liquid has two properties, and they do different jobs
+
+| Property | What it decides | Where you see it |
+|---|---|---|
+| **Working Temp.** | **Energy efficiency** — how much of a unit actually becomes electricity | a new row in the item tooltip |
+| **Fuel Heat** | how long one unit lasts — i.e. units per second at full load | the tooltip's existing "Fuel Heat" row |
+
+**Output is a flat 216 MW and does not change with the fuel.** What changes is how much fuel energy
+it takes to hold that output. So switching liquids is invisible on the power grid and
+**very visible on the belt**.
+
+### The six liquids
+
+| Temp. | Liquid | Heat | Efficiency | Per unit | At full load |
+|---|---|---|---|---|---|
+| 250 °C | Algal Oil | 4.2 MJ | 30% | 1.26 MJ | 170.8 /s |
+| 500 °C | **Vanadium Residue Oil** | 12.0 MJ | 43% | 5.16 MJ | 41.9 /s |
+| 750 °C | Refined Oil | 4.5 MJ | 50% | 2.23 MJ | 96.8 /s |
+| 1000 °C | Ethylene | 9.7 MJ | 54% | 5.20 MJ | 41.5 /s |
+| 1500 °C | Methanol | 5.0 MJ | 58% | 2.91 MJ | 74.2 /s |
+| 2000 °C | Ammonia | 2.6 MJ | 61% | 1.58 MJ | 136.6 /s |
+
+**Only Vanadium Residue Oil is a new item**; the other five already had production chains. It comes from
+one new recipe, **Vacuum Distillation** (Refinery: crude oil ×4 → refined oil ×3 + residue oil ×1), which is
+**deliberately worse than Plasma Refining**: vanilla gets one refined oil per crude, this gets 0.75. It is not
+a better oil route — it is the route you run when you specifically want the residue.
+
+Apart from the residue oil, all five liquids **still burn in the vanilla Thermal Power Plant**: the combustible
+liquid fuel bit is OR-ed on, so nothing was taken away from them. The residue oil is the one liquid only this
+plant will accept.
+
+### Working temperature is not flame temperature
+
+This needs saying, or the table above reads strangely: ammonia has the lowest heat value, so how does it
+get the highest temperature?
+
+**Because the temperature is how hot this fuel lets you run the hot gas path, not how hot it burns.**
+In reality almost every hydrocarbon burns at 1800–2300 °C in air — they all bunch together. What actually
+forces turbine temperature down is ash, alkali metals, sulfur and vanadium: they foul, slag and corrode,
+and you turn the temperature down to keep the machine alive.
+
+So the whole table is one cleanliness ladder:
+
+> **alkali ash (algal oil) → vanadic hot corrosion (residue oil) → sulfur and aromatics (refined oil)
+> → sooting (ethylene) → sootless (methanol) → carbon-free (ammonia)**
+
+That is also why the two properties are independent of each other: **contaminant content and enthalpy of
+combustion have no causal relationship**. So "the dirty ones are energy-dense and the clean ones are
+energy-poor" is not a balance contrivance — it is what these fuels are actually like. Every heat value in the
+table except the residue oil's is an existing enthalpy-of-combustion conversion; not one was retuned for
+this chain.
+
+> Ethylene sitting below methanol may look backwards. Ethylene has no ash and no sulfur, but it is a
+> **textbook soot precursor** — C₂H₄/C₂H₂ are the standard fuels in soot formation research. Methanol has
+> no C–C bond at all and therefore cannot form soot; its flame is so clean it is nearly invisible.
+
+### It is less efficient than the vanilla Thermal Power Plant, on purpose
+
+The vanilla Thermal Power Plant converts at **80%** (one coal is 2.7 MJ and yields 2.16 MJ). This plant's
+best grade only reaches **61%**.
+
+That is because vanilla's 80% is a flat game number, while this efficiency is computed as
+**Carnot efficiency × the second-law efficiency of a real power plant**, which simply cannot get that high.
+So efficiency is not what this building sells. Two other things are:
+
+- **Power density**: one building replaces a hundred, saving floor space, grid connections and build cost
+- **It burns what your factory is already venting**: when the feedstock's opportunity cost is near zero,
+  how much is wasted stops mattering
+
+### Full derivation
+
+How temperature becomes efficiency, why the anchor sits on the most efficient grade, and the twenty papers
+behind the numbers are all in `可燃液体发电V1.md` at the repository root. The values live in
+`combustibles.json` and the plant itself in `machines.json`.
+
+---
+
 ## Config Quick Reference
 
 | File | What it controls |
@@ -2016,13 +2130,14 @@ repository root.
 | `power.json` | Power node coverage radius |
 | `belts.json` | Speed of the three belt tiers |
 | `ores.json` | The custom vein table: per-ore IDs, vein density, recolour parameters, recipe lists; extra items (phase, heat value, icon); and the gases injected into gas giants |
-| `machines.json` | The six new buildings: which vanilla building to clone from, parameters for the five `kind`s (assembler / station / accumulator / exchanger / generator), tint, build recipe |
+| `machines.json` | The seven new buildings: which vanilla building to clone from, parameters for the five `kind`s (assembler / station / accumulator / exchanger / generator), tint, build recipe |
 | `metals.json` | The four-axis property table (hardness / toughness / corrosion / conductivity) |
 | `alloys.json` | Per-building alloy ratios: adjustable slots, total parts, property weights, yield and time multiplier bands |
 | `cheats.json` | **Cheat switches**, all off by default: instant build / build without condition / no build collision / collider pool off / no power spacing / pump anywhere |
 | `i18n.json` | The English localization table, Chinese → English. Forgetting the English for a new item raises a WARNING at startup |
 | `composite.json` | Living Composite: the filler shortlist, the ratio bands for the four grades, yield and percolation parameters |
 | `ammo.json` | Alloy ammo: the five tiers' damage/rounds multipliers, the pair-conversion weights, the yield curve |
+| `combustibles.json` | Combustible liquid power: each liquid's working temperature, the Carnot cold side and second-law efficiency, the fuel type bit, the property row's field id |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 
 > Before adding an item or recipe to `ores.json`, read the standard in section XII — **properties are derived from
