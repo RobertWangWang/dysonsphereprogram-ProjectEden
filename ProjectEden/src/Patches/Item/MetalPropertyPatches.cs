@@ -152,10 +152,21 @@ namespace ProjectEden.Patches
             }
 
             if (done == 0)
+            {
                 ProjectEdenPlugin.Log.LogWarning("金属属性：一个金属都没配上，提示栏不会有这几行");
-            else
-                ProjectEdenPlugin.Log.LogInfo(
-                    $"金属属性已挂上 {done} 种金属：{string.Join(" / ", _names)}（字段号 {_base}~{_base + _names.Length - 1}）");
+                return;
+            }
+
+            // 报<b>显示出来的那一份</b>，不是配置里的原串。这两者一样才说明
+            // GetPropName 真的走了 Translate —— 上一版漏了那一步，而译文一直都在
+            // i18n.json 里，所以日志看着完全正常、英文客户端的提示栏里却是四行中文。
+            var shown = new string[_names.Length];
+
+            for (var i = 0; i < _names.Length; i++) shown[i] = _names[i].Translate();
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"金属属性已挂上 {done} 种金属：{string.Join(" / ", shown)}" +
+                $"（字段号 {_base}~{_base + _names.Length - 1}）");
         }
 
         /// <summary>
@@ -206,12 +217,23 @@ namespace ProjectEden.Patches
             return _names.Length > 0 && slot >= 0 && slot < _names.Length;
         }
 
-        /// <summary>属性行的名字。原版对认不出的字段号返回 <c>??</c>，这里把我们那几个换掉。</summary>
+        /// <summary>
+        /// 属性行的名字。原版对认不出的字段号返回 <c>??</c>，这里把我们那几个换掉。
+        ///
+        /// <b><c>_names</c> 里是 metals.json 写的中文原串，要过一道 Translate。</b>
+        /// 原版这一行自己也是这么干的（<c>ItemProto.GetPropName</c> 里全是
+        /// <c>"风能".Translate()</c>），漏掉的话 i18n.json 里那四条译文没有任何人去查，
+        /// 英文客户端的提示栏里就只有这四行是中文。<c>Translate</c> 对没登记的键原样返回，
+        /// 所以 metals.json 里新加一条属性没有译文也不会炸。
+        ///
+        /// 和 <see cref="AlloyRatioPatches.AxisName"/> 一样<b>在调用时翻译</b>，
+        /// 不在 <c>Collect</c> 里预先翻好——语言可以中途切换。
+        /// </summary>
         [HarmonyPostfix]
         [HarmonyPatch(typeof(ItemProto), nameof(ItemProto.GetPropName))]
         private static void GetPropName(ItemProto __instance, int index, ref string __result)
         {
-            if (Mine(__instance, index, out int slot)) __result = _names[slot];
+            if (Mine(__instance, index, out int slot)) __result = _names[slot].Translate();
         }
 
         /// <summary>

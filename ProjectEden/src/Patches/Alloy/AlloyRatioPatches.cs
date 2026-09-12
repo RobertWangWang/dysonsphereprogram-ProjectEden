@@ -413,14 +413,21 @@ namespace ProjectEden.Patches
             e = (float)sumE;
         }
 
+        /// <summary>
+        /// 轴名，<b>给人看的那一份</b>，不是键。
+        ///
+        /// <b>在这里翻译，不在注册时翻译。</b> 语言可以中途切换
+        /// （<c>Localization.LoadLanguage</c>），在加载时把译文缓存下来会把它冻在
+        /// 当时那一种语言上——面板上的四维读数会一直是启动时的语言。
+        /// </summary>
         internal static string AxisName(string axis)
         {
             switch (axis)
             {
-                case "toughness": return "韧性";
-                case "corrosion": return "耐蚀";
-                case "conductivity": return "导电";
-                default: return "硬度";
+                case "toughness": return "韧性".Translate();
+                case "corrosion": return "耐蚀".Translate();
+                case "conductivity": return "导电".Translate();
+                default: return "硬度".Translate();
             }
         }
 
