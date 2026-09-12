@@ -128,7 +128,18 @@ namespace ProjectEden.Patches
 
             UpdateSlots(factory, ref component);
 
-            RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
+            // 催化反应器：床里没有活性催化剂就这一 tick 不许生产。
+            // Gate 自己会调 Suppress 压住原版那次调用——前置钩子取消不了它后面那次。
+            if (!CatalystBedPatches.Gate(factory, ref component)) return;
+
+            int settled = RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
+
+            // 只在**真的产出了**的 tick 扣活性。settled 是实测值；cyclesPerTick = 1 时
+            // 没有补跑周期可测，才退回按原版判据推导（见 LooksProductive 的注释）。
+            CatalystBedPatches.Settle(factory, ref component, settled,
+                                      settled == 0 && CatalystBedPatches.LooksProductive(ref component, power));
+
+            CatalystBedPatches.DebugTick(factory, ref component);
         }
 
         /// <summary>
@@ -145,7 +156,13 @@ namespace ProjectEden.Patches
         /// 之所以多跑几遍就能多产出：高速下 time 会累积成一个「待结算周期」的缓冲，
         /// 每次调用消化其中一个，而 time &gt;= timeSpend 期间不再累加。
         /// </summary>
-        private static void RunExtraCycles(PlanetFactory factory, ref AssemblerComponent component, float power,
+        /// <remarks>
+        /// 返回<b>实际结算掉的</b>补跑周期数——每跑一遍就看一眼 <c>produced[0]</c> 动没动。
+        /// 催化剂床拿它当「这一 tick 真的产出了吗」的判据：断电、缺料、产物槽满
+        /// 三种情况下原版本来就不结算，这里也就数不出来，活性自然不会被扣。
+        /// <b>这是实测，不是复现原版的条件</b>，所以原版将来多一道闸也不会失准。
+        /// </remarks>
+        private static int RunExtraCycles(PlanetFactory factory, ref AssemblerComponent component, float power,
             int[] productRegister, int[] consumeRegister)
         {
             int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
@@ -160,12 +177,27 @@ namespace ProjectEden.Patches
                 {
                     MegaLightPatches.Suppress(ref component);
 
-                    return;
+                    return 0;
                 }
             }
 
+            int[] produced = component.produced;
+            bool watch = produced != null && produced.Length > 0;
+            int last = watch ? produced[0] : 0;
+            var settled = 0;
+
             // 原本那次调用紧随其后，所以这里只补差额
-            for (var i = 1; i < cycles; i++) component.InternalUpdate(power, productRegister, consumeRegister);
+            for (var i = 1; i < cycles; i++)
+            {
+                component.InternalUpdate(power, productRegister, consumeRegister);
+
+                if (!watch || produced[0] == last) continue;
+
+                settled++;
+                last = produced[0];
+            }
+
+            return settled;
         }
 
         private static bool _reportedSpeed;

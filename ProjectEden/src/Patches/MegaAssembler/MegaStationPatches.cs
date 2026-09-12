@@ -9,6 +9,7 @@
 // 按 GPL-3.0 发布，详见仓库根目录的 LICENSE 与 NOTICE。
 // Released under GPL-3.0; see LICENSE and NOTICE at the repository root.
 
+using System.Collections.Concurrent;
 using ProjectEden.Utils;
 
 namespace ProjectEden.Patches
@@ -94,7 +95,7 @@ namespace ProjectEden.Patches
             // 直接改 storage 绕过了原版设置物品的入口（PlanetTransport.SetStationStorage），
             // 而供需配对只在那条路径上重建，所以布局一变就得自己刷一次，否则运输机永远配不上对。
             // RefreshStationTraffic 会遍历整颗星球的物流站，只能在真正变化时调用。
-            if (SyncStorageLayout(station, requires, products)) factory.transport.RefreshStationTraffic();
+            if (SyncStorageLayout(factory, station, requires, products)) factory.transport.RefreshStationTraffic();
 
             lock (station.storage)
             {
@@ -168,7 +169,18 @@ namespace ProjectEden.Patches
 
         private static bool _warnedMissingStation;
         private static bool _warnedNoRecipe;
-        private static bool _reported;
+        /// <summary>
+        /// 储物格转储<b>按建筑类型各报一次</b>，不是全局一次。
+        ///
+        /// 原来是一个全局 bool，于是<b>八种巨型建筑里只有最先 tick 到的那一种</b>
+        /// 会打出储物格清单——催化反应器的催化剂槽到底排出来没有，在日志里根本查不到，
+        /// 因为那一次早被熔岩冷却厂用掉了。诊断行「只打一次」的目的是不刷屏，
+        /// 而不是只覆盖一种建筑；按 protoId 分桶两者都满足。
+        ///
+        /// 组装机 tick 跑在 <c>_assembler_parallel</c> 上，所以用 <c>ConcurrentDictionary</c>
+        /// 的 <c>TryAdd</c> 领号，不用普通集合（CLAUDE.md 第 4 号坑）。
+        /// </summary>
+        private static readonly ConcurrentDictionary<int, byte> Reported = new ConcurrentDictionary<int, byte>();
 
         /// <summary>建筑有站点但没设配方时提示一次。</summary>
         private static void WarnNoRecipe(PlanetFactory factory, int entityId)
@@ -189,15 +201,16 @@ namespace ProjectEden.Patches
         /// </summary>
         private static void ReportOnce(PlanetFactory factory, int entityId, StationComponent station)
         {
-            if (_reported) return;
+            int protoId = factory.entityPool[entityId].protoId;
 
-            _reported = true;
+            if (!Reported.TryAdd(protoId, 0)) return;
 
             int slots = station.storage?.Length ?? 0;
             int droneCapacity = station.workDroneDatas?.Length ?? 0;
 
             ProjectEdenPlugin.Log.LogInfo(
-                $"巨型建筑物流站接管成功（实体 {entityId} / 站点 {station.id}）：" +
+                $"巨型建筑物流站接管成功（{LDB.items.Select(protoId)?.name ?? protoId.ToString()}"
+                + $" / 实体 {entityId} / 站点 {station.id}）：" +
                 $"储物格 {slots} 个，运输机 空闲 {station.idleDroneCount} / 工作 {station.workDroneCount} / 容量 {droneCapacity}，" +
                 $"运送量 {station.deliveryDrones}%，储能 {station.energy}/{station.energyMax}，" +
                 $"本地供需配对 {station.localPairCount} 组");
@@ -249,7 +262,7 @@ namespace ProjectEden.Patches
         /// 把储物格排成「先原料后产物」，原料挂本地需求、产物挂本地供应。
         /// 配方一换就跟着重排，玩家不需要手动配置储物格。
         /// </summary>
-        private static bool SyncStorageLayout(StationComponent station, int[] requires, int[] products)
+        private static bool SyncStorageLayout(PlanetFactory factory, StationComponent station, int[] requires, int[] products)
         {
             // 只在前 MaxSafeStorageKinds 格里排布局：UIEntityBriefInfo 的 icons 是定长数组，
             // 按储物格种类数遍历，超出即越界崩溃。
@@ -264,6 +277,16 @@ namespace ProjectEden.Patches
 
             for (var i = 0; i < products.Length && cursor < length; i++, cursor++)
                 changed |= SetSlot(station, cursor, products[i], ELogisticStorage.Supply);
+
+            // 催化反应器还要两格：催化剂（需求）和待生催化剂（供应）。
+            //
+            // <b>它必须排在这里，而不是由那边自己去填。</b> 下面那个清理循环会把
+            // cursor 之后的格子全清掉，唯一的赦免是 count > 0——而催化剂槽恰恰
+            // 要在**空的时候**存在（空着才是在向物流网要货）。从别处填的话，
+            // 每 tick 都会被这里擦掉一次，症状是「反应器永远等不到催化剂」，
+            // 而病因在一个名字里根本没有「催化剂」三个字的方法里。
+            if (CatalystBedPatches.IsReactor(factory, station.entityId))
+                changed |= CatalystBedPatches.LayoutSlots(station, ref cursor, length);
 
             // 多出来的格子清空，免得换配方后残留旧物品的需求。
             // 这里要一直清到数组末尾而不是 length：早先版本按 12 格建过站点，

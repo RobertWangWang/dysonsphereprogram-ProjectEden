@@ -4,7 +4,7 @@ using S = ProjectEden.Model.BuildingTexture;
 namespace ProjectEden.Model
 {
     /// <summary>
-    /// 六座巨型建筑各自的程序化几何、贴图，以及把它们换进 <see cref="PrefabDesc"/> 的那一步。
+    /// 八座巨型建筑各自的程序化几何、贴图，以及把它们换进 <see cref="PrefabDesc"/> 的那一步。
     ///
     /// <b>要解决的问题：五座建筑长得一模一样。</b> <c>megabuildings.json</c> 里
     /// <c>copyFromModelId</c> 是<b>一个全局设置</b>（49，物流运输站），五座克隆的是同一个模型，
@@ -21,7 +21,7 @@ namespace ProjectEden.Model
 
         private static bool _shaderReported;
 
-        // ══ 六座建筑的造型 ════════════════════════════════════
+        // ══ 八座建筑的造型 ════════════════════════════════════
 
         // ── 天工装配厂：三层收口台座 + 中央塔柱 ──────────────
         private static void SkyAssembler(MeshKit k)
@@ -202,7 +202,7 @@ namespace ProjectEden.Model
         //   敞开的熔池  = 进料，也是全身唯一把「热」摆在外面的地方
         //   池面上的粒化环 = 冷却速率，三条配方的区别就在这里
         //   四座冷却塔   = 热最后去了哪里
-        // 七座巨型建筑里只有它在外表露出发光面，远处看过去就靠这一点认。
+        // 八座巨型建筑里只有它在外表露出发光面，远处看过去就靠这一点认。
         private static void LavaCooler(MeshKit k)
         {
             k.AddBox(new Vector3(0f, 0.13f * U, 0f), new Vector3(2.1f * U, 0.26f * U, 2.1f * U), S.Concrete, S.Grating);
@@ -235,6 +235,85 @@ namespace ProjectEden.Model
 
             k.AddGreebleRow(new Vector3(-0.20f * U, 0.30f * U, 1.00f * U), new Vector3(0.20f * U, 0.30f * U, 1.00f * U),
                             3, new Vector3(0.13f * U, 0.14f * U, 0.13f * U), S.Vent);
+
+            k.AddRailing(Vector3.zero, 0.95f * U, 0.95f * U, 0.30f * U, 0.20f * U, S.Hazard);
+        }
+
+        // ── 催化反应器：提升管 + 再生器 + 两条来回的输送管 ────
+        //
+        // 造型的母题是**那个回路**，不是塔。真实的 FCC 装置一眼能认出来靠的就是
+        // 「一细一粗两个容器被两条管接成一个环」——催化剂在里面转圈：反应器里结焦、
+        // 送去再生器烧掉、再送回来。这也正好是这座建筑的机制本身，所以造型不是装饰，
+        // 它就是在说明这台机器怎么工作。
+        //
+        // <b>两条输送管刻意一高一低、一后一前（z 差开）。</b> 摆成平行的两根会读成
+        // 一副梯子；错开之后才读得出「去」和「回」是两个方向。图标那张也是这么画的。
+        //
+        // 顶上三只旋风分离器是再生器最好认的特征，也是 80px 图标里唯一能把它和
+        // 燔石化工厂那几只普通立罐分开的东西——模型和图标在这一点上必须一致。
+        private static void CatalyticReactor(MeshKit k)
+        {
+            k.AddBox(new Vector3(0f, 0.13f * U, 0f), new Vector3(2.1f * U, 0.26f * U, 2.1f * U), S.Concrete, S.Grating);
+
+            // ── 再生器：粗矮的那个，右边 ──
+            var regen = new Vector3(0.42f * U, 0.26f * U, 0f);
+            const float regenR = 0.50f * U;
+            const float regenH = 0.78f * U;
+
+            k.AddCylinder(regen, regenR, regenH, 20, S.PlateRivet, S.PlateDark);
+            k.AddRibs(regen, regenR + 0.01f * U, regenH, 12, 0.05f * U, S.PlateDark);
+
+            // 腰带：耐火衬里的那道箍。图标上也有，两边要对得上
+            k.AddTorus(new Vector3(regen.x, regen.y + regenH * 0.55f, regen.z),
+                       regenR + 0.015f * U, 0.045f * U, 24, 6, S.Accent);
+
+            // ── 旋风分离器：三只，锥口朝上坐在罐顶 ──
+            float top = regen.y + regenH;
+
+            foreach (var off in new[]
+                     {
+                         new Vector3(0.26f * U, 0f, 0f),
+                         new Vector3(-0.13f * U, 0f, 0.23f * U),
+                         new Vector3(-0.13f * U, 0f, -0.23f * U),
+                     })
+            {
+                var at = new Vector3(regen.x + off.x, top, regen.z + off.z);
+
+                k.AddCone(at, 0.06f * U, 0.17f * U, 0.30f * U, 12, S.Vent, S.PlateDark);
+                k.AddCylinder(new Vector3(at.x, at.y + 0.30f * U, at.z), 0.17f * U, 0.06f * U, 12, S.PlateLight);
+            }
+
+            // ── 提升管：细高的那个，左边。比再生器高出一截，回路才有落差 ──
+            var riser = new Vector3(-0.62f * U, 0.26f * U, 0f);
+            const float riserR = 0.19f * U;
+            const float riserH = 1.30f * U;
+
+            k.AddCylinder(riser, riserR, riserH, 14, S.PlateLight, S.PlateDark);
+            k.AddRibs(riser, riserR + 0.01f * U, riserH, 6, 0.035f * U, S.PlateDark);
+
+            // 爬梯：横杠一路上去。管子上有梯子，尺度感才出来
+            k.AddGreebleRow(new Vector3(riser.x, riser.y + 0.20f * U, riser.z + riserR),
+                            new Vector3(riser.x, riser.y + riserH - 0.12f * U, riser.z + riserR),
+                            7, new Vector3(0.16f * U, 0.03f * U, 0.04f * U), S.Hazard);
+
+            // ── 上行管：提升管顶 → 横过去 → 落进再生器（走后侧） ──
+            k.AddBox(new Vector3((riser.x + 0f) * 0.5f, riser.y + riserH - 0.10f * U, -0.20f * U),
+                     new Vector3(Mathf.Abs(riser.x), 0.12f * U, 0.12f * U), S.Pipe);
+            k.AddBox(new Vector3(0f, riser.y + riserH * 0.72f, -0.20f * U),
+                     new Vector3(0.12f * U, riserH * 0.56f, 0.12f * U), S.Pipe);
+
+            // ── 下行管：再生器底 → 横回来 → 接进提升管底（走前侧） ──
+            k.AddBox(new Vector3(-0.26f * U, 0.42f * U, 0.30f * U),
+                     new Vector3(0.76f * U, 0.11f * U, 0.11f * U), S.Pipe);
+            k.AddBox(new Vector3(0.10f * U, 0.38f * U, 0.30f * U),
+                     new Vector3(0.11f * U, 0.24f * U, 0.11f * U), S.Pipe);
+
+            // 控制间 + 通风口：和别的几座一样，放在正面把体量坐实
+            k.AddBox(new Vector3(-0.05f * U, 0.40f * U, 0.86f * U),
+                     new Vector3(0.30f * U, 0.16f * U, 0.30f * U), S.PlateDark, S.Grating);
+            k.AddGreebleRow(new Vector3(0.45f * U, 0.32f * U, 0.98f * U),
+                            new Vector3(0.85f * U, 0.32f * U, 0.98f * U),
+                            3, new Vector3(0.12f * U, 0.13f * U, 0.12f * U), S.Vent);
 
             k.AddRailing(Vector3.zero, 0.95f * U, 0.95f * U, 0.30f * U, 0.20f * U, S.Hazard);
         }
@@ -334,6 +413,7 @@ namespace ProjectEden.Model
                 case 6504: ParticleCollider(kit); break;
                 case 6505: BioGreenhouse(kit); break;
                 case 6506: LavaCooler(kit); break;
+                case 6507: CatalyticReactor(kit); break;
                 default: return false;
             }
 

@@ -1898,6 +1898,183 @@ def lava():
     return d
 
 
+# ── 丙烯 C₃H₆ ────────────────────────────────────────────
+# CH₂=CH–CH₃。骨架走左下→右上的对角线（和甲醇同一条理由：小尺寸下比横平竖直好认），
+# 双键落在左端那一段。**六个氢是这张图最难的地方**——乙烯只有四个，多两个就容易把
+# 三个碳糊掉。所以六个氢一律朝外扇开，碳链周围一个氢都不留，链子才读得出来是三节。
+#
+# <b>双键那一段要画得比单键长。</b> 第一版三个碳等距，结果碳碳之间只剩十来个单位
+# 露在球外面，两条平行线挤成了一根粗棍——双键就这么没了。原子半径是固定的 16，
+# 所以「双键看不看得见」取决于**键长减去两个半径**还剩多少，不是取决于线宽。
+def propylene():
+    return _molecule(
+        [(-54, 30, -6, 4, 2),                       # C1=C2，拉长到 54.6
+         (-6, 4, 34, -20),                          # C2—C3
+         (-54, 30, -88, 8), (-54, 30, -66, 66),     # C1 的两个氢
+         (-6, 4, 6, 46),                            # C2 的一个氢
+         (34, -20, 22, -58), (34, -20, 68, -44), (34, -20, 62, 14)],
+        [("H", -88, 8), ("H", -66, 66), ("H", 6, 46),
+         ("H", 22, -58), ("H", 68, -44), ("H", 62, 14),
+         ("C", -54, 30), ("C", -6, 4), ("C", 34, -20)])
+
+
+# ── 沸石催化剂 / 待生沸石催化剂 ──────────────────────────
+# 这两张是**一对**：同一个轮廓、同一处孔位，只有明度和孔里装的东西相反。
+# 玩家要一眼看出「是同一样东西的两个状态」而不是两样东西——这是整条
+# 反应—再生环里唯一需要靠图标讲清楚的事，别的都能靠文字。
+
+def _iso_face(cx, cy, w, a, b):
+    """等距顶面（菱形）上按 (a, b) ∈ [0,1]² 取一点。左顶点当原点，两条棱各是一轴。"""
+    hh = w * ISO
+
+    return cx - w + (a + b) * w, cy + (b - a) * hh
+
+
+def _pore(d, cx, cy, s, fill, edge, gloss=None):
+    """顶面上的一个孔（小菱形，躺在顶面那个平面里）。"""
+    d.append(dw.Lines(cx, cy - s * ISO, cx + s, cy, cx, cy + s * ISO, cx - s, cy,
+                      close=True, fill=fill, stroke=edge, stroke_width=1.0, stroke_linejoin="round"))
+
+    if gloss:
+        # 孔口内壁的一道反光：没有它，深色菱形会读成「贴上去的黑片」而不是「洞」
+        d.append(dw.Lines(cx, cy - s * ISO * 0.52, cx + s * 0.48, cy - s * ISO * 0.04,
+                          cx, cy + s * ISO * 0.12, cx - s * 0.48, cy - s * ISO * 0.04,
+                          close=True, fill=gloss, fill_opacity=0.5))
+
+
+def _sieve(body, pore_fill, pore_edge, pore_gloss, side_pore, lumps=()):
+    """分子筛块体：等距方块 + 顶面 3×3 孔阵 + 侧面两排通孔。两态共用。"""
+    d = canvas()
+    p = _pal(body)
+
+    w, cy, h = 34.0, -14.0, 30.0
+
+    _prism(d, 0, cy, w, h, p, gloss=0.10)
+
+    # 顶面孔阵。**「孔是有序的」才是这张图的信息** ——
+    # 分子筛和一块普通多孔石头的全部区别就在这里，孔画得再多、排得不齐也没用。
+    for a in (0.26, 0.5, 0.74):
+        for b in (0.26, 0.5, 0.74):
+            px, py = _iso_face(0, cy, w, a, b)
+
+            _pore(d, px, py, 5.2, pore_fill, pore_edge, pore_gloss)
+
+    # 左侧面两排通孔：说明孔是穿透的，不是表面的坑。
+    #
+    # <b>斜率必须正好是 ISO。</b> 左面的上棱从左顶点 (-w, cy) 走到前顶点 (0, cy + w·ISO)，
+    # 所以那条棱上 y = cy + (x + w)·ISO。第一版写成了 ISO·0.5，方块就一路从面上飘出去，
+    # 看着像贴在空气里——等距图里任何「贴在某个面上」的东西都得用那个面自己的斜率。
+    for x in (-25, -16, -7):
+        edge_y = cy + (x + w) * ISO
+
+        for dy in (8, 18):
+            d.append(dw.Rectangle(x - 3.3, edge_y + dy, 6.6, 6.6,
+                                  rx=1.2, fill=side_pore, stroke=p[3], stroke_width=0.9))
+
+    # 结焦的碳瘤：只有待生态才有。
+    #
+    # <b>要骑在轮廓线上，而且不能给高光。</b> 第一版是三个带高光的规则圆点，摆在面中央——
+    # 读出来是三颗铆钉。碳瘤得破坏那条干净的等距棱，形状还得不规则，才读得出「长出来的脏东西」。
+    for lx, ly, lr in lumps:
+        for ox, oy, k in ((0, 0, 1.0), (lr * 0.75, lr * 0.35, 0.72), (-lr * 0.6, lr * 0.5, 0.6)):
+            d.append(dw.Circle(lx + ox, ly + oy, lr * k, fill="#14100e",
+                               stroke="#2b2420", stroke_width=1.1))
+
+    return d
+
+
+def zeolite_catalyst():
+    """沸石催化剂：淡青灰的块体，孔洞是通的、深的、排得整整齐齐。
+
+    孔口内壁那道反光压得比较淡——调亮会读成「镶了一圈蓝宝石」，那是块首饰不是催化剂。
+    """
+    return _sieve("#b7ccd0", "#26383d", "#16242a", "#6aa8ba", "#1d2d33")
+
+
+def spent_catalyst():
+    """待生沸石催化剂：同一块，压暗两档，孔被碳填平，棱上糊着碳瘤。
+
+    <b>孔要填成「亮黑」而不是留空。</b> 留空的话这张就只是「更暗的那张干净图」，
+    读不出「堵住了」——焦炭那点油亮的反光是这里唯一能表达「填满」的手段。
+    """
+    return _sieve("#5c5750", "#0f0c0a", "#000000", "#6b5f52", "#0d0a09",
+                  lumps=((-17, -22.7, 5.6), (17, -22.7, 4.6), (0, 3.4, 5.0)))
+
+
+# ── 催化反应器 ───────────────────────────────────────────
+def catalytic_reactor():
+    """催化反应器：细高的提升管 + 粗矮的再生器 + 两条来回的输送管。
+
+    <b>母题是那个回路，不是塔。</b> 真实的 FCC 装置一眼能认出来，靠的就是
+    「一细一粗两个容器被两条斜管接成一个环」——催化剂在里面转圈：反应器里结焦、
+    送去再生器烧掉、再送回来。这张图要是只画一座塔，它和燔石化工厂就分不开了。
+
+    <b>两条管必须一上一下、而且不平行。</b> 平行的两条会读成一副梯子；一上一下
+    才读得出「去」和「回」是两个方向，也才对得上那个环。
+
+    顶上三只小锥体是旋风分离器。80px 下它们是唯一能把「再生器」和「一只普通立罐」
+    分开的东西——燔石化工厂那张已经占了「几只立罐 + 横管」，不能再撞。
+    """
+    d = canvas()
+    p = _pal("#6b9198")          # 建筑 tint：分子筛的灰青
+    dark = _pal("#3d565c")       # 底盘与管道
+    pipe = dark[2]
+
+    _prism(d, 0, 32, 38, 7, dark)
+
+    # 上行输送管：从提升管顶斜下来搭到再生器顶。先画，被两个容器压住两端，
+    # 接口就藏进罐体里了（化工厂那张横管的同一条经验：管子悬空就读成一根棍）。
+    #
+    # <b>斜度要压住。</b> 第一版两个容器拉得很开、这条管就成了一道长对角线，
+    # 整张图读出来是台吊车的臂而不是化工装置。真实的 FCC 两个塔是紧挨着的。
+    d.append(dw.Line(-21, -28, 14, -9, stroke=pipe, stroke_width=5.4, stroke_linecap="round"))
+    d.append(dw.Line(-21, -29.6, 14, -10.6, stroke=p[0], stroke_width=1.8, stroke_linecap="round"))
+
+    # 再生器：粗矮的那个，右边
+    RX, RY, RR = 15.0, -4.0, 17.0
+
+    _cyl(d, RX, RY, RR, 28, p, cap_gloss=0.30)
+
+    # 腰带：把「立罐」读成「工业容器」最省的一笔，也顺手把再生器那一大片平色打断。
+    #
+    # <b>只能画前半弧。</b> 用整个 dw.Ellipse 描边会把<b>背面那半也画出来</b>，
+    # 而背面本该被罐体挡住——画出来立刻读成「罐口上扣了个盖」。这和熔岩冷却厂
+    # 那次 _ring() 画出实心盘是同一类错：等距图里凡是绕着圆柱的东西，
+    # 都得自己决定哪半被遮住，SVG 不会替你挡。
+    for dy, col, wdt in ((13, dark[1], 4.0), (11.8, p[0], 1.4)):
+        d.append(dw.Path(fill="none", stroke=col, stroke_width=wdt, stroke_linecap="round")
+                 .M(RX - RR, RY + dy).A(RR, RR * ISO, 0, 0, 0, RX + RR, RY + dy))
+
+    # 旋风分离器：三只小锥，锥尖坐在罐顶的<b>穹面上</b>。
+    #
+    # 第一版把三个锥尖排在同一条水平线上，于是它们整体浮在罐口上方十来个单位——
+    # 一眼就是「飘着的三个漏斗」。罐顶是个椭圆，尖端的 y 必须按椭圆算：
+    # y = RY − ry·√(1 − (dx/RR)²)。等距图里所有「坐在罐子上」的东西都要过这道算。
+    for dx, s in ((-11, 0.95), (0, 1.12), (11, 0.95)):
+        tip = RY - RR * ISO * (1 - (dx / RR) ** 2) ** 0.5
+        cx, r, hgt = RX + dx, 5.0 * s, 10.5 * s
+
+        d.append(dw.Lines(cx - r, tip - hgt, cx + r, tip - hgt, cx, tip,
+                          close=True, fill=p[1], stroke=dark[3], stroke_width=1.2,
+                          stroke_linejoin="round"))
+        d.append(dw.Ellipse(cx, tip - hgt, r, r * ISO, fill=p[0], stroke=dark[3], stroke_width=1.2))
+
+    # 提升管：细高的那个，左边。它比再生器高出一截，回路才有落差
+    _cyl(d, -21, -28, 8.5, 46, p, cap_gloss=0.34)
+
+    # 爬梯：六道横杠。管子上有梯子，尺度感就出来了——没有它，那根柱子可以是任何大小的东西
+    for y in range(-18, 14, 6):
+        d.append(dw.Line(-21, y, -13.5, y + 1.5, stroke=dark[3], stroke_width=1.5,
+                         stroke_opacity=0.75))
+
+    # 下行输送管：从再生器底斜上来接回提升管底。画在最后，从两个容器前面横过去。
+    # 两端都<b>咬进</b>容器里（右端在罐身上，左端在管身上），伸到轮廓外面就又是一根悬空的棍子。
+    d.append(dw.Line(6, 22, -18, 16, stroke=pipe, stroke_width=5.0, stroke_linecap="round"))
+    d.append(dw.Line(6, 20.6, -18, 14.6, stroke=p[0], stroke_width=1.7, stroke_linecap="round"))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -1979,3 +2156,9 @@ if __name__ == "__main__":
 
     # 岩浆：抽水站在熔岩星上抽出来的东西
     render(lava(), "lava")
+
+    # 催化反应器：催化剂的两个状态是一对，形制相同、明暗相反
+    render(propylene(), "propylene")
+    render(zeolite_catalyst(), "zeolite-catalyst")
+    render(spent_catalyst(), "spent-catalyst")
+    render(catalytic_reactor(), "catalytic-reactor")

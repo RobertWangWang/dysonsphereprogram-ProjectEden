@@ -43,6 +43,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXIV. Silicon Carbide: what moissanite is for, and it buys throughput](#xxiv-silicon-carbide-what-moissanite-is-for-and-it-buys-throughput)
 - [XXV. Bio Matrix: the seventh matrix, and it is grown](#xxv-bio-matrix-the-seventh-matrix-and-it-is-grown)
 - [XXVI. Magma: putting a water pump on a lava planet](#xxvi-magma-putting-a-water-pump-on-a-lava-planet)
+- [XXVII. Catalytic Reactor: a factory that remembers its own state](#xxvii-catalytic-reactor-a-factory-that-remembers-its-own-state)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -51,7 +52,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 
 ## I. Mega Structures
 
-A new **"Mega Structures" tab** (category 12) appears in the build bar, holding six 10000x facilities:
+A new **"Mega Structures" tab** (category 12) appears in the build bar, holding eight 10000x facilities:
 
 | Building | Recipe type | Working power |
 |---|---|---|
@@ -1346,7 +1347,7 @@ It now has a horizontal scrollbar too, and **jumps to the first usable recipe wh
 is remembered across windows, so opening the picker for a machine that only accepts a custom recipe type would very
 likely land on the previous tab and show nothing).
 
-### The seven mega buildings now have distinct shapes
+### The eight mega buildings now have distinct shapes
 
 They used to clone one vanilla model (the logistics station) and differ only by colour — five of the same
 building in five paints. Each one's geometry is now **generated in code**, with a silhouette of its own:
@@ -2563,7 +2564,7 @@ The seventh mega building, and the only one that eats magma.
 | Speed | 10000x, twelve belt ports connected directly, built-in planetary logistics station |
 | Power | 6 MW idle / 30 MW working |
 
-It is the only one of the seven that **shows a glowing surface on the outside**: an open
+It is the only one of the eight that **shows a glowing surface on the outside**: an open
 refractory pool in the middle, four cooling towers pulling the heat away, and a granulation
 ring hanging above the pool. At a distance that is the whole silhouette cue.
 
@@ -2609,11 +2610,109 @@ generate power at the same time"**, so making it electricity means making it a f
 collides with the Geothermal Power Station already standing on those same lava planets.
 ---
 
+## XXVII. Catalytic Reactor: a factory that remembers its own state
+
+The eighth mega building. The other seven have no memory — feed them and they produce,
+tear one down and rebuild it and you get the same machine back.
+**This one remembers how much activity is left in the catalyst sitting in its bed.**
+
+### How the loop runs
+
+The catalyst is not a per-cycle ingredient. It is a **charge loaded into the bed**:
+
+```
+Zeolite Catalyst ──loaded──▶ runs ~10 minutes, coke builds up in the channels
+                                │
+                        activity spent, the whole bed is blown into the spent hopper
+                                │
+              Spent Zeolite ────▶ "Coke Burn-Off" in the Redox Chemical Plant
+                                │
+                          10 in, 9 out ──▶ back to Zeolite Catalyst
+```
+
+**The loop is closed, but it is not perpetual.** Regeneration returns nine tenths —
+zeolite dealuminates, hydrothermally deactivates and sinters at regenerator temperature,
+and real plants top up with 1–2% fresh catalyst every day. So you need a small,
+permanent make-up line. It is not much throughput, but it cannot stop.
+
+The regenerator's off-gas is carbon dioxide, and **"Methanol · CO₂ Hydrogenation" already
+consumes it** — and methanol is in turn one of the reactor's feedstocks. That closed loop
+was not designed; it appeared on its own once the real process was wired in.
+
+### No sorters needed either way
+
+Catalyst and spent catalyst travel through the building's **own planetary logistics
+station**, not through the recipe's ingredient and product slots: drones bring the
+catalyst and take the spent away, and all you have to do is keep some in the network.
+
+The cost is that a mega building's storage slots are invisible to the player (the recipe
+window takes the place of the station window), so a **read-only panel** sits under the
+window:
+
+```
+In the bed       ████████████████████  200
+Activity left    ███████████░░░░░░░░░  58.3%
+Spent hopper                             0
+350s of activity left    catalyst in stock 840
+```
+
+The three rows are how much is loaded, how long it can still run, and how much spent
+catalyst has piled up. **With no catalyst the machine stops** and the panel says so —
+it will not idle and burn feedstock at the same time.
+
+### Activity only drops on ticks that actually produced
+
+No power, missing ingredients, output backed up — on those ticks the machine produces
+nothing in the first place, and **not a point of activity is spent**. You will never see
+"the machine is stopped and the catalyst is burning anyway".
+
+### Three recipes, and only this building can run them
+
+| Recipe | In → Out |
+|---|---|
+| Ethylene · Methanol to Olefins (Fluidised Bed) | Methanol ×7 → Ethylene ×2 + Propylene ×1 + Water ×7 |
+| Propylene · Catalytic Cracking | Refined Oil ×6 → Propylene ×4 + Ethylene ×6 |
+| Hydrogen · Catalytic Reforming | Refined Oil ×1 + Water ×4 → Carbon Monoxide ×4 + Hydrogen ×8 |
+
+All three are real molecular-sieve processes, and **the carbon and hydrogen balance
+exactly**: the first is `4 CH₃OH → 2 C₂H₄ + 4 H₂O` and `3 CH₃OH → C₃H₆ + 3 H₂O` merged;
+the second conserves everything without a single filler term, because refined oil,
+ethylene and propylene are all (CH₂)ₙ in this mod.
+
+**The first one does not make vanilla's MTO dead content.** Ethylene per unit of methanol
+is identical in both (of the 7 methanol, 4 go to ethylene and 3 to propylene). What the
+fluidised bed buys is **propylene**, not a better ethylene yield.
+
+Real FCC also lays down coke, and coke is exactly what deactivates the catalyst. **This mod
+does not make coke a product; it expresses it as the consumption of catalyst activity** —
+the line missing from the recipe table is the building's mechanic itself.
+
+### Propylene is not a dead end
+
+Propylene C₃H₆, like ethylene, cracks to **elemental carbon** rather than to carbon
+monoxide, so it drops straight into the existing hydrocarbothermic family. That family's
+gradient was already set by how many electrons the carbon can give up (CO 2, formaldehyde 4,
+methanol 6, ethylene 12) — propylene is 18. **Two propylene do the work of three ethylene**,
+because two propylene and three ethylene both supply exactly six carbons:
+`2 Al₂O₃ + 2 C₃H₆ → 4 Al + 6 CO + 6 H₂`, balanced exactly. The ratio was not picked.
+
+It burns too: 14.1 MJ, scaled from a heat of combustion of 2058 kJ/mol against the coal
+anchor — 1.45× ethylene's 9.7 MJ, matching the carbon-count ratio.
+
+### What you can tune
+
+`catalyst.json`: how many units a bed holds, how many ticks it lasts, the catalyst slot's
+capacity, and a debug switch that prints all five stages on one line every 10 seconds.
+**The catalyst slot's capacity is its own setting and does not follow the logistics
+station's** — if it did, the first reactor built would ask the network for ten million
+units of catalyst and starve every later one.
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The seven mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `megabuildings.json` | The eight mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |

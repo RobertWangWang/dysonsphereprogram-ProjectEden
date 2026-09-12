@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: seven 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, and six rule-bypass cheat switches that are off by default. ~31,000 lines of C# in 104 files — 97 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: eight 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, and six rule-bypass cheat switches that are off by default. ~31,000 lines of C# in 104 files — 97 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). Not a git repository. **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
@@ -220,6 +220,79 @@ types 9–14**. Without that restriction the five buildings holding vanilla type
 that is overwriting working vanilla copy, not filling in a gap. `MegaBuildingEntry.machineTypeName` supplies the item
 tooltip's 类型 row, since returning the building's own name there reads oddly.
 
+
+### Stateful production — `src/Patches/Catalyst/`
+
+催化反应器 (item **6507**, model 703, `ERecipeType` **14**) is the eighth mega building and
+**the first machine in this repo that remembers anything**. Every other machine here is
+memoryless: feed it and it produces, tear it down and rebuild it and you get the same
+machine. This one holds a *charge* of zeolite catalyst that loses activity as it runs,
+ejects itself as 待生沸石催化剂 when spent, and blocks until a fresh charge arrives.
+`data/catalyst.json` holds the knobs; state lives in `CatalystBedStore` and is persisted
+through `IModCanSave` (**SaveVersion 3 → 4**, with the usual `if (version >= 4)` branch —
+the stream is positional, so reading one extra int on an old save shifts everything after it).
+
+**The state is `{charge, life}` and `life` *is* the remaining productive ticks** — not a
+0–10000 scale that has to be converted for display. The design draft had the scale; the
+implementation dropped it because the panel's "how much longer" is exactly that number.
+
+**"Did this tick actually produce" is measured, not reproduced.** `RunExtraCycles` now
+returns how many of its N−1 extra cycles actually settled, by watching `produced[0]` across
+each `InternalUpdate` call. That is strictly better than reproducing vanilla's own gates
+(power ≥ 0.1, inputs sufficient, output not full) because it cannot drift when vanilla adds
+a fourth gate. `LooksProductive` is the fallback for `cyclesPerTick == 1`, where there are
+no extra cycles to observe — and it **logs that it is being used**, because it provably
+cannot see the output-full case and will slightly over-charge there. This is the drill-bit
+lesson (*a hook that runs before vanilla decides whether to act must reproduce that
+decision*) satisfied by measurement rather than by imitation.
+
+#### Two slot traps, and the second one was found only after the code was written
+
+Catalyst in and spent catalyst out go through the building's **station slots**, never
+through the recipe arrays — `AssemblerComponent.Export` writes `produced`/`served` counts
+from the **lengths** of `recipeExecuteData.products`/`requires`, so changing a length
+corrupts the save, and "eject once every ten minutes" cannot be expressed as a product
+without either changing the length or parking a permanent `count = 0` product on the UI.
+
+**(1) `MegaStationPatches.SyncStorageLayout` erases any slot it did not lay out itself.**
+After laying out requires→Demand and products→Supply it clears every slot past its cursor,
+and the only exemption is `count > 0`. A catalyst *demand* slot **has to exist while empty**
+— empty is precisely when it is asking the network for more. Filling it from the tick path
+(the `AlienVeinPatches.EnsureBitSlot` approach) therefore gets it wiped once per tick, and
+the symptom is "the reactor never receives catalyst" with the cause sitting in a method
+whose name contains nothing about catalyst. The fix is to make it **part of that layout**
+(`CatalystBedPatches.LayoutSlots`, called with the same cursor) rather than to fight it.
+
+**(2) `StationCapacityPatches.PlanetTransport_GameTick` forces `max` on *every* slot of
+*every* target proto, every tick.** This is the one that was missed at design time and found
+by reading the code afterwards. The catalyst slot is local **Demand**, so it requests from
+the network up to `max`; raised to 10,005,000 it would have the first reactor built vacuum
+up every unit of catalyst in the network and starve every later one — presenting as
+「我别的反应器全停了」, which points nowhere near the cause. `CatalystBedPatches.OwnsSlot`
+is now consulted there to skip those two slots, and `LayoutSlots` re-asserts the capacity
+every tick anyway (one int compare, against a silent failure of the whole line).
+
+**Both of these are the same shape, and it is worth naming: a rule this repo added for one
+building silently constrains another one added later — and by now the constraining rule is
+usually also ours.** The drill-bit slot hit it with `StationExpandPatches.StorageCount`;
+this feature hit it twice in one day. When a new building needs a slot, check every
+per-tick pass that walks `station.storage`, not just the one that creates it.
+
+#### The panel, and what the log has to carry instead
+
+Mega buildings deliberately do not open the station window (`MegaStationWindowPatches`
+reports `stationId` as 0 so the recipe window opens instead), so **those 30 slots are
+invisible to the player**. `AlloySliderPatches` therefore gained a sixth mode —
+`RefreshCatalyst`, the **first read-only one** (the catalyst is chosen by the recipe, so
+there is no `Handle*Input` at all). It distinguishes **"the slot was never laid out" (−1)
+from "the slot is there and empty"**, because the first is a layout defect and the second
+is normal waiting, and they need opposite responses.
+
+**`MegaStationPatches`' storage dump was a single global `bool`**, so of eight mega building
+types only the first one to tick ever printed its slots — and that is exactly the question
+this feature needed answered. It is now keyed by `protoId` in a `ConcurrentDictionary` and
+names the building. *A "log it once" diagnostic should mean once per kind of thing, not once
+per session.*
 
 ### Advanced miner & water pumps — `src/Patches/AdvancedMiner/`
 
@@ -961,7 +1034,36 @@ Machine follows reaction class as everywhere else: alloying is melting and mixin
 
 **A new machine and a new recipe type are the same feature.** `UIRecipePicker.RefreshIcons` filters on a single value (`filter != 0 && filter != recipe.Type → skip`), and `filter` comes from the machine's `prefabDesc.assemblerRecipeType` via `UIAssemblerWindow.OnSelectRecipeClick`. **One machine, one type** — there is no "this machine accepts types A and B". So "a class of recipes only the new machine can run" means allocating a type number and pointing a machine at it. (Making one machine accept *several* types — e.g. 量子化工厂 doing both 化学 and 电化学 — would require patching the picker and every `assemblerRecipeType` reader; GenesisBook does exactly that via a `ContainsRecipeType` helper transpiled into `BuildingParameters` and friends.)
 
-**No preloader needed, same as `EVeinType`.** `ERecipeType` is int-backed and `(ERecipeType)9` is valid unnamed; vanilla uses 1–8 and 15, leaving **9–14 free** (this repo has taken 9, 10, 11 and 12). `AssemblerComponent.SetRecipe` **does not validate the type at all** (its IL only checks `recipeId > 0` and a null lookup), so the type is a pure UI concern and no production logic changes.
+**No preloader needed, same as `EVeinType`.** `ERecipeType` is int-backed and `(ERecipeType)9` is valid unnamed; vanilla names only 1–8 plus 15 (`Research`), so 9–14 sit in a gap. `AssemblerComponent.SetRecipe` **does not validate the type at all** (its IL only checks `recipeId > 0` and a null lookup), so the type is a pure UI concern and no production logic changes.
+
+**There is no ceiling on `ERecipeType`, and an earlier version of this file wrongly said there
+was.** It claimed "only 14 remains" — which was counting unused values *below* `Research = 15`,
+not measuring a limit. Every candidate gate was then checked against the shipped assembly, and
+all four are open:
+
+- **The enum has no `Max` sentinel** (unlike `EVeinType.Max`): members are `None = 0`,
+  `Smelt = 1` … `Fractionate = 8`, then `Research = 15`. There is nothing to delete, so nothing
+  for a preloader to do — this is the same test the top of the preloader section prescribes,
+  and it passes on its first question.
+- **Nothing is indexed by it.** A whole-assembly scan for a `RecipeProto.Type` /
+  `PrefabDesc.assemblerRecipeType` read followed within a few instructions by `ldelem`/`stelem`
+  returns exactly one hit, `UIRecipePicker.RefreshIcons` @007B — and that `ldelem.ref` is
+  `recipeProtos[i]`; the `Type` read at @007C feeds a plain `bne.un` against `filter`.
+- **Both switches fall through.** `RecipeProto.get_madeFromString` is a 16-target jump table and
+  `ItemProto.get_typeString` is `sub 1` + a 15-target table, so anything out of range takes the
+  default — which `RecipeTypeNamePatches` already postfixes.
+- **`productionMask` is not a per-type bit.** `ItemProto.InitProductionMask` is a three-way
+  classification (`Type <= 5 → |= 1`, `== 8 → |= 8`, `== 15 → |= 2`), so types 9–14 already get
+  no bit and **16+ loses nothing further**. Its only reader is `UIReferenceSpeedTip` (参考速率).
+
+So 16, 17, 18 … are exactly as usable as 14: take the next free number and move on. What a custom
+type still costs is unchanged — `RecipeTypeNamePatches` for the two display strings, and
+`machineTypeName` on a mega building.
+
+**The process note is the point.** "Only 14 remains" was never measured; it was inferred from the
+shape of the enum, and it sat here long enough to be quoted as a design constraint in a feature
+doc. Same family as the `kMaxCargoFlowSpeedPerSecond` trap recorded under **Belt speed**:
+*a number that looks like a limit is a claim until you find the code that enforces it.*
 
 Only two strings leak: `RecipeProto.madeFromString` (a recipe's 制造于) and `ItemProto.typeString` (an item's 类型 row) both `switch` over known types and fall through to a default. `RecipeTypeNamePatches` fixes both with getter postfixes — the same approach as GenesisBook's `DisplayTextPatches`.
 
@@ -1139,7 +1241,7 @@ The nineteen configs: `megabuildings.json` (tab, build category 12, the seven bu
 
 **LDBTool re-binds proto IDs from its own config, after your code sets them.** `LDBTool.PreAddProto` → `Bind` → `IdBind` / `GridIndexBind` records every mod proto's ID and GridIndex in `BepInEx/config/LDBTool/LDBTool.CustomID.cfg` and `LDBTool.CustomGridIndex.cfg`, **keyed by the proto's display name**, and on every later launch it writes those stored values *back onto the proto*. So changing an ID in this repo's JSON has **no effect** on a proto that has already been registered once — the first ID a proto is ever given is sticky until that cfg entry is deleted. Cobalt sat on 电磁矩阵's 6001 through three config edits because of this. When an ID looks ignored, check that cfg before anything else, and delete the entry (both files) to let the new value take. `OreRegistry.VerifyIds` now checks the post-registration reality and names the file.
 
-**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)** and **6506 (熔岩冷却厂)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs 704, 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂) and 13 is 熔岩处理 (熔岩冷却厂), leaving **14 alone**.
+**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)**, **6641–6643 (沸石催化剂 / 待生沸石催化剂 / 丙烯)**, **6506 (熔岩冷却厂)** and **6507 (催化反应器)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**, **6507** and **6648–6653 (catalyst synthesis / regeneration, three type-14 reactor recipes, propylene carbothermic)**. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs 703, 704, 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂), 13 is 熔岩处理 (熔岩冷却厂) and 14 is 催化 (催化反应器). **14 is not a ceiling** — see the `ERecipeType` paragraph under *Cloned buildings*; 16 and up are equally usable.
 
 **PowerShell scripts for IL inspection must be pure ASCII.** Windows PowerShell reads `.ps1` as ANSI, so a heredoc-written script containing Chinese characters gets mangled into parser errors that look nothing like an encoding problem (`unexpected token 'case'`, `missing string terminator`).
 
@@ -1166,6 +1268,18 @@ So this mod's Chinese `Name` was never a key, `Translate` handed it straight bac
 **CommonAPI's `ProtoRegistry.RegisterString` was deliberately not used.** Its `AddModTranslations` is an unconditional `strings[lang][indexer[key]] = value` for every registered key, so it writes over an existing vanilla key without complaint — exactly the check that matters here. The implementation instead follows soarqin/DSP_Mods' `UXAssist.Common.I18N` (MIT): postfix `Localization.LoadSettings` to register (that is the earliest point at which `namesIndexer` is populated) and postfix `Localization.LoadLanguage(index)` to re-apply, because **languages are loaded lazily** and a later load overwrites `strings[index]`. Growing `strings[lang]` to the new `namesIndexer.Count` before writing is mandatory — and `floats[lang]` is a parallel table that has to grow with it.
 
 Non-Chinese languages all fall back to English rather than to the key, so French/German/Japanese players see English rather than Chinese.
+**The Chinese side of the table is the key itself, so a key must BE the Chinese display
+text.** `I18N.ApplyLanguage` ends in
+`table[pair.Value] = lcid == LcidZhcn ? pair.Key : _table[pair.Key];` — Chinese gets the key
+verbatim and only other languages get the translation. That is correct for item and recipe
+names (the key *is* the Chinese name), but it means a **UI string key named descriptively
+renders as that name**. The five existing panel titles are written that way
+(`合金配比面板标题`, `合金弹药面板标题`, `活性复合材面板标题`, `烧结析出面板标题`,
+`活性增产剂面板标题`), so on a Chinese client those panels are titled with the literal key.
+English is fine (`Ratio — {0} parts total, balance {1}` etc.). The catalyst panel's keys are
+written as real Chinese sentences instead (`催化剂床　装填与活性`, `还能跑 {0:0} 秒　　催化剂库存 {1}`)
+and do not have the problem. **Any new `.Translate()` key for UI text must be the sentence
+you want a Chinese player to read, placeholders included.**
 
 **Two self-checks had to stop comparing `name`.** `MachineRegistry.OnPostAddData` and `MetalPropertyPatches` both compared the *translated* `name` against the config's Chinese; in English every one of them would have fired. They now compare `Name`, the raw key. **Any future check of this shape must do the same** — `proto.Name` is data, `proto.name` is presentation.
 

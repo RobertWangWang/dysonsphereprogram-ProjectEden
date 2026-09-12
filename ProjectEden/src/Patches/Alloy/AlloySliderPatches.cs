@@ -79,7 +79,7 @@ namespace ProjectEden.Patches
             // 弹药、复合材和增产剂的面板一起消失——那是几个不相干的功能。
             if (__instance?.factory == null
                 || (AlloyRatioPatches.Count == 0 && !AmmoRegistry.Ready && !CompositeRegistry.Ready
-                    && !ProliferatorPatches.Ready))
+                    && !ProliferatorPatches.Ready && !CatalystBedPatches.Ready))
             {
                 Hide();
 
@@ -164,6 +164,22 @@ namespace ProjectEden.Patches
                     prolif = nowProlif;
 
                 RefreshProliferator(prolif);
+
+                return;
+            }
+
+            // 催化剂床：第六种模式，也是**唯一只读的一种**——催化剂由配方决定、不给玩家选，
+            // 所以只有 Refresh 没有 HandleInput。它存在的理由是巨型建筑的 30 个储物格
+            // 对玩家不可见（MegaStationWindowPatches 把 stationId 报成 0 让配方窗口顶上来），
+            // 而催化剂床就住在那里面——没有这块面板，玩家没有任何途径看到它。
+            if (CatalystBedPatches.Current(__instance.factory, entityId,
+                    out int charge, out int life, out int stock, out int spent))
+            {
+                if (!EnsurePanel(__instance)) return;
+
+                _panel.SetActive(true);
+
+                RefreshCatalyst(charge, life, stock, spent);
 
                 return;
             }
@@ -552,6 +568,95 @@ namespace ProjectEden.Patches
                 + $"   {pick.Entry.timeSpend / 60f:0.##}s";
 
             _resultText.color = new Color(0.92f, 0.86f, 0.70f);
+        }
+
+        /// <summary>
+        /// 催化剂床的三行：装填 / 活性 / 待生。<b>纯报数，不接输入。</b>
+        ///
+        /// 活性那一行是真的进度条（<c>LayoutRow(row, false)</c>），另外两行是仓位数字——
+        /// 三行共用同一套控件，所以<b>每次刷新都要重跑 LayoutRow</b>：这块面板是
+        /// 五种模式共用的，上一台机器要是选料模式，不重排的话这里会继承它的布局。
+        /// </summary>
+        private static void RefreshCatalyst(int charge, int life, int stock, int spent)
+        {
+            CatalystConfig cfg = CatalystBedPatches.Config;
+            int full = cfg != null && cfg.ticksPerCharge > 0 ? cfg.ticksPerCharge : 1;
+
+            // **键必须就是中文原文。** I18N.ApplyLanguage 对中文那一侧写的是 `pair.Key` 本身
+            // （非中文语言才取译文），所以键起成「xx面板标题」这种描述名的话，
+            // 中文玩家看到的就是那五个字本身。
+            _titleText.text = "催化剂床　装填与活性".Translate();
+
+            const int rows = 3;
+
+            _panelTrs.sizeDelta = new Vector2(0f, HeadHeight + rows * RowHeight + FootHeight);
+
+            for (var i = 0; i < MaxRows; i++)
+            {
+                if (Rows[i] == null) continue;
+
+                var on = i < rows;
+
+                if (Rows[i].Root.activeSelf != on) Rows[i].Root.SetActive(on);
+
+                if (!on) continue;
+
+                Rows[i].Root.transform.localPosition = new Vector3(0f, -(HeadHeight + i * RowHeight), 0f);
+
+                LayoutRow(Rows[i], false);
+
+                Rows[i].TrackImage.color = new Color(1f, 1f, 1f, 0.06f);
+            }
+
+            // 第 0 行：床里装了多少
+            Rows[0].Label.text = "床内装填".Translate();
+            Rows[0].Value.text = charge > 0 ? charge.ToString() : "—";
+            SetFill(Rows[0], charge > 0 ? 1f : 0f);
+
+            // 第 1 行：活性。这是唯一一条真的会动的条
+            Rows[1].Label.text = "剩余活性".Translate();
+            Rows[1].Value.text = charge > 0 ? $"{life * 100f / full:0.#}%" : "—";
+            SetFill(Rows[1], charge > 0 ? (float)life / full : 0f);
+
+            // 第 2 行：待生仓。−1 是「这一格没排出来」，和「排出来了但空着」不是一回事
+            Rows[2].Label.text = "待生仓".Translate();
+            Rows[2].Value.text = spent < 0 ? "—" : spent.ToString();
+            SetFill(Rows[2], 0f);
+
+            _resultText.rectTransform.anchoredPosition =
+                new Vector2(SidePad, -(HeadHeight + rows * RowHeight + 4f));
+
+            string tail;
+            Color tint;
+
+            if (stock < 0 || spent < 0)
+            {
+                // 仓位没排出来：这条比「等催化剂」重要得多，它说明的是布局坏了而不是缺货
+                tail = "储物格未就绪——催化剂进不来，去看布局".Translate();
+                tint = new Color(0.95f, 0.55f, 0.45f);
+            }
+            else if (charge > 0)
+            {
+                tail = string.Format("还能跑 {0:0} 秒　　催化剂库存 {1}".Translate(), life / 60f, stock);
+                tint = new Color(0.72f, 0.88f, 0.78f);
+            }
+            else
+            {
+                tail = string.Format("等待催化剂：库存 {0}，装一床需要 {1}".Translate(), stock,
+                                     cfg != null ? cfg.chargeSize : 0);
+                tint = new Color(0.95f, 0.80f, 0.45f);
+            }
+
+            _resultText.text = tail;
+            _resultText.color = tint;
+        }
+
+        private static void SetFill(Row row, float t)
+        {
+            row.Fill.anchorMin = Vector2.zero;
+            row.Fill.anchorMax = new Vector2(Mathf.Clamp01(t), 1f);
+            row.Fill.offsetMin = Vector2.zero;
+            row.Fill.offsetMax = Vector2.zero;
         }
 
         private static bool _compositeClickLatch;

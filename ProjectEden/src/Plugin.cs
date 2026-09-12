@@ -26,10 +26,10 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.4.0";
+        public const string VERSION = "1.5.0";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
-        private const int SaveVersion = 3;
+        private const int SaveVersion = 4;
 
         internal static ManualLogSource Log;
 
@@ -81,6 +81,7 @@ namespace ProjectEden
             AlloysConfig = JsonHelper.Load<Patches.AlloysConfig>("alloys");
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
+            Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             AmmoRegistry.Load();
             CompositeRegistry.Load();
             CombustiblePowerPatches.Load();
@@ -143,6 +144,9 @@ namespace ProjectEden
             // 还要给抽水类设备的 prefabDesc.waterTypes 添上熔岩
             LDBTool.PostAddDataAction += LavaPumpPatches.OnPostAddData;
 
+            // 催化剂床：要在 OreRegistry 之后，它按 ref 名解析催化剂与待生催化剂的物品号
+            LDBTool.PostAddDataAction += CatalystBedPatches.OnPostAddData;
+
             // 可燃液体发电：排在金属属性之后——它要读 MetalPropertyPatches.FieldsEnd
             // 来避开已被占用的属性行字段号，而那个值只有注册跑完才是准的。
             // 也要排在矿种与机器注册之后，才解析得出液体和电厂
@@ -197,6 +201,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= ProliferatorPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= AlienVeinPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= LavaPumpPatches.OnPostAddData;
+            LDBTool.PostAddDataAction -= CatalystBedPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= CombustiblePowerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
@@ -442,6 +447,7 @@ namespace ProjectEden
             w.Write(SaveVersion);
             SlotDataStore.Export(w);
             AlloyRatioStore.Export(w);
+            CatalystBedStore.Export(w);
         }
 
         public void Import(BinaryReader r)
@@ -463,6 +469,11 @@ namespace ProjectEden
             if (version >= 2) AlloyRatioStore.Import(r, version);
             else AlloyRatioStore.Clear();
 
+            // 催化剂床是版本 4 才追加的一块。读更老的档时流到这里就结束了，**不能再读**——
+            // 这个字节流是位置相关的，多读一个 int 就会把后面全部错位。
+            if (version >= 4) CatalystBedStore.Import(r);
+            else CatalystBedStore.Clear();
+
             // **必须在这里再贴一次。** AlloyRatioPatches 挂在 GameData.Import 上的那个后置
             // 跑在本方法之前，那时这个 store 还是空的——只靠它的话，存档里的配比
             // 会在读档时被静默丢掉。到了这里配方数据已经恢复完，正是补贴的时机。
@@ -477,6 +488,7 @@ namespace ProjectEden
         {
             SlotDataStore.Clear();
             AlloyRatioStore.Clear();
+            CatalystBedStore.Clear();
         }
     }
 }

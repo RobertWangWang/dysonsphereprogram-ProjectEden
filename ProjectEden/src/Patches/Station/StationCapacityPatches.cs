@@ -192,8 +192,19 @@ namespace ProjectEden.Patches
 
                 if (fixCapacity && TargetProtoIds.Contains(protoId))
                     for (var s = 0; s < station.storage.Length; s++)
-                        if (station.storage[s].max != capacity)
-                            station.storage[s].max = capacity;
+                    {
+                        // 催化剂床那两格有自己的容量（见 catalyst.json 的 //slotCapacity）。
+                        //
+                        // <b>这里不排除的话会坏一整条线。</b> 催化剂槽是**本地需求格**，
+                        // 它按 max 向物流网要货；被这里抬到一千万之后，第一座建成的反应器
+                        // 会把全网的催化剂一口气吸光，后面每一座都装不上料——
+                        // 而玩家看到的症状是「我别的反应器全停了」，指向的地方
+                        // 离病因十万八千里。大型采矿机的钻头槽当初就是为同一件事
+                        // 单独配了容量，这是同一个坑换了座建筑。
+                        if (CatalystBedPatches.OwnsSlot(station.storage[s].itemId)) continue;
+
+                        if (station.storage[s].max != capacity) station.storage[s].max = capacity;
+                    }
 
                 if (!fixCharge || consumerPool == null) continue;
                 if (!ChargePowerByProto.TryGetValue(protoId, out ChargeTarget charge)) continue;
