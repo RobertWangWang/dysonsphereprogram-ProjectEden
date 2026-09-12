@@ -325,7 +325,7 @@ namespace ProjectEden
                 item.Grid = ResolveGridIndex(entry.gridIndex, entry.name, ProtoSlots.GridKind.Item);
 
                 ItemProto proto = AddItem(item.ItemId, entry.name, entry.description, EItemType.Material,
-                    item.Grid, source, entry.stackSize, "", entry.produceFrom, entry.isFluid,
+                    item.Grid, source, entry.stackSize, entry.miningFrom ?? "", entry.produceFrom, entry.isFluid,
                     IconPathOf(entry.icon) ?? source.IconPath);
 
                 ApplyFuel(proto, entry);

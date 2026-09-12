@@ -84,6 +84,17 @@ namespace ProjectEden.Utils
         /// </summary>
         public bool allowMinerOnOil;
 
+        /// <summary>
+        /// 是否让抽水站在熔岩星球上抽出岩浆。
+        /// <c>PlanetData.waterItemId</c> 是个带标签的联合体，熔岩海洋编码为 <b>-1</b>；
+        /// 原版的出料分支只在 <c>&gt; 0</c> 时产出，建造又另有一张
+        /// <c>prefabDesc.waterTypes</c> 白名单。两道闸相互独立，详见 LavaPumpPatches。
+        /// </summary>
+        public bool lavaPumping;
+
+        /// <summary>岩浆在 ores.json 的 items 段里的 key。<b>按名字解析，不写死物品号</b>，因为 ResolveItemId 碰号时会顺延。</summary>
+        public string lavaItemKey;
+
         public OreProduct[] productMap;
     }
 

@@ -42,6 +42,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXIII. Alien Veins: mining them consumes drill bits](#xxiii-alien-veins-mining-them-consumes-drill-bits)
 - [XXIV. Silicon Carbide: what moissanite is for, and it buys throughput](#xxiv-silicon-carbide-what-moissanite-is-for-and-it-buys-throughput)
 - [XXV. Bio Matrix: the seventh matrix, and it is grown](#xxv-bio-matrix-the-seventh-matrix-and-it-is-grown)
+- [XXVI. Magma: putting a water pump on a lava planet](#xxvi-magma-putting-a-water-pump-on-a-lava-planet)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -1116,7 +1117,7 @@ A thousand wind turbines pressed into one tower array.
 | | |
 |---|---|
 | Appearance | The Wind Turbine's model and icon, **tinted teal** (hue 158°) |
-| Location | The **Mega Structures** tab in the build bar, slot 7, after the six mega buildings |
+| Location | Slot 7 of the **Mega Structures** tab in the build bar |
 | Output | **300 MW**, exactly a thousand wind turbines (300 kW each) |
 | Build | Wind Turbine ×1000 + Energy Matrix ×1000, **10 s, hand-craft only** |
 
@@ -1345,7 +1346,7 @@ It now has a horizontal scrollbar too, and **jumps to the first usable recipe wh
 is remembered across windows, so opening the picker for a machine that only accepts a custom recipe type would very
 likely land on the previous tab and show nothing).
 
-### The six mega buildings now have distinct shapes
+### The seven mega buildings now have distinct shapes
 
 They used to clone one vanilla model (the logistics station) and differ only by colour — five of the same
 building in five paints. Each one's geometry is now **generated in code**, with a silhouette of its own:
@@ -2491,12 +2492,113 @@ by running it. The default pattern deliberately keeps three Universe Matrix posi
 shader does not recognise it, only those two positions look wrong: never a blank ring, and never
 any effect on throughput or research speed.
 
+## XXVI. Magma: putting a water pump on a lava planet
+
+That orange sea on a lava planet is scenery in vanilla. Now it is a resource.
+
+| | |
+|---|---|
+| How to get it | a **Water Pump** — the vanilla one, not a new building — built on a lava shore |
+| Product | Magma |
+| Phase | **fluid** — it goes into storage tanks, onto belts, and through logistics stations |
+| Can you burn it | **No**, see "Why it has no heat value" below |
+
+No new tech and no new building: put a water pump at the edge of a lava sea exactly as you
+would at the edge of water. This mod's pump speed-up and enlarged buffer apply to it as
+well (`boostWaterPumps` in `advancedminer.json`).
+
+### Why vanilla cannot pump it
+
+Two **independent** gates block it, and neither reports anything:
+
+1. **Building.** A pump carries a whitelist of which ocean kinds it accepts. Lava is not on
+   it, so placing one there only ever gives you "must be built on water".
+2. **Output.** Even once placed, a pump only produces when the ocean is a real item. Lava is
+   not an item id in the data — it is a **negative marker**, sharing that slot with "ice" and
+   "no ocean" — so the pump would run, draw power, and yield nothing.
+
+The two gates being independent has a practical consequence: the **Pump Anywhere** cheat in
+`cheats.json` clears only the first one. In older versions, with that switch on, a pump could
+be placed on lava and would then spin uselessly — that was not a bug, it was the second gate.
+
+This mod handles both, but **never edits the planet data itself**: that negative marker is
+also what the ocean rendering and the **Geothermal Power Station** read, and changing it
+would break geothermal power entirely.
+
+### Why it has no heat value
+
+By this mod's standing rule, whether something burns is decided by whether it can be
+**oxidised**. Magma is molten silicate — silica, alumina, magnesia — and is **already fully
+oxidised**, so like carbon dioxide it yields no energy at all. It therefore has no `fuelType`,
+and neither a Thermal Power Plant nor the mecha reactor will take it.
+
+What it carries is **sensible heat**, not chemical energy: it leaves the pump at around a
+thousand degrees. That is what its eventual use should be built on — heat exchange, not
+combustion.
+
+### Where magma goes: the Lava Cooling Plant
+
+The seventh mega building, and the only one that eats magma.
+
+| | |
+|---|---|
+| Location | Slot 8 of the **Mega Structures** tab in the build bar |
+| Recipe type | **13 (Lava Processing)**, this mod's own — only it can run the three recipes |
+| Speed | 10000x, twelve belt ports connected directly, built-in planetary logistics station |
+| Power | 6 MW idle / 30 MW working |
+
+It is the only one of the seven that **shows a glowing surface on the outside**: an open
+refractory pool in the middle, four cooling towers pulling the heat away, and a granulation
+ring hanging above the pool. At a distance that is the whole silhouette cue.
+
+### Three recipes: how far you cool it decides what crystallises
+
+These are not three power tiers. They are **three real cumulate horizons from a layered mafic
+intrusion** — which is where most of Earth's chromium, vanadium and magmatic cobalt actually
+come from. And this mod's cobalt, chromium and vanadium veins were already placed on the
+**Lava** and **Volcanic Ash** themes, from the same geology.
+
+| Recipe | Input | Output | Time | Real basis |
+|---|---|---|---|---|
+| Chromite - Early Cumulate | Magma ×6000 | Chromite ×1 + Stone Ore ×4 | 4 s | Chromite crystallises first at ~1300 °C, is denser than the melt and settles into a seam (Bushveld LG6 / UG2) |
+| Titanomagnetite - Late Cumulate | Magma ×6400 | Titanomagnetite ×1 + Stone Ore ×4 | 6 s | Vanadium is incompatible and concentrates in the residual melt until Fe-Ti oxides take it up at ~1050 °C (Bushveld Main Magnetite Layer) |
+| Cobalt Ore - Sulfide Segregation | Magma ×40000 + Gypsum Ore ×600 + Coal ×400 | Cobalt Ore ×1 + Stone Ore ×26 | 8 s | Cobalt is chalcophile and needs an immiscible sulfide droplet to segregate first. Magma carries too little sulfur — Noril'sk got its sulfur from assimilated **anhydrite**, and coal reduces it: CaSO₄ + 4C → CaS + 4CO |
+
+**The input ratios are not invented.** A basaltic melt carries Cr ≈ 300 ppm, V ≈ 280 ppm and
+Co ≈ 45 ppm, so the magma needed per unit of ore stands as **1 : 1.07 : 6.7**. The ratio is
+physics; **only the absolute scale is a balance knob** — the shipped tier is 6000 : 6400 : 40000,
+i.e. the same ratio scaled up a hundredfold. Sulfur and carbon scale with it (the sulfur needed
+to reach sulfide saturation goes with **melt volume**); the stone byproduct does not.
+
+**The yields are deliberately tiny, and that is the design rather than caution.** Prospecting
+for rare veins is what this whole line is worth; if magma bought chromium and vanadium cheaply,
+that gameplay would be dead. The precedent is already in the mod: `Vanadium Ingot · Residue
+Extraction` says outright that it exists so a bad galaxy seed cannot lock the line out, while
+tungsten deliberately gets **no fallback at all**. These three sit in the same place — **they
+fill a gap, they do not replace the veins.**
+
+**The stone output is badly understated, and here is why.** The real silicate fraction is over
+99.9%; the recipes give you a handful. Two solid reasons: written honestly, this building would
+outclass every other source of stone by orders of magnitude and push mining out entirely; and a
+byproduct nobody wants will back up its output slot, which stalls a multi-product machine
+outright.
+
+### Not done yet
+
+**The heat in magma is still not actually used.** Right now it is only a feedstock for the three
+recipes — the "thousand degrees" shows up in *what* crystallises and nowhere else. It has not
+become electricity, and it does not supply heat to any other high-temperature step. The reason is
+in the opening of section XXVI: DSP's component model **has no shape for "convert something and
+generate power at the same time"**, so making it electricity means making it a fuel, and that
+collides with the Geothermal Power Station already standing on those same lava planets.
+---
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The six mega buildings, the tab, speed, built-in logistics station, replicator page count |
-| `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors |
+| `megabuildings.json` | The seven mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes |

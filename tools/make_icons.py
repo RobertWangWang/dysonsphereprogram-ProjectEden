@@ -1681,6 +1681,223 @@ def sic_power_module():
     return d
 
 
+def _blob(pts, close_path=None, **kw):
+    """把一圈点变成平滑的闭合轮廓（Catmull-Rom 转三次贝塞尔）。
+
+    手写 .C() 控制点画有机形状太容易画出硬角——上一版岩浆的底缘就是这么
+    变成云朵的。给一圈点、让曲线自己插出来，形状就只由点位决定。
+    """
+    n = len(pts)
+    p = dw.Path(**kw).M(*pts[0])
+
+    for i in range(n):
+        p0, p1, p2, p3 = pts[(i - 1) % n], pts[i], pts[(i + 1) % n], pts[(i + 2) % n]
+        c1 = (p1[0] + (p2[0] - p0[0]) / 6.0, p1[1] + (p2[1] - p0[1]) / 6.0)
+        c2 = (p2[0] - (p3[0] - p1[0]) / 6.0, p2[1] - (p3[1] - p1[1]) / 6.0)
+        p.C(c1[0], c1[1], c2[0], c2[1], p2[0], p2[1])
+
+    return p.Z()
+
+
+def _scaled(pts, k, dx=0.0, dy=0.0):
+    return [(x * k + dx, y * k + dy) for x, y in pts]
+
+
+# 岩浆的轮廓点：上半是圆穹，下半在 y=11/20 之间来回，插出三个浅流舌。
+# 舌要浅——做成半圆会读成云朵，这是上一版的教训。
+LAVA_OUTLINE = [
+    (0, -34), (19, -29), (30, -14), (33, 2),
+    (26, 15), (17, 9), (8, 19), (-1, 11), (-10, 19), (-19, 9), (-26, 15),
+    (-33, 2), (-30, -14), (-19, -29),
+]
+
+
+def _blob(pts, **kw):
+    """把一圈点变成平滑的闭合轮廓（Catmull-Rom 转三次贝塞尔）。
+
+    手写 .C() 控制点画有机形状太容易画出硬角；给一圈点、让曲线自己插出来，
+    形状就只由点位决定。<b>但点位不能带周期性</b>——上下交替的一圈点会被
+    样条冲成一排尖齿（岩浆的底缘这么画过，整张图读成了南瓜灯）。
+    要不规则，就让每个点各不相同，别让它有节奏。
+    """
+    n = len(pts)
+    p = dw.Path(**kw).M(*pts[0])
+
+    for i in range(n):
+        p0, p1, p2, p3 = pts[(i - 1) % n], pts[i], pts[(i + 1) % n], pts[(i + 2) % n]
+        p.C(p1[0] + (p2[0] - p0[0]) / 6.0, p1[1] + (p2[1] - p0[1]) / 6.0,
+            p2[0] - (p3[0] - p1[0]) / 6.0, p2[1] - (p3[1] - p1[1]) / 6.0,
+            p2[0], p2[1])
+
+    return p.Z()
+
+
+def _scaled(pts, k, dx=0.0, dy=0.0):
+    return [(x * k + dx, y * k + dy) for x, y in pts]
+
+
+# 岩浆的轮廓：矮而宽、左右不对称的一摊。
+# 和藻油那滴泪（高、尖、对称）、钒渣油那坨稠块（高、底部摊开）都拉开了形体。
+LAVA_OUTLINE = [
+    (2, -31), (20, -26), (31, -12), (33, 5),
+    (23, 19), (6, 25), (-12, 24), (-26, 15),
+    (-33, 1), (-28, -16), (-14, -28),
+]
+
+
+def _blob(pts, **kw):
+    """把一圈点变成平滑的闭合轮廓（Catmull-Rom 转三次贝塞尔）。
+
+    手写 .C() 控制点画有机形状太容易画出硬角；给一圈点、让曲线自己插出来，
+    形状就只由点位决定。<b>但点位不能带周期性</b>——上下交替的一圈点会被
+    样条冲成一排尖齿（岩浆的底缘这么画过，整张图读成了南瓜灯）。
+    要不规则，就让每个点各不相同，别让它有节奏。
+    """
+    n = len(pts)
+    p = dw.Path(**kw).M(*pts[0])
+
+    for i in range(n):
+        p0, p1, p2, p3 = pts[(i - 1) % n], pts[i], pts[(i + 1) % n], pts[(i + 2) % n]
+        p.C(p1[0] + (p2[0] - p0[0]) / 6.0, p1[1] + (p2[1] - p0[1]) / 6.0,
+            p2[0] - (p3[0] - p1[0]) / 6.0, p2[1] - (p3[1] - p1[1]) / 6.0,
+            p2[0], p2[1])
+
+    return p.Z()
+
+
+def _scaled(pts, k, dx=0.0, dy=0.0):
+    return [(x * k + dx, y * k + dy) for x, y in pts]
+
+
+# 岩浆的轮廓：矮而宽、左右不对称的一摊。
+# 和藻油那滴泪（高、尖、对称）、钒渣油那坨稠块（高、底部摊开）都拉开了形体。
+LAVA_OUTLINE = [
+    (2, -31), (20, -26), (31, -12), (33, 5),
+    (23, 19), (6, 25), (-12, 24), (-26, 15),
+    (-33, 1), (-28, -16), (-14, -28),
+]
+
+
+def lava_cooler():
+    """熔岩冷却厂：敞口熔池 + 四座冷却塔 + 悬在池面上的粒化环。
+
+    <b>七座里唯一把发光面露在外头的。</b> 别的六座要么是实心塔、要么把光关在
+    玻璃穹顶里；这一座的身份就是「中间那口烫的池子」。80px 下剩不下别的，
+    也正好和它们都不撞。
+
+    <b>粒化环不能用 _ring() 画。</b> 那个辅助函数画的其实是一张<b>实心盘</b>
+    （外椭圆填色、内椭圆只描边，SVG 不会把中间挖掉），对撞机能用是因为中央靶室
+    压在它前面。这里环悬在池面<b>上方</b>，用 _ring() 会把整口池子盖掉——
+    实际画出来才看见的。所以这里用一条只描边、不填充的椭圆，池面才透得出来。
+
+    <b>四座塔只画得出两座半。</b> 等距视角下后两座被池子挡掉大半，照实画反而对；
+    硬把四座摆全会挤成一圈栅栏，中间那口池子就读不出来了。后两座先画、压暗一档。
+
+    颜色照建筑的 tint 走（冷玄武岩的炭褐），池面用橙黄——
+    **冷与热的对比就是这张图的全部信息**，别的都可以糊掉。
+    """
+    d = canvas()
+    p = _pal("#6b5347")          # 冷玄武岩：池壁与机身
+    dark = _pal("#3a2c25")       # 底盘
+    tower = _pal("#8f7362")      # 塔身比池壁亮一档，免得糊成一团
+    tower_bk = _pal("#54423a")   # 后两座压暗
+    melt = "#ff9d1c"
+    melt_hi = "#ffdc63"
+    ring = "#d98b2b"
+
+    _prism(d, 0, 32, 38, 7, dark)
+
+    # 后面两座塔：先画，下半截被池子挡掉
+    for cx in (-23, 23):
+        _cyl(d, cx, -18, 8, 24, tower_bk)
+
+    # 熔池：池壁 + 两层池面（外圈橙、中心更亮，读作「中间最烫」）
+    _cyl(d, 0, 10, 24, 13, p)
+    d.append(dw.Ellipse(0, 10, 19, 19 * ISO, fill=melt, stroke=p[3], stroke_width=1.4))
+    d.append(dw.Ellipse(0, 8, 10, 10 * ISO, fill=melt_hi))
+
+    # 粒化环：只描边，池面要从中间透出来
+    d.append(dw.Ellipse(0, -3, 17, 17 * ISO, fill="none", stroke=ring, stroke_width=4.2))
+    d.append(dw.Ellipse(0, -4, 17, 17 * ISO, fill="none", stroke=_shade(ring, 1.35), stroke_width=1.6))
+
+    # 前面两座塔：压在池沿上，塔口外扩——冷却塔的标志
+    for cx in (-29, 29):
+        _cyl(d, cx, 2, 9, 30, tower)
+        d.append(dw.Ellipse(cx, 2, 11, 11 * ISO, fill=tower[0], stroke=tower[3], stroke_width=1.4))
+
+        # 翅片：三道竖线，说明它散热而不是储液
+        for k in (-4.5, 0, 4.5):
+            d.append(dw.Lines(cx + k, 8, cx + k, 29,
+                              stroke=tower[3], stroke_width=1.3, stroke_opacity=0.6, fill="none"))
+
+    return d
+
+
+def lava():
+    """岩浆：一摊正在淌的硅酸盐熔体，表面浮着裂开的玄武岩结壳。
+
+    <b>配色和钒渣油刻意互为反面。</b> 渣油是「暗底 + 亮边 + 亮颗粒」，
+    这张是<b>亮底 + 暗结壳</b>——两种都解决 DSP 深色界面的可见性问题，
+    但读起来一个是「很黑很稠」，一个是「烫得发光」，并排摆不会混。
+
+    <b>没有白色高光</b>，这和本文件里其他液体不一样，是故意的：
+    岩浆自己发光，打一块镜面高光在物理上就是错的，看着也像一滩果汁。
+    「这是液体」靠淌出来的那一滴说，以及矮而宽的摊开形体。
+
+    <b>热层是同一条轮廓缩小后重画的，不是椭圆。</b> 早先用椭圆铺内层，
+    边缘和外形对不上，整张读成「橙色身子上浮着一个黄球」。按轮廓缩放之后
+    亮色一路贴着边收进去，才是熔体从边缘往心部升温的样子。
+
+    <b>结壳画成「裂开的一整片」，不是散落的几块。</b> 均匀散开的深色多边形
+    会在圆形身子上凑成一张脸（上两块当眼睛、下面几块当嘴）——这是实际画出来
+    才看见的。现在是左半边一整片壳裂成三瓣、右边浮一小块孤岛，相邻瓣之间
+    透出的亮缝才是熔岩流最好认的特征。缝是留出来的空隙，不是描上去的亮线。
+    """
+    d = canvas()
+
+    deep = "#6f1a06"       # 最凉的边，暗红
+    mid = "#cf4410"        # 橙红
+    hot = "#f2901c"        # 橙
+    core = "#ffd75a"       # 亮黄心
+    crust = "#241f1c"      # 玄武岩结壳
+    crust_hi = "#574b41"   # 壳的受光面
+
+    # 淌出的一滴：先画，让主体压住它上半截，看着才是从边上流下去的
+    d.append(dw.Path(fill=hot, stroke=deep, stroke_width=2.2, stroke_linejoin="round")
+             .M(7, 10).C(14, 22, 15, 33, 10, 41)
+             .C(4, 33, 1, 22, 7, 10).Z())
+
+    d.append(_blob(LAVA_OUTLINE, fill=mid, stroke=deep,
+                   stroke_width=2.4, stroke_linejoin="round"))
+
+    # 热层：按轮廓缩放，只在外圈留一道橙红的边
+    d.append(_blob(_scaled(LAVA_OUTLINE, 0.82, -1, -2), fill=hot))
+    d.append(_blob(_scaled(LAVA_OUTLINE, 0.58, -2, -3), fill=core, fill_opacity=0.95))
+
+    # 结壳：左半边一整片裂成三瓣（相邻、共缝），右边一小块孤岛
+    plates = (
+        ((-27, -9), (-17, -15), (-12, -6), (-22, -1)),
+        ((-15, -17), (-5, -21), (-1, -12), (-11, -8)),
+        ((-20, 4), (-10, 1), (-7, 9), (-17, 13)),
+        ((16, -4), (25, -2), (24, 8), (15, 6)),
+    )
+
+    for pts in plates:
+        d.append(dw.Lines(*[c for p in pts for c in p], close=True,
+                          fill=crust, stroke=deep, stroke_width=1.0,
+                          stroke_linejoin="round"))
+        # 受光面：沿板的上缘压一条窄边，给壳一点厚度
+        top = sorted(pts, key=lambda p: p[1])[:2] + [pts[-1]]
+        d.append(dw.Lines(*[c for p in top for c in p], close=True,
+                          fill=crust_hi, fill_opacity=0.5))
+
+    # 溅起的火星：挨在一起，散开摆会变成两只眼睛
+    for cx, cy, r in ((-20, -31, 2.6), (-11, -35, 1.9)):
+        d.append(dw.Circle(cx, cy, r, fill=core))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -1729,6 +1946,7 @@ if __name__ == "__main__":
     render(mega_assembler(), "mega-assembler")
     render(particle_collider(), "particle-collider")
     render(bio_greenhouse(), "bio-greenhouse")
+    render(lava_cooler(), "lava-cooler")
     render(tab_mega(), "tab-mega")
 
     # 生物温室的产物与配方图标
@@ -1758,3 +1976,6 @@ if __name__ == "__main__":
     render(sic_wafer(), "sic-wafer")
     render(aluminium_nitride(), "aluminium-nitride")
     render(sic_power_module(), "sic-power-module")
+
+    # 岩浆：抽水站在熔岩星上抽出来的东西
+    render(lava(), "lava")

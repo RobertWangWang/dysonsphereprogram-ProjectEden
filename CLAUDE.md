@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: six 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, and six rule-bypass cheat switches that are off by default. ~31,000 lines of C# in 103 files — 96 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: seven 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, and six rule-bypass cheat switches that are off by default. ~31,000 lines of C# in 104 files — 97 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). Not a git repository. **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
@@ -403,6 +403,110 @@ here because its twin still takes every one of them. A duplicate building became
 (Existing forges running an Assemble recipe keep running it — `SetRecipe` does not validate the
 type — they just cannot switch back to one.) **Do not generalise the trade**: it was paid for by
 the duplication, and would not be worth it for a building that was actually distinct.
+
+#### Pumping lava — `LavaPumpPatches`
+
+A vanilla 抽水站 on a lava planet produces 岩浆 (item **6640**, a fluid). No new building, no
+new tech, no preloader — but the reason it did not already work is worth keeping, because it
+is a shape that recurs.
+
+**`PlanetData.waterItemId` is not an item id. It is a tagged union**, and the whole table is
+readable off `UIPlanetDetail.OnPlanetDataSet` IL 0684–06B5:
+
+| Value | Meaning |
+|---|---|
+| `> 0` | a real item id (水 1000, 硫酸 1116) |
+| `0` | no ocean |
+| **`-1`** | **lava** |
+| `-2` | ice |
+| more negative | unknown |
+
+`-1 = lava` has two independent confirmations, neither of them a guess:
+`PlanetModelingManager.ModelingPlanetMain` IL 0778–07B9 picks the ocean mesh with
+`oceanSpheres[-waterItemId]` — the negative value *is* a render index — and both
+`PowerSystem.CalculateGeothermalStrength` and `SetGeothermalAffectStrength` open with
+`waterItemId == -1` as their **first instruction**, geothermal plants being exactly what you
+build on lava.
+
+**So the field itself must never be rewritten.** Swapping a lava planet's `-1` for the magma
+item id breaks two things at once: the ocean sphere index goes out of range or picks the wrong
+mesh, and those two `== -1` tests silently kill **every geothermal power station**. This is
+trap 2 ("the same constant, two meanings") at field level; the fix rewrites **the value as it
+is read**, never the source.
+
+**Two independent gates, both silent**, and that independence is the part that matters:
+
+| Gate | Where | Vanilla shape |
+|---|---|---|
+| Output | `MinerComponent.InternalUpdate`, `type == Water` branch (IL 0690) | `productId = planet.waterItemId; if (productId > 0) produce; else productId = 0;` |
+| Building | `CheckBuildConditions` IL 2896–28F8 | `desc.waterTypes` whitelist; miss → `desc.geothermal ? NeedGeothermalResource(25) : NeedWater(24)` |
+
+`cheats.json`'s 平地抽水 clears **only the second**. So with that switch on, a pump could
+already be placed on lava and would spin, draw power and yield nothing — which reads as a
+broken cheat and is really the first gate. **When a feature has two gates with one symptom,
+clearing one changes nothing visible** — the same shape as the drill-bit slot's two gates.
+
+The fix is correspondingly two-sided: append `-1` to `prefabDesc.waterTypes` for every
+`minerType == EMinerType.Water` prefab (a **fresh array**, never an in-place append — whether
+`ReadPrefab` gives each prefab its own array is not readable offline), and insert a
+`MapWaterProduct` call after each `ldfld PlanetData::waterItemId` in a **listed** set of
+methods.
+
+**The method list is enumerated, not pattern-matched, and that is the whole design.** There
+are 37 reads of `waterItemId` in the assembly and they are instruction-identical; only
+semantics separate the two groups. Eleven are mapped (production, the build-time sign icon,
+and every display/statistics path — `UIMinerWindow`, both vein-collector panels,
+`EntityBriefInfo`, `AstroResourceStatPlan.AddPlanetResources` ×3,
+`ProductionExtraInfoCalculator`, `UIReferenceSpeedTip`, `UIPlanetDetail`, `UIStarDetail`).
+The rest **must read the raw −1**: `PowerSystem` ×2, `ModelingPlanetMain`, every `BuildTool`
+(the whitelist is handled by the array edit instead), `FlattenTerrainReform`, `PlayerAudio`,
+`ACH_MechaInTheWarter` and the `PlanetAlgorithm` family. Per-method expected counts live in
+`Expected` and loud-fail on a mismatch.
+
+Only the production site is load-bearing; the other ten are the ore→ingot lesson again — get
+them wrong and the pump has no product icon and the item is missing from 参考速率 / 理论产能,
+which reads as a broken item rather than a missing patch.
+
+Two things that were already handled by existing infrastructure and did not need code:
+`UnlockKey = -1` (set by `OreRegistry` for every extra item) is what keeps a recipe-less item
+visible in the item picker — `GameHistoryData.ItemUnlocked` returns false at
+`maincraft == null` otherwise, and magma has no recipe at all; and `isFluid` + the existing
+`RefreshFluidList` is the entire tank story.
+
+**No heat value, deliberately.** Molten silicate is already fully oxidised, so by this repo's
+own `fuelType` rule it burns for nothing — like CO₂. What it carries is sensible heat.
+
+#### What consumes it — 熔岩冷却厂 (item 6506, `ERecipeType` 13)
+
+The seventh mega building, and the only consumer of magma. Three recipes (6645–6647) that are
+**three real cumulate horizons of a layered mafic intrusion**, not three power tiers: chromite
+settles first at ~1300 °C (Bushveld LG6/UG2), vanadium stays incompatible until Fe–Ti oxides
+take it up at ~1050 °C (the Main Magnetite Layer), and cobalt is chalcophile so it needs an
+immiscible sulfide droplet — which magma alone cannot supply, so that recipe additionally
+consumes 石膏矿 and 煤矿 (`CaSO₄ + 4C → CaS + 4CO`; Noril’sk got its sulfur from assimilated
+anhydrite exactly this way). **This is the same geology that already put 钴/铬/钒 veins on the
+熔岩 and 火山灰 themes** — it was not invented for the building.
+
+**The input ratios are derived, the absolute scale is the balance knob.** A basaltic melt carries
+Cr ≈ 300 ppm, V ≈ 280 ppm, Co ≈ 45 ppm → magma per unit of ore stands as 1 : 1.07 : 6.7, which is
+the shipped 6000 : 6400 : 40000 — that ratio scaled up 100×, the scale being the balance knob and the ratio the physics. **Sulfur and carbon scale with the magma, the stone byproduct does not**: sulfide saturation needs sulfur proportional to *melt volume*, so pinning 石膏矿/煤矿 while raising magma would break that recipe’s stoichiometry, whereas 石矿 is already understated on purpose for reasons unrelated to input scale. Yields are **one ore per cycle** on purpose: rare-vein prospecting is
+what this line is worth, and a cheap synthetic route would kill it. The precedent is
+`钒块 · 残渣提取` (an explicit "bad seed" fallback) versus tungsten, which deliberately has none.
+
+**The 石矿 byproduct is deliberately understated by orders of magnitude, and the second reason is
+mechanical, not cosmetic.** The real silicate fraction is >99.9%; shipping that would make this the
+dominant stone source in the game *and* — more importantly — a byproduct nobody drains backs up its
+output slot, which stalls a multi-product assembler outright. Say the deviation in the `//`, do not
+pretend the equation balances.
+
+**Why it is a feedstock and not a fuel.** DSP’s component model can express "burn X for power"
+(`PowerGeneratorComponent` + fuel) and "turn X into Y" (`AssemblerComponent`), but **not "turn X
+into Y while generating power"** — so magma had to be one or the other. Fuel loses on three
+counts: 地热发电站 already occupies "power from a lava planet" (both `PowerSystem` methods gate on
+`waterItemId == -1`, i.e. geothermal *only* works there); the honest energy density is ~1.9 MJ/kg
+against coal’s ~27, which by this repo’s own coal anchor puts a magma item near 0.19 MJ — an order
+of magnitude below 氨, already the worst in `combustibles.json`; and its Carnot η at 1200 °C is
+0.558, fourth of seven. **The heat is therefore still unused as energy**, and that is a stated gap.
 
 ### Logistics — `src/Patches/Station/`
 
@@ -860,6 +964,8 @@ What converts one into the other is the 能量枢纽, and **`PowerExchangerCompo
 
 **`megaTab: true` puts a `machines.json` building on the mod's own tab.** Neither number it needs can live in the JSON: the replicator page index is handed out by CommonAPI at Awake (`MegaBuildingRegistry.TabIndex`) and the build category is configured in `megabuildings.json`. So the entry gives only `gridRow` / `gridCol` / `buildSlot`, and `MachineRegistry.WantedGrid` / `WantedBuildIndex` fetch the rest — which works only because `MachineRegistry.OnPreAddData` is registered after `MegaBuildingRegistry`'s.
 
+**That makes the mega tab's slot and grid space shared across two config files, and nothing in either one says so.** 风力发电机集群 sits at build slot 7 / grid column 7 from `machines.json`; the seventh mega building was first written to the same pair in `megabuildings.json` and had to be moved to 8. The reservation ledger would have shifted one of them silently, and the visible result of a real collision is `UIBuildMenu.StaticLoad` overwriting `protos[category, slot]` — **one building simply missing from the build bar, with no error**. Check both files before picking a slot; `megabuildings.json`'s `//slot` on that entry says so at the point of use.
+
 **Mecha fuel has a power multiplier as well as an energy total.** `Mecha.GenerateEnergy` computes `ratio = ItemProto.ReactorInc + 1` (then folds in the proliferator table) and multiplies `reactorPowerGen` by it, so `ReactorInc = 1.5` means **+150% power**. It scales *rate*, not *total* — `HeatValue` is still what determines how long one unit lasts, so a high `ReactorInc` drains each unit faster. Vanilla spread: 原油 −0.5, 蓄电器（满）and 氢燃料棒 1.0, 氘核燃料棒 2.0, 金色燃料棒 9.0.
 
 **Burning a cloned "full" item does not return its shell without a patch.** The same method hardcodes the pair: `if (reactorItemId == 2207) player.TryAddItemToPackage(2206, 1, …)`. A cloned full accumulator is not 2207, so it is consumed outright — silently throwing away the whole build cost each time. `MechaFuelShellPatches` transpiles it the usual way: normalise the *read* of `reactorItemId` so any mod full variant reports as 2207, and replace the two hardcoded `2206` pushes with a lookup keyed on the current fuel (`reactorItemId` is still the full item at that point — it is only overwritten later, at IL 0x01F8). Values are filtered as they are read; nothing in `Mecha` is written.
@@ -1014,13 +1120,13 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
-The nineteen configs: `megabuildings.json` (tab, build category 12, the six buildings with their pinned model IDs 708 and 723–727, station block), `advancedminer.json` (miner/pump limits + the ore→ingot product map), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch).
+The nineteen configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, and whether a pump may draw 岩浆 from a lava ocean), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all off by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
 **LDBTool re-binds proto IDs from its own config, after your code sets them.** `LDBTool.PreAddProto` → `Bind` → `IdBind` / `GridIndexBind` records every mod proto's ID and GridIndex in `BepInEx/config/LDBTool/LDBTool.CustomID.cfg` and `LDBTool.CustomGridIndex.cfg`, **keyed by the proto's display name**, and on every later launch it writes those stored values *back onto the proto*. So changing an ID in this repo's JSON has **no effect** on a proto that has already been registered once — the first ID a proto is ever given is sticky until that cfg entry is deleted. Cobalt sat on 电磁矩阵's 6001 through three config edits because of this. When an ID looks ignored, check that cfg before anything else, and delete the entry (both files) to let the new value take. `OreRegistry.VerifyIds` now checks the post-registration reality and names the file.
 
-**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631 and 6636–6639 (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635 and 6640–6644. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室) and 12 is 锻造 (锤锻精工厂), leaving **13–14**.
+**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)** and **6506 (熔岩冷却厂)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs 704, 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂) and 13 is 熔岩处理 (熔岩冷却厂), leaving **14 alone**.
 
 **PowerShell scripts for IL inspection must be pure ASCII.** Windows PowerShell reads `.ps1` as ANSI, so a heredoc-written script containing Chinese characters gets mangled into parser errors that look nothing like an encoding problem (`unexpected token 'case'`, `missing string terminator`).
 

@@ -196,6 +196,49 @@ namespace ProjectEden.Model
             k.AddBox(new Vector3(0f, 0.95f * U, 0f), new Vector3(0.1f * U, 0.1f * U, 1.5f * U), S.Pipe);
         }
 
+        // ── 熔岩冷却厂：敞开的发光熔池 + 四座翼片冷却塔 + 粒化环 ──
+        //
+        // 和生物温室一样，三组形体各对应一件事，不是随手堆的：
+        //   敞开的熔池  = 进料，也是全身唯一把「热」摆在外面的地方
+        //   池面上的粒化环 = 冷却速率，三条配方的区别就在这里
+        //   四座冷却塔   = 热最后去了哪里
+        // 七座巨型建筑里只有它在外表露出发光面，远处看过去就靠这一点认。
+        private static void LavaCooler(MeshKit k)
+        {
+            k.AddBox(new Vector3(0f, 0.13f * U, 0f), new Vector3(2.1f * U, 0.26f * U, 2.1f * U), S.Concrete, S.Grating);
+
+            const float poolR = 0.68f * U;
+
+            k.AddCylinder(new Vector3(0f, 0.26f * U, 0f), poolR, 0.30f * U, 20, S.PlateRivet, S.PlateDark);
+            k.AddRibs(new Vector3(0f, 0.26f * U, 0f), poolR + 0.01f * U, 0.30f * U, 12, 0.06f * U, S.PlateDark);
+
+            k.AddCylinder(new Vector3(0f, 0.54f * U, 0f), poolR - 0.08f * U, 0.03f * U, 20, S.Glow);
+
+            k.AddTorus(new Vector3(0f, 0.86f * U, 0f), poolR - 0.12f * U, 0.07f * U, 24, 6, S.Pipe);
+            k.AddTorus(new Vector3(0f, 0.86f * U, 0f), poolR - 0.12f * U, 0.035f * U, 24, 5, S.Accent);
+
+            for (var sx = -1; sx <= 1; sx += 2)
+            for (var sz = -1; sz <= 1; sz += 2)
+            {
+                var at = new Vector3(0.72f * U * sx, 0.26f * U, 0.72f * U * sz);
+
+                k.AddCone(at, 0.26f * U, 0.19f * U, 0.92f * U, 12, S.Vent, S.PlateDark);
+                k.AddRibs(at, 0.27f * U, 0.92f * U, 8, 0.045f * U, S.PlateDark);
+                k.AddCone(new Vector3(at.x, at.y + 0.92f * U, at.z), 0.22f * U, 0.26f * U, 0.10f * U, 12, S.PlateLight);
+
+                k.AddBox(new Vector3(at.x * 0.5f, 0.40f * U, at.z),
+                         new Vector3(Mathf.Abs(at.x), 0.09f * U, 0.09f * U), S.Pipe);
+            }
+
+            k.AddBox(new Vector3(0f, 0.42f * U, 0.88f * U),
+                     new Vector3(0.24f * U, 0.12f * U, 0.34f * U), S.PlateDark, S.Grating);
+
+            k.AddGreebleRow(new Vector3(-0.20f * U, 0.30f * U, 1.00f * U), new Vector3(0.20f * U, 0.30f * U, 1.00f * U),
+                            3, new Vector3(0.13f * U, 0.14f * U, 0.13f * U), S.Vent);
+
+            k.AddRailing(Vector3.zero, 0.95f * U, 0.95f * U, 0.30f * U, 0.20f * U, S.Hazard);
+        }
+
         // ── 生物温室：穹顶温室 + 外挂培养罐 ──────────────────
         //
         // 造型的三件事都对应三条配方，不是随手堆的：
@@ -290,6 +333,7 @@ namespace ProjectEden.Model
                 case 6503: PrecisionCenter(kit); break;
                 case 6504: ParticleCollider(kit); break;
                 case 6505: BioGreenhouse(kit); break;
+                case 6506: LavaCooler(kit); break;
                 default: return false;
             }
 

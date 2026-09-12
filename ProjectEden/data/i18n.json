@@ -333,6 +333,18 @@
     "活性复合材 · 烧结析出": "Living Composite · Directed Exsolution",
     "把长好的复合材送进熔炉。菌丝基体在高温下炭化退场，留下的金属骨架按它自己的连通方式定向析出——**放进去哪一级，出来就是哪一样东西**。选哪一级，在下面的面板里点。": "The grown composite goes into the furnace. The mycelial matrix chars away at temperature and the metal skeleton left behind exsolves along whatever way it was connected — **which grade you put in decides what comes out**. Pick the grade in the panel below.",
     "烧结析出面板标题": "Directed Exsolution — which grade goes in",
-    "投入等级": "Grade fed in"
+    "投入等级": "Grade fed in",
+    "岩浆": "Magma",
+    "从熔岩星球的岩浆洋里直接抽上来的熔融硅酸盐，出口温度一千度上下，表面一接触空气就结出一层玄武岩壳。它已经是完全氧化的石头，烧不出一点能量——值钱的是它带上来的那一千度，以及溶在里面、在地壳里本来要几百万年才能分离出来的那些东西。": "Molten silicate drawn straight out of a lava planet’s ocean, leaving the pump at around a thousand degrees and skinning over with basalt the moment it meets air. It is already fully oxidised rock and will not burn at all — what makes it worth taking is the thousand degrees it carries, and what is dissolved in it: things the crust would otherwise take millions of years to separate out.",
+    "熔岩海洋": "Lava Ocean",
+    "熔岩冷却厂": "Lava Cooling Plant",
+    "巨型熔岩处理厂，速度 10000 倍。中央是一口敞开的耐火熔池，四座冷却塔把热抽走，池面上方的粒化环控制冷却速率——冷得快慢不同，结晶出来的矿物就不同。十二个传送带口直连，输入输出都不需要分拣器，机身自带行星内物流站。": "A colossal lava processing plant running at 10000x speed. At its centre is an open refractory pool; four cooling towers pull the heat away, and the granulation ring above the pool sets the cooling rate - cool it at different speeds and different minerals crystallise out. Twelve belt ports connect directly, so neither input nor output needs a sorter, and it carries its own planetary logistics station.",
+    "熔岩处理设备": "Lava Processing Facility",
+    "铬铁矿 · 早期堆晶": "Chromite - Early Cumulate",
+    "岩浆刚落到一千三百度，铬铁矿就开始结晶——它比熔体重得多，直接沉到池底铺成一层。地球上绝大部分铬都出自这样的堆晶层，而不是什么富铬的岩石。": "Chromite starts crystallising the moment the melt drops to thirteen hundred degrees - being far denser than the liquid, it sinks straight to the floor of the pool and forms a layer. Most of the chromium on Earth comes out of cumulate seams like this one, not out of any chromium-rich rock.",
+    "钒钛磁铁矿 · 晚期堆晶": "Titanomagnetite - Late Cumulate",
+    "钒在熔体里待不进早期矿物的晶格，只能一路留在残余熔体里越积越浓，直到铁钛氧化物开始结晶才被磁铁矿一把抓进去。所以取钒要把岩浆冷得更透。": "Vanadium does not fit the lattice of the early minerals, so it simply stays in the residual melt and grows more concentrated, until the Fe-Ti oxides begin to crystallise and magnetite takes it all in at once. Getting vanadium therefore means cooling the magma much further.",
+    "钴矿石 · 硫化物熔离": "Cobalt Ore - Sulfide Segregation",
+    "钴亲硫，它不会自己结晶出来，得先让熔体里熔离出一滴硫化物液体，再由那滴液体把钴扫干净。岩浆自带的硫不够，所以要投硬石膏补硫、投煤把它还原成硫化物。": "Cobalt is chalcophile: it will not crystallise on its own. An immiscible sulfide liquid has to segregate out of the melt first, and that droplet then scavenges the cobalt clean. Magma does not carry enough sulfur by itself, so anhydrite is fed in to supply it and coal to reduce it to sulfide."
   }
 }

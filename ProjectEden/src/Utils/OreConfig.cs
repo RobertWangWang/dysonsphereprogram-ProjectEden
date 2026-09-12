@@ -56,6 +56,12 @@ namespace ProjectEden.Utils
         public string produceFrom;
 
         /// <summary>
+        /// 「采集自」那一栏的文字。挖出来 / 抽上来的东西填这个，
+        /// 合成出来的填 <see cref="produceFrom"/>——原版就是这么分的（水是「采集自 海洋」）。
+        /// </summary>
+        public string miningFrom;
+
+        /// <summary>
         /// 气体/液体。<b>决定能不能进储液罐</b>——不只是提示文字：原版空罐从皮带取货时，
         /// 直接把流体白名单当过滤数组传进去（见 ProjectEdenPlugin.RefreshFluidList）。
         /// 传送带和物流站则一视同仁，不受影响。

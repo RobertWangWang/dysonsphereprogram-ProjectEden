@@ -139,6 +139,10 @@ namespace ProjectEden
             // 外星矿脉：排在金属属性之后——钻头谓词读的就是四维
             LDBTool.PostAddDataAction += AlienVeinPatches.OnPostAddData;
 
+            // 抽岩浆：排在矿种注册之后——要按 key 解析出岩浆的物品号，
+            // 还要给抽水类设备的 prefabDesc.waterTypes 添上熔岩
+            LDBTool.PostAddDataAction += LavaPumpPatches.OnPostAddData;
+
             // 可燃液体发电：排在金属属性之后——它要读 MetalPropertyPatches.FieldsEnd
             // 来避开已被占用的属性行字段号，而那个值只有注册跑完才是准的。
             // 也要排在矿种与机器注册之后，才解析得出液体和电厂
@@ -192,6 +196,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= CompositeRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= AlienVeinPatches.OnPostAddData;
+            LDBTool.PostAddDataAction -= LavaPumpPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= CombustiblePowerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
