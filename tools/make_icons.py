@@ -1131,6 +1131,57 @@ def proliferator_5_spread():
     return proliferator("#c56bff", "#e2aaff", "#2e1b47", False)
 
 
+def moissanite_ore():
+    """莫桑石：一簇带刻面的晶体，不是矿块。
+
+    <b>形制上刻意不走 ore() 那条路。</b> 其它矿石都是圆钝的碎块（那个函数画的就是
+    「敲下来的一堆石头」），而这一族的卖点是<b>硬</b>——所以画成尖锐的刻面晶体，
+    边缘是直线不是弧线，在物品栏里和任何一块矿都不像。
+
+    颜色取蓝绿：天然碳化硅从绿到蓝黑都有，而这个色在本 mod 的矿石里还没人占
+    （钨黄、钴蓝、铬绿偏暗）。高光给得很硬——莫桑石的色散比金刚石还高，
+    「火彩」是它最出名的特征，图标上就靠这几道白光表示。
+    """
+    d = canvas()
+
+    body = "#1f6f6a"        # 主晶体：暗青
+    face = "#3fb8ad"        # 亮刻面
+    face2 = "#6fe0d4"       # 更亮的一面
+    edge = "#0d3b38"
+
+    # 主晶体：上尖下宽的六面柱，左右两个刻面亮度不同才有体积
+    d.append(dw.Lines(0, -42, 20, -16, 15, 30, -15, 30, -20, -16,
+                      close=True, fill=body, stroke=edge,
+                      stroke_width=2.6, stroke_linejoin="round"))
+
+    # 左刻面（迎光）
+    d.append(dw.Lines(0, -42, -20, -16, -15, 30, -3, 30, -3, -30,
+                      close=True, fill=face, fill_opacity=0.95))
+
+    # 右上刻面
+    # 收在腰棱（y = -13）以上：越过去会在晶体中部压出一个缺口
+    d.append(dw.Lines(0, -42, 18, -14, 4, -14, 0, -30,
+                      close=True, fill=face2, fill_opacity=0.85))
+
+    # 腰棱：一条横向的亮线，刻面晶体的标志
+    d.append(dw.Lines(-19, -13, 19, -13, stroke=face2,
+                      stroke_width=2.2, stroke_opacity=0.8, fill="none"))
+
+    # 旁边一颗小晶体：说明它是成簇产出的颗粒，不是单块大石
+    d.append(dw.Lines(26, 6, 38, 18, 32, 32, 20, 26,
+                      close=True, fill=body, stroke=edge,
+                      stroke_width=2.2, stroke_linejoin="round"))
+    d.append(dw.Lines(26, 6, 20, 26, 26, 29, 32, 14,
+                      close=True, fill=face, fill_opacity=0.9))
+
+    # 火彩：色散比金刚石还高，靠两道硬白光表示
+    d.append(dw.Lines(-9, -26, -5, -8, stroke="#ffffff",
+                      stroke_width=3.2, stroke_opacity=0.85, stroke_linecap="round", fill="none"))
+    d.append(dw.Circle(9, -20, 3.2, fill="#ffffff", fill_opacity=0.9))
+
+    return d
+
+
 def photosynthesis():
     """光合育林：叶片 + 落在它上面的日光。
 
@@ -1493,3 +1544,6 @@ if __name__ == "__main__":
     render(proliferator_4_spread(), "proliferator-4-spread")
     render(proliferator_5_dense(), "proliferator-5-dense")
     render(proliferator_5_spread(), "proliferator-5-spread")
+
+    # 外星矿脉
+    render(moissanite_ore(), "moissanite-ore")

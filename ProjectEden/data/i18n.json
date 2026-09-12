@@ -3,6 +3,10 @@
   "//collision": "注册时会**跳过原版已经有的键**并打 WARNING——不然会把原版那条翻译全局改掉。所以像「铁块」「钢材」「低速传送带」这类原版名字不必也不该写进来。",
   "//missing": "启动时会核对一遍：配置里出现过、但这里没有对应条目的中文串，会各报一次 WARNING。新加物品忘了配英文不会静默。",
   "strings": {
+    "//-- 外星矿脉 --": "",
+    "莫桑石": "Moissanite",
+    "莫桑石矿脉": "Moissanite Vein",
+    "碳化硅晶体，蓝绿色，断口锋利如刃。地球上几乎不天然存在——1893 年莫瓦桑第一次在陨石坑里找到它时以为是金刚石。陨石中的碳化硅颗粒凝结于比太阳更古老的恒星风中，每一粒都比这个星系本身年长。硬度仅次于金刚石，寻常钻头压不动它。": "Silicon carbide crystal, blue-green, with edges that fracture razor-sharp. It barely occurs naturally on any living world — when Moissan first found it in a meteor crater in 1893 he took it for diamond. The silicon carbide grains in meteorites condensed in the winds of stars older than the sun; every one of them predates this system. Second only to diamond in hardness, and ordinary drill bits cannot bite into it.",
     "//-- 活性增产剂 --": "",
     "活性增产剂面板标题": "Living Proliferator",
     "投料一": "Feedstock A",

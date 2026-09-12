@@ -295,6 +295,10 @@ namespace ProjectEden.Patches
             float limit = Config.maxTimeIncrementPerTick;
 
             if (perTick > 0f && miningSpeed * perTick > limit) miningSpeed = limit / perTick;
+
+            // 外星矿脉的钻头消耗：排在最后，因为它要用限幅完毕的 miningSpeed
+            // 算这一 tick 到底挖出多少件；而且它只对那一种矿脉生效
+            AlienVeinPatches.Tick(ref __instance, factory, ref miningSpeed, perTick);
         }
 
         // ── 一次性日志 ────────────────────────────────────────

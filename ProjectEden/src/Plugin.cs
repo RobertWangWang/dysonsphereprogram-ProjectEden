@@ -85,6 +85,7 @@ namespace ProjectEden
             CompositeRegistry.Load();
             CombustiblePowerPatches.Load();
             ProliferatorPatches.Load();
+            AlienVeinPatches.Load();
 
             // 英文本地化：表要在任何 proto 注册之前载好，注册本身挂在
             // Localization.LoadSettings 上（那时 namesIndexer 才有内容，防撞检查才做得了）
@@ -131,6 +132,8 @@ namespace ProjectEden
             // 活性增产剂：排在复合材之后——投料就是那四级，
             // 而两个分数读的是 metals.json 的四维，两边都得先就绪
             LDBTool.PostAddDataAction += ProliferatorPatches.OnPostAddData;
+            // 外星矿脉：排在金属属性之后——钻头谓词读的就是四维
+            LDBTool.PostAddDataAction += AlienVeinPatches.OnPostAddData;
 
             // 可燃液体发电：排在金属属性之后——它要读 MetalPropertyPatches.FieldsEnd
             // 来避开已被占用的属性行字段号，而那个值只有注册跑完才是准的。
@@ -177,6 +180,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= AmmoRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= CompositeRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorPatches.OnPostAddData;
+            LDBTool.PostAddDataAction -= AlienVeinPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= CombustiblePowerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;

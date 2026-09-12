@@ -2236,6 +2236,7 @@ computes the ceiling for your current config and spells out the derivation.
 | `ammo.json` | Alloy ammo: the five tiers' damage/rounds multipliers, the pair-conversion weights, the yield curve |
 | `combustibles.json` | Combustible liquid power: each liquid's working temperature, the Carnot cold side and second-law efficiency, the fuel type bit, the property row's field id |
 | `proliferator.json` | Living proliferators: the candidate list for both feedstock slots, the thresholds for the character and grade scores, and each outcome's level / sprays / yield |
+| `alienvein.json` | Alien vein: which vein consumes drill bits, the bit predicate's hardness margin and yield formula, and the miner's bit slot |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 
 > Before adding an item or recipe to `ores.json`, read the standard in section XII — **properties are derived from
