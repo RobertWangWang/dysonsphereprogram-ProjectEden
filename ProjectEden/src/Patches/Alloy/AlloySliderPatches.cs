@@ -74,11 +74,12 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(UIAssemblerWindow), "_OnUpdate")]
         private static void UIAssemblerWindow_OnUpdate(UIAssemblerWindow __instance)
         {
-            // 三种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
+            // 五种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
             // 只判 AlloyRatioPatches.Count 的话，关掉 alloys.json 会连带让
-            // 弹药和复合材的面板一起消失——那是两个不相干的功能。
+            // 弹药、复合材和增产剂的面板一起消失——那是几个不相干的功能。
             if (__instance?.factory == null
-                || (AlloyRatioPatches.Count == 0 && !AmmoRegistry.Ready && !CompositeRegistry.Ready))
+                || (AlloyRatioPatches.Count == 0 && !AmmoRegistry.Ready && !CompositeRegistry.Ready
+                    && !ProliferatorPatches.Ready))
             {
                 Hide();
 
@@ -144,6 +145,25 @@ namespace ProjectEden.Patches
                     outState = nowOut;
 
                 RefreshOutput(outState);
+
+                return;
+            }
+
+            // 活性增产剂：第五种模式，和合金弹药同形——两行选料位，产物由这一对决定。
+            // 不同的是产物是二维的（档次 × 性格），所以结果行要把两个分数都写出来，
+            // 否则玩家只看到「换了一对，产物变了」，看不出是哪个维度在动。
+            if (ProliferatorPatches.Current(__instance.factory, entityId, out int[] prolif))
+            {
+                if (!EnsurePanel(__instance)) return;
+
+                _panel.SetActive(true);
+
+                HandleProliferatorInput(__instance.factory, entityId, prolif);
+
+                if (ProliferatorPatches.Current(__instance.factory, entityId, out int[] nowProlif))
+                    prolif = nowProlif;
+
+                RefreshProliferator(prolif);
 
                 return;
             }
@@ -364,6 +384,95 @@ namespace ProjectEden.Patches
                 + $"  →  {t.Entry.name} ×{yield}   {"伤害".Translate()} {t.Damage}";
 
             _resultText.color = new Color(0.72f, 0.82f, 0.92f);
+        }
+
+        private static bool _prolifClickLatch;
+
+        /// <summary>
+        /// 活性增产剂的输入：两行选料位，点左右半边换材料。
+        ///
+        /// <b>自己一个 latch，不和弹药共用。</b> 共用的话在两种机器之间来回点，
+        /// 前一次的按下状态会把后一次吃掉。
+        /// </summary>
+        private static void HandleProliferatorInput(PlanetFactory factory, int entityId, int[] pair)
+        {
+            if (!Input.GetMouseButton(0))
+            {
+                _prolifClickLatch = false;
+
+                return;
+            }
+
+            if (_prolifClickLatch) return;
+
+            List<int> pool = ProliferatorPatches.Candidates;
+
+            if (pool.Count < 1) return;
+
+            for (var i = 0; i < 2; i++)
+            {
+                if (!InRow(i, out Vector2 hit)) continue;
+
+                _prolifClickLatch = true;
+
+                Rect rect = Rows[i].Track.rect;
+                int step = hit.x < rect.center.x ? -1 : 1;
+                int at = pool.IndexOf(pair[i]);
+
+                if (at < 0) at = 0;
+
+                var next = (int[])pair.Clone();
+
+                next[i] = pool[((at + step) % pool.Count + pool.Count) % pool.Count];
+
+                if (!ProliferatorPatches.Apply(factory, entityId, next)) return;
+
+                AlloyRatioStore.SetPlayerDefault(ProliferatorPatches.RecipeId, next);
+
+                return;
+            }
+        }
+
+        private static void RefreshProliferator(int[] pair)
+        {
+            _titleText.text = "活性增产剂面板标题".Translate();
+
+            _panelTrs.sizeDelta = new Vector2(0f, HeadHeight + 2 * RowHeight + FootHeight);
+
+            for (var i = 0; i < MaxRows; i++)
+            {
+                var on = i < 2;
+
+                if (Rows[i].Root.activeSelf != on) Rows[i].Root.SetActive(on);
+
+                if (!on) continue;
+
+                Rows[i].Root.transform.localPosition = new Vector3(0f, -(HeadHeight + i * RowHeight), 0f);
+                Rows[i].Label.text = i == 0 ? "投料一".Translate() : "投料二".Translate();
+
+                ItemProto item = LDB.items.Select(pair[i]);
+
+                LayoutRow(Rows[i], true);
+
+                Rows[i].Value.text = "◀  " + (item != null ? item.name : "?") + "  ▶";
+            }
+
+            _resultText.rectTransform.anchoredPosition =
+                new Vector2(SidePad, -(HeadHeight + 2 * RowHeight + 4f));
+
+            ProliferatorPatches.Outcome outcome =
+                ProliferatorPatches.Outcomes[ProliferatorPatches.OutcomeIndex(pair[0], pair[1])];
+
+            // 把两个分数都写出来：产物是二维的，只报结果的话玩家分不清
+            // 刚才那一下动的是「档次」还是「性格」
+            _resultText.text =
+                $"{"性格".Translate()} {ProliferatorPatches.Character(pair[0], pair[1]):0.00}"
+                + $"  {"档次".Translate()} {ProliferatorPatches.Tier(pair[0], pair[1]):0.0}"
+                + $"  →  {outcome.Entry.name} ×{outcome.Yield}"
+                + $"   {"喷涂等级".Translate()} {outcome.Entry.ability}"
+                + $" / {"可喷件数".Translate()} {outcome.Entry.hpMax}";
+
+            _resultText.color = new Color(0.72f, 0.92f, 0.82f);
         }
 
         private static bool _outputClickLatch;

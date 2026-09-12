@@ -305,6 +305,7 @@ namespace ProjectEden
                     IconPathOf(entry.icon) ?? source.IconPath);
 
                 ApplyFuel(proto, entry);
+                ApplyProliferator(proto, entry);
 
                 ProtoSlots.ReserveItemId(item.ItemId);
                 ProtoSlots.ReserveGrid(item.Grid, ProtoSlots.GridKind.Item);
@@ -537,6 +538,36 @@ namespace ProjectEden
             LDBTool.PreAddProto(item);
 
             return item;
+        }
+
+        /// <summary>
+        /// 给物品配上增产剂属性。
+        ///
+        /// <b>只写 proto 的两个字段，不做别的。</b> 让喷涂机认它还差一步——
+        /// 要把物品 ID 追加进喷涂机 prefab 的 <c>incItemId[]</c>，
+        /// 那件事在 <see cref="ProliferatorRegistry"/> 里做（时机不同：
+        /// 这里是 PreAddData，那里要等 LDB 建好才拿得到 prefab）。
+        /// </summary>
+        private static void ApplyProliferator(ItemProto proto, ExtraItemEntry entry)
+        {
+            if (entry.ability <= 0 && entry.hpMax <= 0) return;
+
+            // 半套配置是最糟的情况：等级有喷数没有 = 喷一件就没了；
+            // 反过来 = 喷了等于没喷。两种都不会报错，所以这里要响
+            if (entry.ability <= 0 || entry.hpMax <= 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"物品「{entry.name}」的 ability({entry.ability}) 和 hpMax({entry.hpMax}) " +
+                    "只配了一半，增产剂两个都得有，已跳过");
+
+                return;
+            }
+
+            proto.Ability = entry.ability;
+            proto.HpMax = entry.hpMax;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"「{entry.name}」是增产剂：等级 {entry.ability}，一份喷 {entry.hpMax} 件");
         }
 
         /// <summary>

@@ -1,0 +1,77 @@
+{
+  "//": "活性增产剂：一条配方两个选料位，四种活性复合材两两组合决定产物。完整推导见仓库根目录的设计文档与 CLAUDE.md。",
+
+  "//how": "和合金弹药是同一套做法——RecipeProto.requires[i] 是个 int，逐台建筑改它就能让同一条配方吃不同原料。四取二（可重复）共 10 种组合，映射到 4 个产物；数组**长度**不动，所以存档安全（AssemblerComponent.Export 按 requires/products 的长度写 served/produced）。",
+
+  "//engine": "喷涂机直接读物品的两个字段：incAbility = ItemProto.Ability（等级）、incSprayTimes = ItemProto.HpMax（一份喷几件）。SpraycoaterComponent.InternalUpdate 全方法 518 条指令**没有一处把等级钳在 4**；Cargo.kSprayIncMax = 4 是个没有任何实现的 const。各张增产剂表都填到 10 级，原版只用到 4。",
+
+  "//ceiling": "真正的上限是 Cargo.inc：喷涂那一步是 cargo.inc = stack × Ability，preloader 把 inc 加宽成 Int16 之后上限是 32767 ÷ 集装层数。集装 5000 层 → 最高 6 级。**集装层数和增产剂等级是同一笔预算里的两项开销**，ProliferatorSurvey 每次启动会把当前上限算出来并说明推导。",
+
+  "//score": "两个分数，实测几乎正交（在 10 种组合上相关系数 0.057，所以二维不会塌成一维）：性格 = 硬度 / 韧性，档次 = 耐蚀 + 导电。混合律复用 AmmoPairPatches.Mix，也就是合金自己那一套：硬度取幂平均 p=2、韧性取调和平均、其余线性，50:50。",
+
+  "//thresholds": "两处阈值都取在**枚举出来的天然缺口中点**，不是先拍一个再去凑：性格排序 … 0.55 0.61 0.89 │ 1.97 2.06 … 取 1.0；档次排序 … 91 93 │ 95 97 … 取 94。",
+
+  "//flavour": "**轴到产物的映射是味道不是机制。** 增产剂本身是科幻设定，没有现实对应物，所以这里不存在「从化学推出来」这回事——和烧结析出那四条里的三条同样处理，明写出来而不是假装推过。能自圆其说的只到：耐蚀 → 涂层持久 → 档次，硬度/韧性 → 集中还是铺开 → 性格。",
+
+  "//secret": "游戏里不写哪一对出哪一种，而且直觉是错的：纯 IV 刚化双份只出 Mk.IV 浓缩（它的耐蚀+导电 93 差一点够不到档次线），反倒是最不起眼的 II 渗流双份出 Mk.V 广延——II 是四级里唯一导电的那一级。",
+
+  "enabled": true,
+
+  "//recipeId": "配方本体写在 ores.json 里，这里只用来认它。",
+  "recipeId": 6626,
+
+  "//candidates": "可选的投入材料。两个选料位共用这一份名单，允许两格选同一种（引擎可行：InsertInto 是展开的六个 if，按 needs[i] 匹配；0 号吃饱后 UpdateNeeds 会把 needs[0] 置 0，1 号接着填）。",
+  "candidates": [
+    "living-composite-1",
+    "living-composite-2",
+    "living-composite-3",
+    "living-composite-4"
+  ],
+
+  "characterThreshold": 1.0,
+  "tierThreshold": 94.0,
+
+  "//outcomes": "四个产物。ability / hpMax 写在 ores.json 的物品上（那才是引擎读的地方），这里的同名字段只用于交叉核对——对不上就报错，免得两处各说各话。",
+  "outcomes": [
+    {
+      "//": "低档 + 广延：等级和原版 Mk.III 一样是 4，赢在一份喷 112 件。",
+      "ref": "proliferator-4-spread",
+      "name": "增产剂 Mk.IV·广延",
+      "highTier": false,
+      "dense": false,
+      "ability": 4,
+      "hpMax": 112,
+      "yield": 4
+    },
+    {
+      "//": "低档 + 浓缩：等级 5，越过原版顶格。",
+      "ref": "proliferator-4-dense",
+      "name": "增产剂 Mk.IV·浓缩",
+      "highTier": false,
+      "dense": true,
+      "ability": 5,
+      "hpMax": 90,
+      "yield": 4
+    },
+    {
+      "//": "高档 + 广延：等级 5 且一份喷 151 件。",
+      "ref": "proliferator-5-spread",
+      "name": "增产剂 Mk.V·广延",
+      "highTier": true,
+      "dense": false,
+      "ability": 5,
+      "hpMax": 151,
+      "yield": 2
+    },
+    {
+      "//": "高档 + 浓缩：等级 6，当前集装层数下的上限。",
+      "ref": "proliferator-5-dense",
+      "name": "增产剂 Mk.V·浓缩",
+      "highTier": true,
+      "dense": true,
+      "ability": 6,
+      "hpMax": 126,
+      "yield": 2
+    }
+  ]
+}

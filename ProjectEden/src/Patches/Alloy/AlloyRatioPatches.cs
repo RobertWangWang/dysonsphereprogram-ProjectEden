@@ -717,6 +717,7 @@ namespace ProjectEden.Patches
             AmmoPairPatches.ReapplyAll();
             CompositePatches.ReapplyAll();
             CompositeOutputPatches.ReapplyAll();
+            ProliferatorPatches.ReapplyAll();
         }
 
         /// <summary>玩家在装配器窗口里选了配方：贴这台建筑记着的配比，没记过就贴当前默认。</summary>

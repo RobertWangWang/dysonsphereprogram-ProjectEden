@@ -63,9 +63,14 @@ namespace ProjectEden.Utils
         public bool isFluid;
 
         /// <summary>
-        /// 燃料类型，位掩码。<b>1 = 化学燃料</b>（火力发电厂、机甲反应堆能烧）；
-        /// 4 反物质 / 8 蓄电器 / 16 核燃料。填 0 表示不是燃料。
-        /// 发电建筑按 <c>prefabDesc.fuelMask &amp; FuelType</c> 判收不收。
+        /// 燃料类型，位掩码。发电建筑按 <c>prefabDesc.fuelMask &amp; FuelType</c> 判收不收。
+        /// 填 0 表示不是燃料。
+        ///
+        /// <b>实测占用情况（FuelSurvey 在游戏里读的，不是凭记忆）：</b>
+        /// 1 化学燃料（26 种，火力发电厂与机甲反应堆）／2 氘核燃料棒／
+        /// 4 反物质与金色燃料棒／8 蓄电器（满）／<b>16 本 mod 的可燃液体</b>。
+        /// <c>ItemProto.fuelNeeds</c> 长 64 且按掩码值索引，所以合法位只有 bit 0~5，
+        /// 现在只剩 32 一个空位。
         /// </summary>
         public int fuelType;
 
@@ -74,6 +79,29 @@ namespace ProjectEden.Utils
         /// 配了 fuelType 就必须配它，否则烧起来是 0 电。
         /// </summary>
         public long heatValue;
+
+        /// <summary>
+        /// 增产剂等级，写进 <c>ItemProto.Ability</c>。填 0 表示这不是增产剂。
+        ///
+        /// <b>喷涂机直接读它当等级</b>（<c>SpraycoaterComponent.InternalUpdate</c>：
+        /// <c>incAbility = ItemProto.Ability</c>），全方法没有一处把它钳在 4——
+        /// <c>Cargo.kSprayIncMax = 4</c> 是个没有任何实现的 <c>const</c>。
+        /// 各张增产剂表都填到 10 级，原版只用到 4。
+        ///
+        /// <b>但真正的上限是 <c>Cargo.inc</c>。</b> 喷涂那一步是
+        /// <c>cargo.inc = stack × Ability</c>，preloader 把 inc 加宽成 Int16 之后
+        /// 上限是 <c>32767 / 集装层数</c>——集装和等级是同一笔预算里的两项开销，
+        /// <c>ProliferatorSurvey</c> 每次启动会把当前上限算出来。
+        /// </summary>
+        public int ability;
+
+        /// <summary>
+        /// 一份增产剂能喷多少件，写进 <c>ItemProto.HpMax</c>
+        /// （<c>incSprayTimes = ItemProto.HpMax</c>）。
+        ///
+        /// 原版三档给出的规律是 <c>HpMax = k × Ability</c>，k 走 12 / 12 / 15。
+        /// </summary>
+        public int hpMax;
 
         /// <summary>
         /// 自制图标：assets/icons/&lt;icon&gt;.png（80×80，透明底）。
