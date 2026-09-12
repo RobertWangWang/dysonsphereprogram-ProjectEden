@@ -14,6 +14,53 @@
 
   "machines": [
     {
+      "//": "一百台火力发电厂的燃烧室共用一套汽轮机。烧的是可燃液体，而且能量利用率跟着燃料允许的热通道工作温度走——完整推导见仓库根目录的 可燃液体发电V1.md。",
+      "key": "combustible-liquid-plant",
+      "enabled": true,
+      "kind": "generator",
+      "displayName": "可燃性液体发电厂",
+      "description": "一百台火力发电厂的燃烧室共用一套汽轮机与并网设备。只烧可燃液体，而且烧得好不好要看液体本身：燃料越干净，热通道就敢开得越热，能把多少化学能变成电也就越高。工作温度写在每种液体的属性栏里——但真正烧得热的液体，往往单位能量最低。",
+      "//copyFromItemId": "2204 = 火力发电厂。FuelSurvey 在游戏里实测：发电 2.16 MW、耗料 2.7 MW，能量利用率 0.8，fuelMask 1。整台克隆，本 mod 只改功率、效率和燃料掩码。",
+      "copyFromItemId": 2204,
+      "itemId": 6625,
+      "//modelId": "上限 727，708~727 已被矿脉与其它新建筑排满，往下取 707。",
+      "modelId": 707,
+      "//tint": "琥珀色。和风力发电机集群的青绿、六座巨型建筑的橙/蓝/紫都分得开。",
+      "tint": [
+        0.98,
+        0.66,
+        0.24
+      ],
+      "iconHue": 34.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.24,
+      "iconValueScale": 1.08,
+      "//generator": "powerMultiplier 100 就是「一百台火力发电厂」，和建造配方里的 100 台是同一个数。efficiency 直接写能量利用率、由代码反推 useFuelPerTick——用 fuelMultiplier 表达的话要填 131.5，一个只有回推才看得懂的数。",
+      "//efficiency": "0.6082 = 2000°C 那一档（0.7 × 卡诺，冷端 298.15 K）。**必须锚在效率最高的那一档**：ABN_PowerGenerator.CheckPowerGen 要求运行时的 useFuelPerTick 不低于 prefab 的 0.7 倍，逐台改只能往上乘。顺带一提它低于原版火力发电厂的 0.8——这座建筑卖的是一百倍功率密度和一整条新燃料链，不是效率。",
+      "//fuelMask": "16 = 可燃液体专用位。FuelSurvey 实测原版已用掩码 15（1 化学 / 2 氘核 / 4 反物质 / 8 满蓄电器），bit 0~5 里只剩 16 和 32；取 16，32 留着。",
+      "generator": {
+        "powerMultiplier": 100.0,
+        "efficiency": 0.6082,
+        "fuelMask": 16
+      },
+      "recipeId": 6625,
+      "//recipeHandcraftOnly": "和风力发电机集群同理：配方 Type 设成 0(None)，只能手搓。",
+      "recipeHandcraftOnly": true,
+      "recipeTimeSpend": 600,
+      "recipeGridIndex": 0,
+      "//recipeItems": "100 台火力发电厂 + 100 个能量矩阵（6002）。数量和 powerMultiplier 是同一个 100——这座建筑就是一百台。",
+      "recipeItems": [
+        {
+          "id": 2204,
+          "count": 100
+        },
+        {
+          "id": 6002,
+          "count": 100
+        }
+      ]
+    },
+    {
       "key": "electrochem",
       "enabled": true,
 

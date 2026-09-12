@@ -164,8 +164,37 @@ namespace ProjectEden.Utils
         /// 燃料消耗倍率。留 0 则跟随 <see cref="powerMultiplier"/>——
         /// 两者同倍等于发电效率不变，这几乎总是想要的。
         /// 风能 / 光伏这类没有燃料的发电建筑用不到它。
+        ///
+        /// <b>被 <see cref="efficiency"/> 覆盖</b>：两个都填时以 efficiency 为准。
         /// </summary>
         public float fuelMultiplier;
+
+        /// <summary>
+        /// 能量利用率，直接指定。填了它就按
+        /// <c>useFuelPerTick = genEnergyPerTick / efficiency</c> 反推，不再用
+        /// <see cref="fuelMultiplier"/>。
+        ///
+        /// <b>为什么要有这个字段。</b> 效率是
+        /// <c>genEnergyPerTick / useFuelPerTick</c>（见
+        /// <c>PowerGeneratorComponent.GenEnergyByFuel</c>：扣掉的燃料能量是
+        /// <c>energy × useFuelPerTick / genEnergyPerTick</c>）。想要一个指定的效率，
+        /// 用倍率表达就得写 <c>fuelMultiplier = powerMultiplier × 源效率 / 目标效率</c>——
+        /// 一个只有回推才看得懂的数。**仓库的规矩是配置里写依据，不写算好的结果**，
+        /// 所以这里让配置直接写效率，倍率由代码去算并打进日志。
+        ///
+        /// <b>它同时是 ABN_PowerGenerator 那条红线的锚点。</b> 该检查要求运行时的
+        /// <c>useFuelPerTick</c> 不低于 prefab 的 0.7 倍，所以逐台改这个字段的功能
+        /// 必须把 prefab 锚在<b>效率最高</b>的那一档，其余只能往上乘。
+        /// </summary>
+        public float efficiency;
+
+        /// <summary>
+        /// 可烧的燃料类型掩码。留 0 则继承源建筑的。
+        ///
+        /// <c>ItemProto.fuelNeeds</c> 按<b>掩码值</b>索引且长度为 64，所以合法位只有
+        /// bit 0~5。空位要用 <c>FuelSurvey</c> 在游戏里查——物品表离线读不到。
+        /// </summary>
+        public int fuelMask;
     }
 
     /// <summary>

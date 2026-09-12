@@ -59,6 +59,18 @@ namespace ProjectEden
 
         internal static MachinesConfig Config { get; private set; }
 
+        /// <summary>按 key 找一台发电建筑的 generator 配置，找不到返回 null。</summary>
+        internal static MachineGeneratorEntry FindGenerator(string key)
+        {
+            if (Config?.machines == null || string.IsNullOrEmpty(key)) return null;
+
+            foreach (MachineEntry entry in Config.machines)
+                if (entry != null && entry.key == key)
+                    return entry.generator;
+
+            return null;
+        }
+
         internal static readonly List<Machine> Machines = new List<Machine>();
 
         /// <summary>
@@ -604,23 +616,46 @@ namespace ProjectEden
             target.gammaRayReceiver = source.gammaRayReceiver;
             target.geothermal = source.geothermal;
 
-            target.fuelMask = source.fuelMask;
+            // 燃料类型掩码：配置没写就继承源建筑的。写了就是要把这台机器和原版那台隔开
+            target.fuelMask = gen != null && gen.fuelMask > 0 ? gen.fuelMask : source.fuelMask;
+
             target.powerCatalystId = source.powerCatalystId;
             target.powerProductId = source.powerProductId;
             target.powerProductHeat = source.powerProductHeat;
 
             float power = gen?.powerMultiplier > 0f ? gen.powerMultiplier : 1f;
-            float fuel = gen?.fuelMultiplier > 0f ? gen.fuelMultiplier : power;
 
             target.genEnergyPerTick = (long)(source.genEnergyPerTick * power);
-            target.useFuelPerTick = (long)(source.useFuelPerTick * fuel);
 
-            ProjectEdenPlugin.Log.LogInfo(
+            // efficiency 优先于 fuelMultiplier：前者写的是意图，后者写的是算好的结果
+            if (gen != null && gen.efficiency > 0f)
+                target.useFuelPerTick = (long)(target.genEnergyPerTick / gen.efficiency);
+            else
+                target.useFuelPerTick =
+                    (long)(source.useFuelPerTick * (gen?.fuelMultiplier > 0f ? gen.fuelMultiplier : power));
+
+            var line =
                 $"{machine.Entry.displayName}：发电 {Power(source.genEnergyPerTick)} → " +
-                $"{Power(target.genEnergyPerTick)}（×{power:0.##}）" +
-                (source.useFuelPerTick > 0L
-                    ? $"，耗料 {Power(source.useFuelPerTick)} → {Power(target.useFuelPerTick)}（×{fuel:0.##}）"
-                    : "，无燃料"));
+                $"{Power(target.genEnergyPerTick)}（×{power:0.##}）";
+
+            if (source.useFuelPerTick > 0L && target.useFuelPerTick > 0L)
+            {
+                // 源效率和目标效率都报出来：这一对是 ABN_PowerGenerator 那条红线的参照物，
+                // 也是「这台比原版省还是费」唯一能一眼看出来的地方
+                double was = (double)source.genEnergyPerTick / source.useFuelPerTick;
+                double now = (double)target.genEnergyPerTick / target.useFuelPerTick;
+
+                line += $"，耗料 {Power(source.useFuelPerTick)} → {Power(target.useFuelPerTick)}"
+                        + $"，能量利用率 {was:0.###} → {now:0.###}"
+                        + $"，燃料掩码 {source.fuelMask} → {target.fuelMask}"
+                        + $"，ABN 下限 useFuelPerTick ≥ {target.useFuelPerTick * 0.7:0}";
+            }
+            else
+            {
+                line += "，无燃料";
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(line);
         }
 
         private static bool SourceIsAccumulator(ItemProto source)

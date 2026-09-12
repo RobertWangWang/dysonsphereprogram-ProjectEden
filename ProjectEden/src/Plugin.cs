@@ -83,6 +83,7 @@ namespace ProjectEden
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
             AmmoRegistry.Load();
             CompositeRegistry.Load();
+            CombustiblePowerPatches.Load();
 
             // 英文本地化：表要在任何 proto 注册之前载好，注册本身挂在
             // Localization.LoadSettings 上（那时 namesIndexer 才有内容，防撞检查才做得了）
@@ -127,6 +128,11 @@ namespace ProjectEden
             // 复合材只解析不注册（物品和配方都在 ores.json 里），所以只挂 PostAdd
             LDBTool.PostAddDataAction += CompositeRegistry.OnPostAddData;
 
+            // 可燃液体发电：排在金属属性之后——它要读 MetalPropertyPatches.FieldsEnd
+            // 来避开已被占用的属性行字段号，而那个值只有注册跑完才是准的。
+            // 也要排在矿种与机器注册之后，才解析得出液体和电厂
+            LDBTool.PostAddDataAction += CombustiblePowerPatches.OnPostAddData;
+
             // 排在最后：要等所有注册器都把物品塞进 LDB 之后，才重建流体白名单
             LDBTool.PostAddDataAction += RefreshFluidList;
 
@@ -158,6 +164,7 @@ namespace ProjectEden
             LDBTool.PreAddDataAction -= AmmoRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= AmmoRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= CompositeRegistry.OnPostAddData;
+            LDBTool.PostAddDataAction -= CombustiblePowerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
             LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;

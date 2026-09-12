@@ -67,6 +67,16 @@ namespace ProjectEden.Patches
         /// <summary>这个物品有没有四维属性行。</summary>
         internal static bool Has(int itemId) => Values.ContainsKey(itemId);
 
+        /// <summary>
+        /// 本表占用的字段号区间的<b>下一个</b>号。别的属性表要从这里或更大处起，
+        /// 否则两边会认领同一个字段号，提示栏静默串行。
+        ///
+        /// <b>读的是注册后的实际值，不是配置值</b>——配置里的 fieldIdBase 会被
+        /// VanillaFieldCount 抬高，按配置算会算矮。所以查它的人必须排在
+        /// <see cref="OnPostAddData"/> 之后。
+        /// </summary>
+        internal static int FieldsEnd => _names.Length > 0 ? _base + _names.Length : VanillaFieldCount;
+
         internal static void OnPostAddData()
         {
             Values.Clear();
