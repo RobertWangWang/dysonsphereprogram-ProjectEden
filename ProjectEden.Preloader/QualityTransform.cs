@@ -87,6 +87,9 @@ namespace ProjectEden.Preloader
             /// </summary>
             internal int ChannelUses;
 
+            /// <summary>调用后把寄存器擦掉的次数。</summary>
+            internal int Scrubs;
+
             /// <summary>形状表里没有的东西：签名 → 次数</summary>
             internal readonly Dictionary<string, int> Unhandled = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -271,6 +274,8 @@ namespace ProjectEden.Preloader
 
                 return r;
             }
+
+            if (mutate) ScrubAfterCalls(module, regs, paramSlots, r);
 
             r.Notes.Add(
                 $"品质搬运层：{r.Twinned} 条语句已孪生、{r.NoTwinNeeded} 条确认不需要孪生，" +
@@ -710,6 +715,112 @@ namespace ProjectEden.Preloader
             }
 
             m.Body.OptimizeMacros();
+        }
+
+        /// <summary>
+        /// <b>调用之后把侧信道寄存器擦掉</b>——让寄存器的寿命只有那一次调用，
+        /// 也就是把它变成一个真正的「参数」。
+        ///
+        /// <b>这一遍是被实测逼出来的，而且它补的是这套设计里唯一比增产点数弱的那一环。</b>
+        /// 增产点数走方法参数：忘了传编译不过，真忘了也只是传 0（丢失，有界）。
+        /// 品质走静态寄存器：忘了写什么事都没有，被调方读到的是<b>上一个人留下的值</b>
+        /// ——凭空发明，而且会累积。实测里单件品质从上限 100 一路涨到 11140。
+        ///
+        /// 而「忘了写」不是假想：这条协议 1b 只在<b>游戏自己的调用点</b>上接好了。
+        /// 本 mod、别的 mod、以及这一遍没能认出来的调用点，都不写寄存器。
+        ///
+        /// 擦掉之后，任何没写就读的地方拿到的都是 0——**和忘传参数的后果完全一致**。
+        ///
+        /// <b>为什么是「调用之后」而不是「读之后清零」。</b> 后者试过，量完否掉了：
+        /// 改写后的程序集里有 24 个方法在<b>同一个方法体内多次普通读</b>同一个寄存器
+        /// （<c>StationComponent::AddItem</c> 读 Q0 七次，那是六个展开的槽位分支；
+        /// <c>PlanetFactory::InsertInto</c> 读 Q0 七次、Q1 四次）。那些多半是互斥分支，
+        /// 但「多半」不够——要证明得做控制流分析，而这正是离线证不了的事。
+        /// 擦在调用方这侧则完全不用碰任何读点。
+        ///
+        /// <b>栈是中性的。</b> <c>ldc.i4.0 ; stsfld</c> 压一个弹一个；被调方的返回值
+        /// 安安稳稳留在下面。<c>call</c> 本身是跳转目标也没关系——我们插在它<b>后面</b>，
+        /// 标签指的还是那条 call。
+        ///
+        /// <b>要跳过紧随其后的出参读回。</b> 出参方向是「被调方在 ret 前写、调用方在 call 后读」，
+        /// 擦得太早就把人家刚送回来的品质抹了。所以往后跳过成对的
+        /// <c>ldsfld Qn ; stloc</c> 再插。
+        ///
+        /// 全模块扫，不只扫被孪生过的那 81 个方法体：脏值是<b>上一个</b>调用点留下的，
+        /// 在哪儿被读到和在哪儿被写的没有关系。
+        /// </summary>
+        private static void ScrubAfterCalls(ModuleDefinition module, IList<FieldDefinition> regs,
+            IDictionary<MethodDefinition, List<int>> slots, Report r)
+        {
+            if (regs == null || regs.Count == 0 || slots == null)
+            {
+                r.Blockers.Add("调用后擦除：拿不到侧信道寄存器或载荷参数表");
+
+                return;
+            }
+
+            var regSet = new HashSet<FieldDefinition>(regs);
+
+            foreach (TypeDefinition t in AllTypes(module))
+            foreach (MethodDefinition m in t.Methods)
+            {
+                if (!m.HasBody || m.Body.Instructions.Count == 0) continue;
+
+                var calls = new List<Instruction>();
+
+                foreach (Instruction i in m.Body.Instructions)
+                {
+                    if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) continue;
+                    if (!(i.Operand is MethodReference mr)) continue;
+
+                    MethodDefinition cd;
+
+                    try { cd = mr.Resolve(); }
+                    catch { continue; }
+
+                    if (cd != null && slots.ContainsKey(cd)) calls.Add(i);
+                }
+
+                if (calls.Count == 0) continue;
+
+                m.Body.SimplifyMacros();
+
+                ILProcessor il = m.Body.GetILProcessor();
+
+                foreach (Instruction call in calls)
+                {
+                    var cd = (MethodDefinition)((MethodReference)call.Operand).Resolve();
+
+                    if (!slots.TryGetValue(cd, out List<int> used)) continue;
+
+                    // 跳过紧随其后的出参读回（`ldsfld Qn ; stloc`），别把刚送回来的品质抹掉
+                    Instruction at = call;
+
+                    while (at.Next != null && at.Next.OpCode == OpCodes.Ldsfld
+                           && at.Next.Operand is FieldDefinition rf && regSet.Contains(rf)
+                           && at.Next.Next != null && IsStloc(at.Next.Next))
+                        at = at.Next.Next;
+
+                    for (var si = 0; si < used.Count && si < regs.Count; si++)
+                    {
+                        Instruction zero = Instruction.Create(OpCodes.Ldc_I4_0);
+                        Instruction store = Instruction.Create(OpCodes.Stsfld, regs[si]);
+
+                        il.InsertAfter(at, zero);
+                        il.InsertAfter(zero, store);
+
+                        at = store;
+
+                        r.Scrubs++;
+                    }
+                }
+
+                m.Body.OptimizeMacros();
+            }
+
+            r.Notes.Add(
+                $"调用后擦除：{r.Scrubs} 处。侧信道寄存器的寿命被压到「一次调用」以内——" +
+                "没写就读的地方拿到 0（丢失，有界），而不是上一个人留下的品质（凭空发明）。");
         }
 
         /// <summary>一条含载荷访问的语句：区间和它的核心形状。</summary>
