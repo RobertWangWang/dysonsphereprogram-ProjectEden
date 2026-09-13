@@ -382,7 +382,18 @@ namespace ProjectEden.Patches
         {
             var code = new List<CodeInstruction>(instructions);
 
-            const int expectInt = 3, expectFloat = 1;
+            // 原版是 3 个整数 4 加 1 个浮点 4f。
+            //
+            // **品质搬运层接通之后，浮点那个会变成两个，而且两个都必须替换。** 原版那句
+            // `b = inc / stack * 4f + 0.5f` 算的是「吐出来那一叠该带多少增产点数」，里面的
+            // 4f 就是**吐出来的层数**（和 `AddCargo(item, 4, b)` 里的 4 是同一个数）；
+            // 品质那条孪生语句 `bq = qua / stack * 4f + 0.5f` 算的是同一叠该带多少品质分，
+            // 那个 4f 当然也是同一个层数。只改一个就会让品质按 4 层算而货按 5000 层吐。
+            //
+            // 所以期望值跟着品质是否接通走，而不是写死——写死的话，接通品质之后这条守卫
+            // 每次启动都报错，而它报的其实是一件正确的事，真出问题时反倒没人信它了。
+            int expectInt = 3;
+            int expectFloat = Patches.QualityWidening.TransportWired ? 2 : 1;
 
             var ints = 0;
             var floats = 0;
