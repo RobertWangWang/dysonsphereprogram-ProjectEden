@@ -54,6 +54,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXVII. Catalytic Reactor: a factory that remembers its own state](#xxvii-catalytic-reactor-a-factory-that-remembers-its-own-state)
 - [XXVIII. The Integrated Chemical Plant: the first machine here that eats several recipe types](#xxviii-the-integrated-chemical-plant-the-first-machine-here-that-eats-several-recipe-types)
 - [XXIX. The Redox Combustion Plant: a machine that makes its own fuel and burns it](#xxix-the-redox-combustion-plant-a-machine-that-makes-its-own-fuel-and-burns-it)
+- [XXX. The Living Lens: a gravitational lens that grows back](#xxx-the-living-lens-a-gravitational-lens-that-grows-back)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -176,6 +177,23 @@ mega building's products, and the sky would be just as busy.
 A miner whose product has been remapped still shows up in **reference rate** and **theoretical capacity** — vanilla
 matches both of those against the vein's original product, so Copper Ingot never matched and the miner vanished from
 the statistics entirely.
+
+### The plain Mining Machine gets exactly one change: internal buffer 50 → 10,000
+
+The ordinary miner is **not** sped up, does **not** stop consuming the vein, and does **not** get its product
+remapped. All it gets is a larger internal buffer, so a belt that backs up briefly no longer stalls it.
+
+> **This one had to move the throttle along with the buffer — raising the buffer alone would have made it
+> slower.** Vanilla's 50 wears two hats: it is the "buffer full, stop mining" gate, and it is also the throttle's
+> divisor — `speedDamper = min(1, −2.45 × min(1, buffer / 50) + 2.47)`, i.e. **it starts slowing at 30 items and
+> drops to 2% at 50**. Lift the gate to 10,000 while leaving the divisor at 50 and the miner crawls from 50 up to
+> 10,000 at 2% speed.
+>
+> So the divisor scales with it: it now **starts slowing at 6,000 and drops to 2% at 10,000**. Vanilla's
+> back-pressure feel — slow down as you fill up — is unchanged; only the scale is 200× larger.
+>
+> The Advanced Mining Machine is unaffected: it takes the other throttle branch, which measures the fill level of
+> its logistics-station slot, and this mod raised that slot to ten million long ago.
 
 ---
 
@@ -3324,11 +3342,122 @@ drones or belts can take it away. A power plant feeding itself first needs no ex
 falls out of the execution order.
 
 
+## XXX. The Living Lens: a gravitational lens that grows back
+
+A ray receiver needs a gravitational lens to run at double power, and that lens **burns
+unconditionally** — no Dyson swarm overhead, not one joule generated, and it is still gone in ten
+minutes. The Living Lens inverts that.
+
+> **It heals in the beam and ages in the dark.**
+
+It goes into the **stock ray receiver**. No new building to place.
+
+### It heals in the beam and ages in the dark
+
+A lens still burns down over ten minutes; that cadence is unchanged. What changes is that every
+time a point is spent, some of it is put back in proportion to **how much radiation this receiver
+is actually catching right now**. Under full illumination that is 2.5× the lifetime (10 minutes →
+25); on the night side it ages exactly like a gravitational lens.
+
+The heal rate is strictly below 1, so **net consumption is always positive** — this is a
+longer-lived consumable, not a perpetual motion machine.
+
+The rule ties "how efficient this receiver is" to "is this receiver actually receiving", which
+stock DSP does not. On the far side of a star, or under a half-built swarm, the Living Lens'
+advantage shrinks back on its own.
+
+### Switching: empty the slot first
+
+Either gesture works:
+
+- **Shift-click the receiver from your inventory** — if the slot is empty and you are carrying
+  Living Lenses, it switches over.
+- **Open the window and click the catalyst slot** with a Living Lens in hand — same requirement,
+  the slot must be empty.
+
+**It will not switch while gravitational lenses are still inside**, and that is deliberate: the
+points already in there would be re-attributed to the new lens, which is transmuting items out of
+nothing. Click the slot once to take the old ones out first.
+
+After the switch, belts feed the right kind on their own with no setting to change — because what
+switching changes is the item id the receiver itself records, and statistics, dismantle refunds and
+consumption accounting all follow that field. Going back to gravitational lenses is the same:
+empty, then insert.
+
+### The two multipliers are independent
+
+| | Gravitational Lens | Living Lens |
+|---|---|---|
+| Power | ×2 | **×10** (5× the stock building) |
+| Critical Photons | baseline | **×3** |
+| Lifetime at full illumination | 10 min | **25 min** |
+
+Power and photons are **two independent knobs**, and that is not a design decision — it was read
+out of the engine: photon output is `this tick's capacity ÷ photon heat value`, with numerator and
+denominator fully decoupled. So `lens.json`'s `powerMultiplier` and `photonMultiplier` move
+separately. Set both back to 1 and the Living Lens degrades to "merely longer-lived", with no
+rebuild needed.
+
+> **Photons have a hard ceiling: one per tick per receiver, i.e. 60/s.**
+> Stock output is nowhere near it (about 0.2/s), and ×3 gives 0.6 — still two orders of magnitude
+> clear. But that figure lives in the game's asset bundle and cannot be read offline, so the
+> startup log prints the computed rate next to the ceiling — and raises a WARNING if it is ever
+> exceeded, rather than leaving you staring at production figures for photons that can never reach
+> a belt.
+
+### It is grown, not machined
+
+| | |
+|---|---|
+| Machine | **Biological Greenhouse** (Bio-Culture) |
+| Inputs | Casimir Crystal ×1 + **High-Purity Silicon Carbide ×4** + Living Composite III ×2 + Living Composite II ×1 |
+
+**Biophotonic crystals are real.** The structural colour of butterfly wings, sea mouse spines and
+opal is not pigment — it is a high-refractive-index material laid down by an organism at the period
+of a light wavelength, selecting light by Bragg diffraction. They are **grown, not machined.** So
+the approach here is to use living composite as an organic scaffold and grow silicon carbide on it
+into a periodic lattice.
+
+**And moissanite is silicon carbide**, which hangs this lens off the alien vein: outside the home
+system, drill bits, the forge recipe type. The barrier turns from *deep* into *far*. The Casimir
+Crystal copies the gravitational lens' own tier — the Living Lens has to sit at the same tier, or
+it becomes a shortcut past the late game.
+
+**Not finding moissanite costs you nothing else.** The stock gravitational lens plus stock receiver
+route is entirely intact, which is why there is deliberately **no synthetic fallback** here —
+unlike tungsten, whose absence leaves the whole cemented-carbide line with nothing to do.
+
+Growing it in the greenhouse buys one free second-order effect: the greenhouse is
+**illumination-gated as a whole building**, so "ray receiver output" ends up indirectly hitched to
+**daytime on some other planet**.
+
+### While we are here: your Living Proliferators already work on lenses
+
+This one has nothing to do with the Living Lens — it has been in effect for several releases and
+was simply never written down:
+
+**A sprayed lens raises the receiver's multiplier by its spray level**, and the engine's cap there
+is **level 10**, not the level 4 that stock proliferator tops out at. This mod's proliferators
+reach level 6, so:
+
+| Sprayed with | Level | Receiver multiplier |
+|---|---|---|
+| nothing | 0 | ×2 |
+| Proliferator Mk.III (stock max) | 4 | ×4 |
+| Proliferator Mk.IV · Concentrated | 5 | ×4.5 |
+| **Proliferator Mk.V · Concentrated** | 6 | **×5** |
+| engine maximum | 10 | ×7 |
+
+Nothing was built for this. It is what falls out of two existing facts colliding: the engine clamps
+at 10 rather than 4, and the spraycoater does not clamp the level. It works on Living Lenses too,
+and the two multiply.
+
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The eight mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `megabuildings.json` | The ten mega buildings, the tab, speed, built-in logistics station, replicator page count |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
@@ -3337,7 +3466,7 @@ falls out of the execution order.
 | `power.json` | Power node coverage radius |
 | `belts.json` | Speed of the three belt tiers |
 | `ores.json` | The custom vein table: per-ore IDs, vein density, recolour parameters, recipe lists; extra items (phase, heat value, icon); and the gases injected into gas giants |
-| `machines.json` | The seven new buildings: which vanilla building to clone from, parameters for the five `kind`s (assembler / station / accumulator / exchanger / generator), tint, build recipe |
+| `machines.json` | The eight new buildings: which vanilla building to clone from, parameters for the five `kind`s (assembler / station / accumulator / exchanger / generator), tint, build recipe |
 | `metals.json` | The four-axis property table (hardness / toughness / corrosion / conductivity) |
 | `alloys.json` | Per-building alloy ratios: adjustable slots, total parts, property weights, yield and time multiplier bands |
 | `cheats.json` | **Cheat switches**, all on by default: instant build / build without condition / no build collision / collider pool off / no power spacing / pump anywhere |
@@ -3347,6 +3476,8 @@ falls out of the execution order.
 | `combustibles.json` | Combustible liquid power: each liquid's working temperature, the Carnot cold side and second-law efficiency, the fuel type bit, the property row's field id |
 | `proliferator.json` | Living proliferators: the candidate list for both feedstock slots, the thresholds for the character and grade scores, and each outcome's level / sprays / yield |
 | `alienvein.json` | Alien vein: which vein consumes drill bits, the bit predicate's hardness margin and yield formula, and the miner's bit slot |
+| `redox.json` | Redox Combustion Plant: the reductant and oxidiser candidate lists with their per-item oxygen balance, the three grain tiers' heat values and density thresholds, and the oxidiser-ratio slider's range |
+| `lens.json` | Living Lens: power multiplier, photon multiplier (the two are independent), heal rate, and which vanilla catalyst counts as "the other lens" |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 
 > Before adding an item or recipe to `ores.json`, read the standard in section XII — **properties are derived from

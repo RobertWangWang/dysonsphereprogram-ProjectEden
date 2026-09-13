@@ -27,6 +27,17 @@ namespace ProjectEden.Utils
         /// <summary>采矿机送进站点之前的机内缓存上限，原版三条采集分支都写死 50</summary>
         public int capacity;
 
+        /// <summary>
+        /// 小型采矿机（出料到传送带的那种，原版 2301）的机内缓存上限，原版 50。
+        /// 填 0 或不大于 50 就是保持原版。
+        ///
+        /// <b>这个值同时会被拿去当节流分母</b>——原版是
+        /// <c>speedDamper = min(1, -2.45 × min(1, productCount / 50) + 2.47)</c>，
+        /// 只抬缓存不抬分母的话，缓存过 50 之后采矿机会一直以 2% 速度爬。
+        /// 见 <c>AdvancedMinerPatches.RetuneSmallMinerDamper</c>。
+        /// </summary>
+        public int smallMinerCapacity;
+
         /// <summary>站点仓储上限（面板上的「上限」），来自 PrefabDesc.stationMaxItemCount</summary>
         public int stationCapacity;
 

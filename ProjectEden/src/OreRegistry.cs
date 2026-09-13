@@ -301,6 +301,28 @@ namespace ProjectEden
             {
                 if (entry == null || !entry.enabled) continue;
 
+                // iconFrom 没填就按名字反查一次，查到了就把号写回 entry——
+                // 后面 IconPathOf、SyncStandaloneRecipeIcons、TintExtraIcon 都读 entry.iconFrom，
+                // 写回去比在四个地方各解析一遍可靠
+                if (entry.iconFrom <= 0 && !string.IsNullOrEmpty(entry.iconFromName))
+                {
+                    int byName = VanillaItemIdByName(entry.iconFromName);
+
+                    if (byName > 0)
+                    {
+                        entry.iconFrom = byName;
+
+                        ProjectEdenPlugin.Log.LogInfo(
+                            $"物品「{entry.name}」的 proto 模板按名字反查到「{entry.iconFromName}」= {byName}");
+                    }
+                    else
+                    {
+                        ProjectEdenPlugin.Log.LogError(
+                            $"物品「{entry.name}」的 iconFromName「{entry.iconFromName}」在原版里找不到。"
+                            + "比的是 ItemProto.Name（原始中文键）不是翻译后的名字，检查有没有写错字");
+                    }
+                }
+
                 ItemProto source = ProtoSlots.ItemIdTaken(entry.iconFrom) ? LDB.items.Select(entry.iconFrom) : null;
 
                 if (source == null)
@@ -874,7 +896,18 @@ namespace ProjectEden
 
             if (@ref == null || !@ref.StartsWith(prefix, StringComparison.Ordinal)) return 0;
 
-            string name = @ref.Substring(prefix.Length);
+            return VanillaItemIdByName(@ref.Substring(prefix.Length));
+        }
+
+        /// <summary>
+        /// 按 <c>ItemProto.Name</c>（<b>原始键，不是翻译过的 <c>name</c></b>）反查原版物品 ID，找不到返回 0。
+        ///
+        /// 只解析原版：本 mod 自己的 proto 在 <c>PreAddDataAction</c> 期间还不在 LDB 里，
+        /// 本来也该按 key 引用。
+        /// </summary>
+        internal static int VanillaItemIdByName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return 0;
 
             foreach (ItemProto proto in LDB.items.dataArray)
                 if (proto != null && proto.Name == name)

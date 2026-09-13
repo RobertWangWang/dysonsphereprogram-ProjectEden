@@ -1,0 +1,34 @@
+{
+  "//": "活性透镜。**单独一个文件，不并进 ores.json**，理由和 cargoprobe.json 一样：JsonHelper 的磁盘覆盖是整文件生效的，把这几个旋钮塞进 ores.json，就等于为了调一个倍率去影子掉整张矿脉表。这个文件影子掉的只有它自己。",
+
+  "//what": "一枚**活的**引力透镜。它和引力透镜的区别不在插哪台机器——两者进的都是原版射线接收站——而在三件事：发电倍率、光子倍率、以及**它会在射线里自己长回来**。",
+
+  "//no-new-building": "**不加新建筑，是所有者的决定，代价记在这里。** 引擎不从透镜物品上读任何东西：catalystId 只是一次相等比较，`cata = 2 × (1 + inc)` 是硬写在三个方法里的字面量。所以没有新建筑，倍率就只能落在我们自己的 transpiler 上——也就是设计稿 活性透镜.md 第六节明确否掉过的那条「同一个乘积写在三个方法里」。现在那三处一起改，并且断言必须正好命中 3 处，命不中就 ERROR。**不想要倍率了就把下面两个 multiplier 调回 1**，透镜退化成纯自愈，一行代码都不用动。",
+
+  "enabled": true,
+
+  "//lensItemKey": "ores.json 的 items 段里那条的 key。**不写裸 ID**——ResolveItemId 在撞号时会挪，硬写的号会静默指到别人的 proto 上。",
+  "lensItemKey": "living-lens",
+
+  "//defaultCatalystName": "原版催化剂的**物品名**，用来认出「这台接收站原本吃什么」，以及让玩家能换回去。**按名字反查，不写号**：原版 proto 在 resources.assets 里，离线枚举不出来，写错号不会报错、只会让功能整个失效。比的是 ItemProto.Name（原始键）不是 .name（翻译过的），否则英文客户端上必然匹配失败。",
+  "defaultCatalystName": "引力透镜",
+
+  "//powerMultiplier": "发电倍率，相对引力透镜。改写的是 EnergyCap_Gamma_Req / MaxOutputCurrent_Gamma / RequiresCurrent_Gamma 里那个 `ldc.r4 2`——**三处必须一起改**：只改 EnergyCap 的话，接收站实发的电和它报给电网的最大出力对不上，电网按错数调度，症状是功率曲线抖而不是报错。形状和自动集装机那四个 `4` 完全一样。",
+  "powerMultiplier": 5.0,
+
+  "//photonMultiplier": "临界光子倍率，相对引力透镜。**光子和电力是两个独立旋钮**，这一条是离线读 IL 读出来的：GameTick_Gamma @00D2 是 `productCount += capacityCurrentTick / productHeat`，分母 productHeat 和分子完全解耦。所以这里不改倍率本身，而是把 productHeat 乘上 powerMultiplier/photonMultiplier——电力涨 5 倍、分母涨 5/3 倍，光子净涨 3 倍。",
+  "photonMultiplier": 3.0,
+
+  "//photon-ceiling": "**光子有个硬出口天花板：每 tick 1 个。** GameTick_Gamma 里有六处 InsertInto（六个传送带口），但每一处成功后都是 `productCount -= 1` 紧跟一条 `br`，跳过后面所有口——所以一台接收站每 tick 最多吐一个光子，60 个/秒封顶，缓冲 productCount 封顶 20。而铸造侧没有这个限制，更难看的是**统计是按截断前记的**（@0106 先记账、@0129 后截断），铸快了会让产量面板显示传送带永远看不到的光子。原版光子产率离 60/s 很远，大概率碰不到，但 productHeat 真值在 resources.assets 里离线读不到——所以注册时会把换算出来的光子/秒和 60/s 天花板并排打进日志，进游戏一眼能判。真撞上了就把这个数往回收。",
+
+  "//healRate": "自愈速率。**必须严格小于 1**，否则透镜就成了永动机：净消耗必须为正。满照下寿命是 1/(1-healRate) 倍——0.6 对应 10 分钟变 25 分钟。代码里会钳，超了报 WARNING。",
+  "healRate": 0.6,
+
+  "//heal-both": "**愈合必须同时补 catalystIncPoint，这是设计稿漏掉的一条。** 原版消耗块（@002A/@0038）是两个字段一起走的：`point -= 1` 配 `incPoint -= incLevel`，比值 incPoint/point（也就是槽里透镜的喷涂等级）才不变。只往 point 里加回去的话，比值单调下滑——healRate 0.6 时 incPoint 在第 3600 步就归零，而 point 要到第 9000 步，**延长出来的那 15 分钟透镜是完全没喷涂的**，×5 的活性透镜在寿命后 60% 退回 ×2。而且全程不报错，只有功率曲线慢慢往下溜。",
+
+  "//dither": "regen 是小数而 catalystPoint 是 Int32。攒余数要加新存档字段（否决），所以按概率取整——**用 entityId + tick 做确定性抖动，不要 Random**：电力 tick 跑在 FactoryPowerSystemGameTick_Parallel 下，每行星一个线程，共享 RNG 会被撕坏（MegaVirtualLogisticsPatches 已经为这条付过代价）。",
+
+  "//save": "**一个存档字段都不用加。** catalystPoint / catalystIncPoint / catalystId 本来就在 PowerGeneratorComponent 的 Export(@0106/@0112/@011E) 和 Import(@0174/@0180/@0190) 里，愈合量直接写进 catalystPoint，换料写进 catalystId。存档格式一动不动，SaveVersion 不用动。",
+
+  "//3600": "**不要动 3600。** 那个常数同时是「一枚透镜换多少点」和「多少点算一枚透镜」，散在至少 13 处 4 个类里（GameTick_Gamma 的取货口、UIPowerGeneratorWindow.OnCataButtonClick 的放入与取出、PlanetFactory.EntityFastFillIn）。改一半的后果不是报错，是凭空造物品或吃掉物品——和自动集装机那四个 `4` 同一个病。自愈方案之所以是对的路，正是因为它绕开了这整张表：它只加 catalystPoint，一枚透镜仍然是 3600 点，所有除法口径原封不动。"
+}

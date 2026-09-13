@@ -13,7 +13,12 @@ namespace ProjectEden.Patches
     ///   2. 机内缓存从 50 放开到一千万；
     ///   3. 始终按矿物利用科技满级工作：采矿速度取满级倍率，矿物消耗取满级最低值。
     ///
-    /// 三项都只作用于大型采矿机（按实体 protoId 判定），普通采矿机和抽水站不受影响。
+    /// 这三项都只作用于大型采矿机（按实体 protoId 判定）与抽水/采油设备（按 MinerComponent.type 判定）。
+    ///
+    /// <b>小型采矿机只沾一项</b>：<c>smallMinerCapacity</c> 单独放开它的机内缓存，
+    /// 不提速、不免消耗、不换产物。它的节流分母必须和缓存一起抬，
+    /// 理由见 <see cref="RetuneSmallMinerDamper"/>。
+    ///
     /// 思路参考 ProjectGenesis 的 AdvancedMinerPatches。
     /// </summary>
     [HarmonyPatch]
@@ -45,6 +50,7 @@ namespace ProjectEden.Patches
             ProductMap.Clear();
 
             ApplyStationCapacity();
+            ReportSmallMinerConfig();
 
             if (Config?.productMap == null || !Config.remapProduct) return;
 
@@ -130,6 +136,32 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
+        /// 开机把小型采矿机这一项的状态报出来，<b>包括「没开」</b>。
+        /// 只在开启时打印的状态行，会让「关掉了」和「这段代码根本没进 DLL」在日志上长得一模一样。
+        /// </summary>
+        private static void ReportSmallMinerConfig()
+        {
+            if (Config == null)
+            {
+                ProjectEdenPlugin.Log.LogInfo("小型采矿机缓存：没有 advancedminer.json，保持原版 50");
+                return;
+            }
+
+            if (Config.smallMinerCapacity <= VanillaCapacity)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"小型采矿机缓存：smallMinerCapacity 配成了 {Config.smallMinerCapacity}"
+                    + $"（不大于原版 {VanillaCapacity}），保持原版");
+
+                return;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"小型采矿机缓存上限：{VanillaCapacity} → {Config.smallMinerCapacity}，"
+                + $"节流从装到 {Config.smallMinerCapacity * 6 / 10} 件开始、装满降到 2%（原版是 30 / 50）");
+        }
+
+        /// <summary>
         /// 站点仓储上限。StationComponent.Init 用 PrefabDesc.stationMaxItemCount 初始化每个仓位的 max，
         /// 所以改 prefabDesc 即可——但只影响之后新建的采矿机，存档里已建好的沿用旧值。
         /// </summary>
@@ -166,7 +198,93 @@ namespace ProjectEden.Patches
 
         /// <summary>供 IL 调用：这台采矿机的缓存上限。</summary>
         internal static int GetCapacity(ref MinerComponent miner, PlanetFactory factory)
-            => IsBoosted(ref miner, factory) ? Config.capacity : VanillaCapacity;
+        {
+            if (IsBoosted(ref miner, factory)) return Config.capacity;
+
+            return IsSmallMiner(ref miner, factory) ? Config.smallMinerCapacity : VanillaCapacity;
+        }
+
+        /// <summary>
+        /// 小型采矿机 = 矿脉型 + 不是大型采矿机 + <b>没有物流站</b>。
+        ///
+        /// 最后一条不是保险，是判据本身：实测 <c>GameLogic._miner_parallel</c> @04C2~@0580 处
+        /// 按「这台采矿机有没有 StationComponent」分两条路算 <c>speedDamper</c>——
+        /// 有站的用 <c>max(StationStore[0].max, 3000)</c> 当分母（所以
+        /// <see cref="StationCapacityPatches"/> 把槽位上限抬到一千万之后，大型采矿机的节流早就失效了），
+        /// 没站的才走 <c>productCount / 50</c>。只有后者需要这里的处理。
+        /// </summary>
+        private static bool IsSmallMiner(ref MinerComponent miner, PlanetFactory factory)
+        {
+            if (Config == null || Config.smallMinerCapacity <= VanillaCapacity) return false;
+
+            if (miner.type != EMinerType.Vein) return false;
+
+            if (factory == null) return false;
+
+            int entityId = miner.entityId;
+
+            if (entityId <= 0) return false;
+
+            EntityData[] pool = factory.entityPool;
+
+            if (entityId >= pool.Length) return false;
+
+            if (pool[entityId].protoId == Config.minerItemId) return false;
+
+            return pool[entityId].stationId <= 0;
+        }
+
+        /// <summary>
+        /// 小型采矿机：缓存上限抬高之后，<b>必须把节流分母一起抬</b>。
+        ///
+        /// 原版那个 50 有两个身份，而且分在两个方法里：
+        /// <c>MinerComponent.InternalUpdate</c> 里的三处 <c>ldc.i4.s 50</c> 是缓存闸（已由转译接管），
+        /// 而节流写在 <c>GameLogic._miner_parallel</c> @0580 与 <c>FactorySystem.GameTick</c> @04D9，
+        /// 两处都是 <c>speedDamper = min(1, -2.45 × min(1, productCount / 50) + 2.47)</c>，
+        /// <b>本 mod 一处都没改</b>。只抬缓存的话，<c>productCount</c> 一过 50 速度就钉死在 2%，
+        /// 采矿机要以 2% 速度爬到 10000 —— 比不改还糟。
+        ///
+        /// 这里不像大型采矿机那样把 <c>speedDamper</c> 直接按死成 1，而是拿同一条公式、
+        /// 换上新的分母重算：原版「装到六成开始减速、装满降到 2%」的背压手感一点没变，
+        /// 只是刻度跟着缓存一起放大。走前缀而不是转译那两个方法，
+        /// 是因为它们都在并行 tick 的热路径上，而 <c>speedDamper</c> 在同一 tick 里
+        /// 早于 <c>InternalUpdate</c> 写好——大型采矿机的 <c>overrideSpeedDamper</c> 用的就是这条路。
+        /// </summary>
+        private static void RetuneSmallMinerDamper(ref MinerComponent miner, PlanetFactory factory)
+        {
+            if (!IsSmallMiner(ref miner, factory)) return;
+
+            float fill = miner.productCount / (float)Config.smallMinerCapacity;
+
+            if (fill > 1f) fill = 1f;
+
+            float damper = -2.45f * fill + 2.47f;
+
+            if (damper > 1f) damper = 1f;
+
+            miner.speedDamper = damper;
+
+            ReportSmallMinerOnce(ref miner);
+        }
+
+        private static int _smallMinerReported;
+
+        /// <summary>
+        /// 第一台走到这里的小型采矿机，把判断依据<b>无条件</b>报一次。
+        ///
+        /// 这个仓库已经为同一个形状付过五次往返：功能带着「什么都不做」的分支上线，
+        /// 而那条分支没有日志，于是「补丁没跑」和「补丁跑了但闸没过」在日志上完全一样。
+        /// 采矿机 tick 在 <c>_miner_parallel</c> 上，一次性标志必须用 Interlocked 抢，
+        /// 否则每个线程各打一行。
+        /// </summary>
+        private static void ReportSmallMinerOnce(ref MinerComponent miner)
+        {
+            if (Interlocked.Exchange(ref _smallMinerReported, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"小型采矿机缓存上限已接管：上限 {Config.smallMinerCapacity}（原版 {VanillaCapacity}），"
+                + $"节流分母同步放大；首台 entityId={miner.entityId} 当前缓存 {miner.productCount}");
+        }
 
         // ── 需求 1 / 2：产物替换 ────────────────────────────────
 
@@ -244,7 +362,13 @@ namespace ProjectEden.Patches
         private static void MinerComponent_InternalUpdate_Prefix(ref MinerComponent __instance, PlanetFactory factory,
             float power, ref float miningRate, ref float miningSpeed)
         {
-            if (!IsBoosted(ref __instance, factory)) return;
+            if (!IsBoosted(ref __instance, factory))
+            {
+                // 小型采矿机不进提速那一套，但缓存上限抬高之后节流分母必须跟着抬
+                RetuneSmallMinerDamper(ref __instance, factory);
+
+                return;
+            }
 
             // 矿物利用满级不只是采矿更快，消耗也降到最低。两者出自同一系列科技，
             // 只给速度不给消耗，等于矿脉被更快地挖空。

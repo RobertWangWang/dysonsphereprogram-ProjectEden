@@ -82,6 +82,7 @@ namespace ProjectEden
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
+            Patches.LensPatches.Config = JsonHelper.Load<Patches.LensConfig>("lens");
             AmmoRegistry.Load();
             RedoxRegistry.Load();
             CompositeRegistry.Load();
@@ -158,6 +159,10 @@ namespace ProjectEden
             // 来避开已被占用的属性行字段号，而那个值只有注册跑完才是准的。
             // 也要排在矿种与机器注册之后，才解析得出液体和电厂
             LDBTool.PostAddDataAction += CombustiblePowerPatches.OnPostAddData;
+
+            // 活性透镜：排在矿种注册之后——它要按 key 反查透镜的物品 ID，
+            // 而那条物品是 OreRegistry 的 items 段注册的
+            LDBTool.PostAddDataAction += LensPatches.OnPostAddData;
 
             // 排在最后：要等所有注册器都把物品塞进 LDB 之后，才重建流体白名单
             LDBTool.PostAddDataAction += RefreshFluidList;

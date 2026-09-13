@@ -156,6 +156,21 @@ namespace ProjectEden.Utils
         /// <summary>没配 icon 时，图标从哪个<b>原版物品</b>的图标改色而来</summary>
         public int iconFrom;
 
+        /// <summary>
+        /// <see cref="iconFrom"/> 的按名字版本：填原版物品的 <c>ItemProto.Name</c>，
+        /// 注册时反查成 ID。<b>只在 <see cref="iconFrom"/> 没填时才看它。</b>
+        ///
+        /// 存在的理由和配方里的 <c>ref: "vanilla:…"</c> 完全一样：<b>原版 proto 在
+        /// resources.assets 里，离线枚举不出来</b>，常用的几个（水 1000、煤矿 1006……）是记住的，
+        /// 引力透镜、卡西米尔晶体这些不是——而写错一个号不会报错，只会静默拿另一件物品当模板，
+        /// 连图标带 DescFields 一起错。
+        ///
+        /// 比的是 <c>Proto.Name</c>（原始键）而不是 <c>proto.name</c>（翻译过的），
+        /// 否则英文客户端上必然匹配失败——这条错本仓库已经犯过一次，记在
+        /// CLAUDE.md 的 English localization 一节。
+        /// </summary>
+        public string iconFromName;
+
         public float iconHue;
         public float iconSaturationScale;
         public float iconMinSaturation;
