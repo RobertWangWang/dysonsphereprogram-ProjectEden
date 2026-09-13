@@ -204,13 +204,17 @@ namespace ProjectEden.Preloader
             "CountInc::get_incArrows",
         };
 
-        internal static Report Analyze(ModuleDefinition module)
+        /// <summary>
+        /// 把 <see cref="DeclaredPayload"/> 解析成真实字段。
+        ///
+        /// <b>分析器和改写器共用这一个方法，不是为了省代码。</b> 两边各抄一份清单，
+        /// 迟早会有一边先改；那时分析报的是一套字段、改写动的是另一套，
+        /// 而两边都会报「全过」——这正是 <c>inc</c> 加宽那次「校验脚本和变换共用同一条
+        /// 名字规则，所以它也跟着报了全过」的翻版，只是换了个方向。
+        /// </summary>
+        internal static void ResolvePayload(ModuleDefinition module,
+            IDictionary<string, FieldDefinition> into, ICollection<string> blockers)
         {
-            var r = new Report();
-
-            // ── 1. 载荷字段：清单里的都要在，且都得是整数 ──
-            var payload = new Dictionary<string, FieldDefinition>(StringComparer.Ordinal);
-
             foreach (string spec in DeclaredPayload)
             {
                 string[] parts = spec.Split(new[] { "::" }, StringSplitOptions.None);
@@ -219,7 +223,7 @@ namespace ProjectEden.Preloader
 
                 if (owner == null)
                 {
-                    r.Blockers.Add($"找不到类型 {parts[0]}（清单项 {spec}）");
+                    blockers.Add($"找不到类型 {parts[0]}（清单项 {spec}）");
 
                     continue;
                 }
@@ -228,20 +232,30 @@ namespace ProjectEden.Preloader
 
                 if (f == null)
                 {
-                    r.Blockers.Add($"找不到字段 {spec}");
+                    blockers.Add($"找不到字段 {spec}");
 
                     continue;
                 }
 
                 if (!IsIntegerPayload(f.FieldType))
                 {
-                    r.Blockers.Add($"{spec} 的类型是 {f.FieldType.FullName}，不是预期的整数或整数数组");
+                    blockers.Add($"{spec} 的类型是 {f.FieldType.FullName}，不是预期的整数或整数数组");
 
                     continue;
                 }
 
-                payload[Key(f)] = f;
+                into[Key(f)] = f;
             }
+        }
+
+        internal static Report Analyze(ModuleDefinition module)
+        {
+            var r = new Report();
+
+            // ── 1. 载荷字段：清单里的都要在，且都得是整数 ──
+            var payload = new Dictionary<string, FieldDefinition>(StringComparer.Ordinal);
+
+            ResolvePayload(module, payload, r.Blockers);
 
             r.PayloadFields = payload.Count;
 

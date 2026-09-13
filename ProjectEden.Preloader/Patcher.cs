@@ -51,6 +51,38 @@ namespace ProjectEden.Preloader
                 $"Cargo.inc 已加宽为 Int16：签名 {r.WidenedParams} 处、局部变量 {r.WidenedLocals} 个、" +
                 $"间接读写 {r.FixedIndirect} 处、截断指令 {r.FixedConv} 处，覆盖 {r.CallSites} 个调用点。" +
                 "存档从此绑定本 mod。");
+
+            AddQualityFields(assembly);
+        }
+
+        /// <summary>
+        /// 物品品质 · 阶段 1a：给 30 个载荷字段各加一个 Int32 孪生。
+        ///
+        /// <b>和 Cargo.inc 加宽互相独立</b>——它只加字段、不碰任何方法体，所以
+        /// 前面那一步失败与否都不影响它的正确性。之所以仍然排在后面跑，是因为加宽
+        /// 会对几个方法做 SimplifyMacros/OptimizeMacros，让它在一个稳定的状态上落子更好排查。
+        ///
+        /// 此刻这些字段恒为 0 / null，<b>游戏行为零变化</b>；写它们的代码在 1b / 1c。
+        /// 失败不影响游戏启动：什么都不加，品质功能就当不存在。
+        /// </summary>
+        private static void AddQualityFields(AssemblyDefinition assembly)
+        {
+            QualityFieldAdder.Report q = QualityFieldAdder.Apply(assembly.MainModule);
+
+            foreach (string n in q.Notes) Log.LogInfo(n);
+
+            if (!q.Applied)
+            {
+                Log.LogError($"物品品质：孪生字段**未添加**，共 {q.Blockers.Count} 条阻塞项（程序集这部分保持原样）：");
+
+                foreach (string b in q.Blockers) Log.LogError("  " + b);
+
+                return;
+            }
+
+            Log.LogWarning(
+                $"物品品质：已添加 {q.Added.Count} 个孪生字段（阶段 1a）。" +
+                "它们现在恒为 0，搬运与效果尚未接线——游戏行为与不加时一致。");
         }
     }
 }
