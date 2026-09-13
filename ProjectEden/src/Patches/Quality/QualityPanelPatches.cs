@@ -27,6 +27,11 @@ namespace ProjectEden.Patches
     /// 位置是**照抄进度条的矩形**再靠右对齐：锚点、pivot、拉伸方式都在 prefab 里，
     /// 离线读不到，照抄就不必知道它们分别是什么。
     ///
+    /// <b>标签是从零建的，不是克隆原文本。</b> 克隆过两版都是发光字：第一版继承了
+    /// <c>BaseMeshEffect</c>，删掉之后还发光，因为**发光在材质上**——游戏那套 UI 文本
+    /// 用的是带辉光的材质，删组件删不掉。克隆会把材质、特效、自动缩放、行距、富文本开关
+    /// 全套带过来，而这里只需要「一个字」。从零建只借字体，其余全默认，所见即所得。
+    ///
     /// 显示的是<b>每件品质分</b>而不是总分：总分随件数变，看不出好坏；每件分才是玩家要比的量。
     /// </summary>
     [HarmonyPatch]
@@ -188,17 +193,27 @@ namespace ProjectEden.Patches
 
         private static Text Build(Text src, Transform host, RectTransform bar)
         {
-            var go = Object.Instantiate(src.gameObject, host, false);
+            // **从零建，不克隆。**
+            //
+            // 克隆过两版，两版都是发光字：第一版是继承来的 BaseMeshEffect，删掉之后还发光,
+            // 因为**发光在材质上**——原文本用的是游戏自己那套带辉光的 UI 材质，
+            // 删组件删不掉它。克隆一个 Text 会把材质、特效、自动缩放、行距、富文本开关
+            // 全套带过来，而这里需要的只是「一个字」。
+            //
+            // 从零建则只借一样东西：字体。其余一律用默认值，所见即所得。
+            var go = new GameObject(LabelName, typeof(RectTransform), typeof(CanvasRenderer),
+                typeof(Text));
 
-            go.name = LabelName;
+            go.transform.SetParent(host, false);
 
             var label = go.GetComponent<Text>();
 
-            if (label == null) { Object.Destroy(go); return null; }
-
-            // 克隆体自己也可能带进来一份子物体（上一次的标签），清掉
-            for (int k = label.transform.childCount - 1; k >= 0; k--)
-                Object.Destroy(label.transform.GetChild(k).gameObject);
+            label.font = src.font;
+            label.fontSize = src.fontSize > 0 ? src.fontSize : 16;
+            label.fontStyle = FontStyle.Normal;
+            label.material = null;          // 默认 UI 材质：不发光
+            label.supportRichText = false;
+            label.resizeTextForBestFit = false;
 
             // 排在最后 = 画在最上面。进度条、填充、滑块都是它的兄弟节点，排在前面。
             label.transform.SetAsLastSibling();
@@ -239,18 +254,7 @@ namespace ProjectEden.Patches
             //
             // 办法是让**轮廓去定义字形**：浅色字 + 实心黑描边。白底上看到的是黑描边勾出的字，
             // 深底上看到的是浅色的字身，两边都成立。游戏 HUD 普遍是这么做的。
-            // **把克隆体继承来的网格特效全部清掉。**
-            //
-            // 实测撞了：原文本身上挂着发光/阴影一类的 BaseMeshEffect，克隆体一并带过来,
-            // 再叠上我自己加的描边，中文笔画之间的缝隙全被浅色填满——
-            // 屏幕上看到的是几团白块，一个字都认不出来。
-            //
-            // 这是「克隆会把你没要的东西一起带过来」的又一次，和 MultiProductUIPatches
-            // 那次「克隆出两份、你写的那份不是画在上面的那份」同一族。
-            // 有了底板就不需要任何特效了：底色是我们自己控制的，纯色字最干净。
-            foreach (BaseMeshEffect fx in go.GetComponents<BaseMeshEffect>()) Object.Destroy(fx);
-
-            label.color = new Color(1f, 0.96f, 0.88f);
+            label.color = Color.white;
 
             if (!_reported)
             {
@@ -259,7 +263,8 @@ namespace ProjectEden.Patches
                 // 布局出问题时要能从**数字**上改，不是从截图上估——这条规矩本仓库
                 // 在物流站面板上付过三次学费。
                 ProjectEdenPlugin.Log.LogInfo(
-                    $"物品品质：槽位品质标签已建，挂在 {host.name} 上，排第 " +
+                    $"物品品质：槽位品质标签已建（字体 {label.font?.name}／字号 {label.fontSize}／" +
+                    $"材质 {(label.material == null ? "默认" : label.material.name)}），挂在 {host.name} 上，排第 " +
                     $"{label.transform.GetSiblingIndex() + 1}/{host.childCount} 个子物体。" +
                     $"进度条 rect={(bar != null ? bar.rect.ToString() : "（没找到）")}；" +
                     $"标签 rect={r.rect}。整个矩形照抄进度条，文字右对齐顶到右端。");
