@@ -55,6 +55,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXVIII. The Integrated Chemical Plant: the first machine here that eats several recipe types](#xxviii-the-integrated-chemical-plant-the-first-machine-here-that-eats-several-recipe-types)
 - [XXIX. The Redox Combustion Plant: a machine that makes its own fuel and burns it](#xxix-the-redox-combustion-plant-a-machine-that-makes-its-own-fuel-and-burns-it)
 - [XXX. The Living Lens: a gravitational lens that grows back](#xxx-the-living-lens-a-gravitational-lens-that-grows-back)
+- [XXXI. Item Quality: refined, not mined](#xxxi-item-quality-refined-not-mined)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -63,16 +64,21 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 
 ## I. Mega Structures
 
-A new **"Mega Structures" tab** (category 12) appears in the build bar, holding eight 10000x facilities:
+A new **"Mega Structures" tab** (category 12) appears in the build bar, holding eleven 10000x facilities:
 
-| Building | Recipe type | Working power |
-|---|---|---|
-| Heavenworks Assembler | Assemble | 22.5 MW |
-| Foundry Smelter | Smelt | 22.5 MW |
-| Calciner Chemical Plant | Chemical | 22.5 MW |
-| Forgeworks Fabricator | Assemble | 22.5 MW |
-| Deep Probe Collider | Particle | 45 MW |
-| Biodome | **Bioculture** (this mod only) | 18 MW |
+| Building | Recipe type | Working power | See |
+|---|---|---|---|
+| Heavenworks Assembler | Assemble | 22.5 MW | |
+| Foundry Smelter | Smelt | 22.5 MW | |
+| Calciner Chemical Plant | Chemical | 22.5 MW | |
+| Forgeworks Fabricator | **Forging** (this mod only) | 22.5 MW | section XXIII |
+| Deep Probe Collider | Particle | 45 MW | |
+| Biodome | **Bioculture** (this mod only) | 18 MW | section XIX |
+| Lava Cooling Plant | **Lava Processing** (this mod only) | 30 MW | section XXVI |
+| Catalytic Reactor | **Catalysis** (this mod only) | 43.2 MW | section XXVII |
+| Integrated Chemical Plant | **Integrated Chemistry** (eats Chemical / Electrochemical / Redox) | 360 MW | section XXVIII |
+| Redox Combustion Plant | **Redox Combustion** (this mod only) | 180 MW | section XXIX |
+| Isotopic Refinery | **Isotopic Refining** (this mod only) | 180 MW | section XXXI |
 
 - **No prerequisite tech.** The recipe is 1 Iron Ingot + 1 Copper Ingot, hand-crafted in 1 second
 - **Belts connect directly**: 12 ports, no sorters needed
@@ -80,11 +86,11 @@ A new **"Mega Structures" tab** (category 12) appears in the build bar, holding 
   materials from logistics stations and advanced mining machines by itself, and ships products out by itself
 - **30 storage slots**, 10,000,000 per slot
 
-The first five borrow **vanilla recipe types**, so a vanilla machine can run those recipes too — the mega versions are
-merely much faster. The Biodome is different: its recipe type is this mod's own number 11 (Bioculture), and its three
-recipes **can be run by nothing else**. See section XIX.
+Three of the first four borrow **vanilla recipe types** (Assemble / Smelt / Chemical), so a vanilla machine can run
+those recipes too — the mega versions are merely much faster. The ones in bold are different: their recipe type is a
+number this mod allocated itself, and those recipes **can be run by nothing else**.
 
-There is a seventh thing on this tab (slot 7) — the **Wind Turbine Cluster** — which is not an assembler. See section X.
+There is one thing on this tab that is not an assembler (slot 7) — the **Wind Turbine Cluster**. See section X.
 
 ### About "10000x"
 
@@ -1741,7 +1747,7 @@ It now has a horizontal scrollbar too, and **jumps to the first usable recipe wh
 is remembered across windows, so opening the picker for a machine that only accepts a custom recipe type would very
 likely land on the previous tab and show nothing).
 
-### The eight mega buildings now have distinct shapes
+### The eleven mega buildings now have distinct shapes
 
 They used to clone one vanilla model (the logistics station) and differ only by colour — five of the same
 building in five paints. Each one's geometry is now **generated in code**, with a silhouette of its own:
@@ -3479,11 +3485,145 @@ at 10 rather than 4, and the spraycoater does not clamp the level. It works on L
 and the two multiply.
 
 
+## XXXI. Item Quality: refined, not mined
+
+**In one line: the same metal can now be *purer*, and purity is a property of a stack of goods, not of a
+different item.**
+
+This is the deepest change in the mod so far — a preloader adds **29 twin fields** to the game so that
+quality flows along the whole item highway exactly the way vanilla's proliferator points do.
+
+> **Current state: quality can be produced, moved, saved and seen — but it has no effect yet.**
+> The effect layer (quality settling into buildings, +30% at the top) is the next step and is not written.
+> Running this line today buys you metal with a nice number on it and nothing else. **This is stated
+> deliberately — please don't report it as a bug.**
+
+### What quality is: a property of a stack, not a new item
+
+DSP has nowhere to hang per-item or per-stack metadata — the `Cargo` struct is full, and this mod's
+four-axis alloy properties and the cargo stacking `inc` byte have both hit that same wall. So "refined
+copper" cannot be a second `ItemProto`: **one "High-Purity X" per metal is enumeration**, and 21 metals
+times three tiers is 63 items, which the replicator grid simply cannot hold.
+
+Quality is therefore an **additive point quantity**, structurally identical to proliferator points:
+
+- A stack records the **total for the whole stack**; per-item quality is total ÷ count
+- Merge two stacks and both the totals and the counts add — **the weighted average falls out on its own,
+  with no extra rule**
+- Split half off and half the points go with it
+
+Mixing in a batch of crude stock pulls the average down, which is exactly the pressure the design wants.
+The ceiling is **100 points per item**.
+
+### The only source: the Isotopic Refinery
+
+**Mined ore has quality 0.** That is not "not done yet", it is the rule: quality is not mined, it is
+refined. To get any, you have to run metal through the **Isotopic Refinery** (category 12, slot 12,
+recipe type 18, 180 MW).
+
+It is the eleventh mega building, and its three recipes are three real industrial purification processes:
+
+| Tier | Process | Reagent | Yield | Quality/item | Time |
+|---|---|---|---|---|---|
+| I | Electrorefining | Electrolyte x2 | 80% | 50 | 10 s |
+| II | Zone Melting | Nitrogen x10 | 40% | 75 | 15 s |
+| III | Carbonyl Refining | Carbon Monoxide x2 | 15% | 100 | 20 s |
+
+100 items go in per craft. **The yield *is* the cost** — there is no second cost to design. Purity was
+never something you save, it is something you select for, and what you throw away is the price. The three
+tiers also gate on different things: tier I needs only sulfuric acid and water, both available locally;
+tier II needs nitrogen collected from a gas giant (**a logistics gate, not a chemistry one**); tier III
+eats carbon monoxide, which comes from water gas — so **the gate on top-grade quality is the whole C1
+chemical chain**.
+
+Electrolyte is a new item added for this line (sulfuric acid + water + a copper salt, mixed in a chemical
+plant). It is not consumed: it only carries the copper across one atom at a time.
+
+### The feed is ingots, not ore — and that is precisely why the quality system exists
+
+It looks backwards at first: the refinery eats **Copper Ingot** and produces **Copper Ingot**. Two
+reasons, and you need both.
+
+**One: you do not have those ores.** This mod's Advanced Mining Machine outputs the **finished product
+directly** for copper ore, silicon ore, titanium ore and three rare veins (see section II), so with an
+ore-based feed the copper line could not even be supplied. Ingots, by contrast, are what every ore turns
+into eventually, smelter or no smelter.
+
+**Two: same-item-in-and-out is the only way out.** Since a second `ItemProto` is off the table, "refined
+copper" and "crude copper" have to be the same item, with the difference recorded on that stack's
+quality — which is exactly what the quality system was built for. The refinery line is its first and
+best-fitting use.
+
+The panel will therefore show rows like "Copper Ingot x100 -> Copper Ingot x80", which looks like a pure
+loss. **The quality figure is printed on the same line**; without it you genuinely could not tell what the
+machine is doing.
+
+### All three tiers are universal: each building picks its own metal
+
+The three recipes are not "one for copper, one for silicon, one for iron" — that would make three dead
+recipes. They are **three universal templates**: click the row on the panel and choose a metal from a
+restricted list, and that building refines that metal. One plant on copper and the next on tungsten run
+the same recipe.
+
+That list is **derived, not listed in config**:
+
+1. First the Advanced Mining Machine's product map (`productMap` in `advancedminer.json`) — the question
+   "does this ore have exactly one obvious downstream" has already been answered there;
+2. Then the ingot declared by this mod's own ore entries;
+3. Only if neither applies does it scan vanilla recipes, and then **only smelting recipes**, taking the
+   first product that is neither a fluid nor another ore.
+
+So adding an ore — yours or another mod's — grows the list by itself, with no edit here. **The whole table
+is printed to the log on every launch** (`可提纯的金属`), and each row names which of the three rules and
+which recipe decided it. That log is the only acceptance test available, because the vanilla recipe table
+lives in `resources.assets` and cannot be read offline at all.
+
+A typical galaxy gives 17: Iron, Copper, High-Purity Silicon, Titanium, Stone Brick, Energetic Graphite,
+Diamond, Crystal Silicon, Graphene, Carbon Nanotube, plus the seven ingots Cobalt / Aluminium / Lithium /
+Manganese / Chromium / Vanadium / Tungsten.
+
+**Re-refining does not compound.** What is injected is a *fixed amount per item*, not an increment on the
+existing quality, so feeding the output back in only burns one more yield step per pass.
+
+### Where you can see it
+
+Quality is a property of a **container**, so it can never appear in an item tooltip (those only know about
+the item proto). It shows up in two places:
+
+- **Every logistics station storage slot**: a "Quality N" label at the right end of the count bar, where N
+  is the **per-item** figure rather than the stack total — the total moves with the count and tells you
+  nothing about how good the goods are.
+- **The refinery panel**: the line under the picker row spells out input -> output, quality and time.
+
+A mega building's 30 slots are invisible to the player (clicking it opens the recipe window), so for the
+refinery that panel is the **only** place the number can be read.
+
+### The save format changed
+
+Quality has to be saved, so `CargoContainer`'s version goes from 2 to 3: **a save written with this mod
+can no longer be opened without it**, while older saves still load normally (quality reads as 0). That is
+consistent with the preloader policy already stated at the top of the README.
+
+One known gap: **the stack a Automatic Piler is part-way through building does not save its quality** —
+its `Import` does not retain a version number, so there is nothing to branch on. The loss is bounded at
+one in-progress stack per piler.
+
+### Config
+
+The three recipes live in the top-level `recipes` block of `ores.json`, each carrying two fields:
+
+- `quality` — points per item on the product (0 = none, which is what almost every recipe has)
+- `yield` — 0~1, **how many come out per hundred that go in**
+
+Rebuild after editing, or drop a same-named file into the profile to override it without compiling, as
+described in section XIV.
+
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The ten mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `megabuildings.json` | The eleven mega buildings, the tab, speed, built-in logistics station, replicator page count |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
