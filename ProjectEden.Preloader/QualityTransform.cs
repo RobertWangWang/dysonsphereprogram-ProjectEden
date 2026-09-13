@@ -383,8 +383,11 @@ namespace ProjectEden.Preloader
                 // 也可能一开始就不在可用集合里（它另有一处赋值），那时第一轮 doomed 是空的、
                 // 直接 break，剪枝从来没跑过——留下的合成语句会以「拼不出来」挡住整个变换，
                 // 而它描述的那件事其实不需要做。
-                stmts.RemoveAll(st => st.Synth && (Orphan(m, code, st.To, carriers)
-                                                   || Orphan(m, code, st.From, carriers)));
+                // **只按目的地剪。** 也按来源剪过一版，那是错的：
+                // `V_4 = V_3 × 每件品质分` 里 V_3 只是个件数，原样重放当系数就行，
+                // 它不是载荷局部也不需要是——按来源剪会把这条语句连同下游整族一起砍掉。
+                // 来源真的不行时，Build 会失败、目的地进 doomed，下一轮照样剪得掉。
+                stmts.RemoveAll(st => st.Synth && Orphan(m, code, st.To, carriers));
 
                 var doomed = new HashSet<VariableDefinition>();
 
@@ -681,7 +684,7 @@ namespace ProjectEden.Preloader
             "ldfld:PAY stloc",      // local = X.inc
             "ldfld:PAY div stloc",  // local = X.inc / count（求等级）
             "ldc stloc",            // local = 0（零初始化，孪生值也是 0）
-            "ldcN stloc",           // local = 非零常量（夹取，品质不动）
+            "recalc stloc",         // local = 与品质无关的重算（夹取／下标／封顶，品质不动）
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
             "call:get_Value ldfld:PAY stloc",
@@ -834,8 +837,21 @@ namespace ProjectEden.Preloader
             }
             while (grew);
 
-            // (2) 零初始化。`ldc ; stloc` 自成一条语句：ldc 压一个、stloc 弹一个，
-            // 栈深进出都是零，所以只看前一条指令就够，不必再跑一遍切分。
+            // (2) 剩下的每一处赋值——**这一趟要等上面收敛之后再跑**。
+            //
+            // 判据是「右边带不带品质」：右边有载荷字段、载荷参数或另一个载荷局部，
+            // 才是真的在改这个局部所代表的品质；否则它只是在**重算一个和品质无关的量**。
+            //
+            //   `V = 0`            声明时的零初始化 → 孪生也是 0。
+            //   `if (lv > 10) lv = 10`   夹取，给增产表当下标 → 品质那边没有这张表。
+            //   `lv = lv + 1`            走表的下标自增。
+            //   `V_11 = served * 10`     把点数夹到「每件最多 10 点」。
+            //
+            // 后三种的孪生都是**什么都不做**：物品没变，它们所代表的品质就没变。
+            // 清成 0 会在只是夹一下的路径上把品质抹掉，而那正是「品质分／件」最该保住的量。
+            //
+            // 要等收敛是因为「右边带不带品质」依赖完整的载荷局部集合：先跑会把
+            // `V_a = V_b`（V_b 稍后才成为载荷）误判成与品质无关。
             for (var i = 1; i < code.Count; i++)
             {
                 if (taken.Contains(i) || !IsStloc(code[i])) continue;
@@ -844,21 +860,19 @@ namespace ProjectEden.Preloader
 
                 if (v == null || !cand.Contains(v)) continue;
 
-                if (!code[i - 1].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal)) continue;
-
-                // 零和非零要分开，它们不是一回事：
-                //   `V = 0` 是声明时的零初始化 → 孪生也是 0。
-                //   `V = 10` 是**夹取**（`if (level > 10) level = 10`，给增产表当下标用）
-                //            → 品质那边没有这张表，夹取不该动品质，孪生保持原值。
-                // 合成一个名字让报告能分开数——把两者当成同一件事，会在夹取那一支上
-                // 把品质清零，而那正是「品质分／件」最该保住的地方。
-                bool zero = code[i - 1].OpCode == OpCodes.Ldc_I4_0;
-
-                extra.Add(new Stmt
+                if (code[i - 1].OpCode == OpCodes.Ldc_I4_0)
                 {
-                    From = i - 1, To = i, Synth = true,
-                    Core = zero ? "ldc stloc" : "ldcN stloc",
-                });
+                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldc stloc", Synth = true });
+
+                    continue;
+                }
+
+                int[] va = ArgStarts(code, i, 1);
+
+                if (va == null || !PureRange(code, va[0], i - 1)) continue;
+                if (CarriesQuality(m, code, va[0], i - 1, cand, ctx)) continue;
+
+                extra.Add(new Stmt { From = va[0], To = i, Core = "recalc stloc", Synth = true });
             }
 
             return extra;
@@ -1257,6 +1271,15 @@ namespace ProjectEden.Preloader
             // rem 是余下的点数，n 是「带 level 点的件数」，结果是**件数**不是点数。
             // 按「认不出的一侧记 0」去孪生它，会得到一个假的品质值往下游流，
             // 而下游拿它去乘、去减真实品质——不报错，品质凭空多出来或少掉。
+            // 例外：一侧是**常量**时原样重放，而不是要求它也带品质。
+            // `(点数/件数) × 新件数 + 0.5` 里那个 0.5 是四舍五入项，品质那边同样要加——
+            // 它不是另一个量纲，是同一个算式的一部分。
+            bool lc = lt == lf && code[lf].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal);
+            bool rc = rt == rf && code[rf].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal);
+
+            if (lv == null && lc && rv != null) lv = new List<Instruction> { Clone(code[lf]) };
+            if (rv == null && rc && lv != null) rv = new List<Instruction> { Clone(code[rf]) };
+
             if (lv == null || rv == null) return null;
 
             var sum = new List<Instruction>();
@@ -1286,6 +1309,31 @@ namespace ProjectEden.Preloader
             VariableDefinition v = VarOf(m, code[at]);
 
             return v != null && !carriers.Contains(v);
+        }
+
+        /// <summary>
+        /// 这段表达式里有没有<b>品质来源</b>：主干道载荷字段、载荷参数，或另一个载荷局部。
+        ///
+        /// 「带不带品质」不能用「TwinValue 拼不拼得出来」来判——常量拼得出来（是 0），
+        /// 可它并不是一个品质来源。两者混同会把「重算一个与品质无关的量」当成
+        /// 「把品质改成 0」。
+        /// </summary>
+        private static bool CarriesQuality(MethodDefinition m, IList<Instruction> code, int from, int to,
+            ICollection<VariableDefinition> cand, Ctx ctx)
+        {
+            for (int k = from; k <= to; k++)
+            {
+                if (code[k].Operand is FieldReference fr
+                    && ctx.Twin.ContainsKey(fr.DeclaringType.FullName + "::" + fr.Name)) return true;
+
+                if (IsLdloc(code[k]) && VarOf(m, code[k]) is VariableDefinition v && cand.Contains(v))
+                    return true;
+
+                if (IsLdarg(code[k]) && ParamOf(m, code[k]) is ParameterDefinition p
+                    && ctx.ParamSlot.ContainsKey(p)) return true;
+            }
+
+            return false;
         }
 
         private static bool IsLdarg(Instruction i) =>
@@ -1662,9 +1710,9 @@ namespace ProjectEden.Preloader
                 // 「每一处赋值都要能发射」这条规则会因为这一处而把 V_3 判死，
                 // 连带它后面三处真正的 `V_3 = storage[i].inc` 全部拼不出来。
                 // 实测 StationComponent::InternalTickLocal 就是这样卡住的。
-                // V = <非零常量>：夹取，品质不动。**空列表不是失败**——
-                // 这条语句确实什么都不用发射，而那和「拼不出来」是两回事。
-                case "ldcN stloc":
+                // V = <与品质无关的重算>：夹取、走表下标、按件数封顶。品质不动。
+                // **空列表不是失败**——这条语句确实什么都不用发射，而那和「拼不出来」是两回事。
+                case "recalc stloc":
                     return VarOf(ctx.Method, store) is VariableDefinition cv
                            && ctx.Locals.ContainsKey(cv)
                         ? new List<Instruction>()
@@ -1782,14 +1830,21 @@ namespace ProjectEden.Preloader
             // stind.i4 在 to，运算符在 to-1
             if (job.To - 1 < job.From) return null;
 
-            Instruction op = code[job.To - 1];
+            // 加宽之后传送带那侧是 `add ; conv.i2 ; stind.i2`——收窄那一条要跳过。
+            // 孪生字段是 Int32，本来就不需要收窄，所以只是不复制它。
+            int opAt = job.To - 1;
+
+            if (opAt > job.From && code[opAt].OpCode.Name.StartsWith("conv.", StringComparison.Ordinal))
+                opAt--;
+
+            Instruction op = code[opAt];
 
             if (op.OpCode != OpCodes.Add && op.OpCode != OpCodes.Sub) return null;
 
             // 找 dup（它后面紧跟 ldind.i4）
             var dupAt = -1;
 
-            for (int k = job.From; k < job.To - 1; k++)
+            for (int k = job.From; k < opAt; k++)
                 if (code[k].OpCode == OpCodes.Dup && IsLdind(code[k + 1]))
                 {
                     dupAt = k;
@@ -1816,7 +1871,7 @@ namespace ProjectEden.Preloader
             outp.Add(Instruction.Create(OpCodes.Dup));
             outp.Add(Instruction.Create(OpCodes.Ldind_I4));
 
-            List<Instruction> val = TwinValue(ctx, code, dupAt + 2, job.To - 2);
+            List<Instruction> val = TwinValue(ctx, code, dupAt + 2, opAt - 1);
 
             if (val == null) return null;
 
@@ -2227,7 +2282,7 @@ namespace ProjectEden.Preloader
             // local = <常量> → twinLocal = 0。**它不是按载荷切出来的**，
             // 是载荷局部认定之后反过来补进语句表的，理由见 Build 里那一段。
             "ldc stloc",
-            "ldcN stloc",
+            "recalc stloc",
 
             // localB = localA → twinB = twinA。同样是补进去的。
             "ldloc stloc",
@@ -2311,7 +2366,7 @@ namespace ProjectEden.Preloader
             "stfld:PAY",                                            // X.inc = 栈上的值
             "ldfld:PAY stloc",                                      // local = X.inc
             "ldc stloc",                                            // local = 0（零初始化）
-            "ldcN stloc",                                           // local = 非零常量（夹取）
+            "recalc stloc",                                         // local = 与品质无关的重算
             "ldloc stloc",                                          // local = 另一个载荷局部
             "ldarg:PAY stloc",                                      // local = 载荷参数
             "call:split_inc stloc",                                 // local = split_inc(...)
