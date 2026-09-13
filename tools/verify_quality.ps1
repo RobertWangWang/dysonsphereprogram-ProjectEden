@@ -161,7 +161,7 @@ $vFound = Field $vr "Added"
 
 foreach ($b in $vBlock) { Check $false $b }
 Check ($vBlock.Count -eq 0) "re-derived twin check reported no problems"
-Check ($vFound.Count -eq 30) "twin field count is 30 (got $($vFound.Count))"
+Check ($vFound.Count -eq 27) "twin field count is 27 (got $($vFound.Count))"
 
 # 3. Cargo specifically - this is the one whose struct size the GPU path cares about
 $cargo = $mod3.GetType("Cargo")
@@ -193,81 +193,41 @@ Check ($broken -eq 0) "all branch targets still resolve across $checked method b
 $asm3.Dispose()
 
 # ============================================================================
-# Stage 1b: twin parameters + call-site fixups, on top of the 1a result.
-# ============================================================================
 
-Write-Host ""
-Write-Host "=== stage 1b: twin parameters + call sites ===" -ForegroundColor Cyan
-
-$out2 = Join-Path $work "Assembly-CSharp.quality1b.dll"
-$asm4 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out, $rp2)
-
-$paramT = $pre.GetType("ProjectEden.Preloader.QualityParamAdder")
-$papply = $paramT.GetMethod("Apply", [Reflection.BindingFlags]"NonPublic,Static")
-$pr     = $papply.Invoke($null, @($asm4.MainModule))
-
-foreach ($n in (Field $pr "Notes")) { Write-Host "  note: $n" }
-
-$pBlockers = Field $pr "Blockers"
-if ($pBlockers.Count -gt 0) {
-    Write-Host "=== 1b BLOCKERS ($($pBlockers.Count)) ===" -ForegroundColor Red
-    foreach ($b in $pBlockers) { Write-Host "  $b" -ForegroundColor Red }
-    $asm4.Dispose()
-    exit 1
-}
-
-Write-Host ("  methods {0}  slots {1} (byref {2})  call sites {3}  bodies {4}" -f `
-    (Field $pr "Methods"), (Field $pr "Slots"), (Field $pr "ByRefSlots"), `
-    (Field $pr "CallSites"), (Field $pr "TouchedBodies"))
-
-$asm4.Write($out2)
-$asm4.Dispose()
-Write-Host "  written: $out2"
-
-Write-Host ""
-Write-Host "=== 1b re-read assertions ===" -ForegroundColor Cyan
-$asm5 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out2, $rp2)
-$mod5 = $asm5.MainModule
-
-# The decisive check: after write/re-read, EVERY call site of a widened method must be
-# immediately preceded by exactly the quality arguments we push. A missed call site
-# leaves the stack one value short, and that is reported by nothing else.
-$pverify = $paramT.GetMethod("Verify", [Reflection.BindingFlags]"NonPublic,Static")
-$vr2     = $pverify.Invoke($null, @($mod5))
-$v2Block = Field $vr2 "Blockers"
-
-foreach ($b in $v2Block) { Check $false $b }
-Check ($v2Block.Count -eq 0) "every widened call site is preceded by its quality arguments"
-Check ((Field $vr2 "CallSites") -eq (Field $pr "CallSites")) `
-    ("call site count survives write/re-read ({0} vs {1})" -f (Field $vr2 "CallSites"), (Field $pr "CallSites"))
-
-# 1a's fields must still be intact after 1b touched ~700 method bodies
-$vr3 = $verify.Invoke($null, @($mod5))
-Check ((Field $vr3 "Blockers").Count -eq 0) "1a twin fields still intact after 1b"
-
-# branch targets again - 1b DOES change body lengths, so this is no longer trivial
-$broken2 = 0; $checked2 = 0
-foreach ($t in $mod5.Types) {
+# 5. MOD COMPATIBILITY: no method signature may differ from vanilla.
+#
+#    This is a standing guard, not a formality. An earlier attempt appended a quality
+#    parameter to 90 methods; measuring the profile afterwards showed UXAssist makes 12
+#    direct calls into that set and InstantDelivery 2 - and InstantDelivery is a declared
+#    dependency in this mod's own manifest. Every such call is a MemberRef compiled
+#    against vanilla, so it throws MissingMethodException the first time it runs, in
+#    someone else's mod, with no compile-time signal anywhere.
+#
+#    Quality therefore carries across method boundaries WITHOUT touching signatures.
+#    If this check ever fails, that decision has been silently reversed.
+$origAsm = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($target, $rp2)
+$sigDiff = 0
+$sigShown = 0
+foreach ($t in $origAsm.MainModule.Types) {
+    $t2 = $mod3.GetType($t.FullName)
+    if ($t2 -eq $null) { continue }
     foreach ($m in $t.Methods) {
-        if (-not $m.HasBody) { continue }
-        $checked2++
-        foreach ($i in $m.Body.Instructions) {
-            $op = $i.Operand
-            if ($op -is [Mono.Cecil.Cil.Instruction]) { if ($op.Offset -lt 0) { $broken2++ } }
-            elseif ($op -is [Mono.Cecil.Cil.Instruction[]]) {
-                foreach ($x in $op) { if ($x.Offset -lt 0) { $broken2++ } }
-            }
+        $m2 = $t2.Methods | Where-Object { $_.Name -eq $m.Name -and $_.Parameters.Count -eq $m.Parameters.Count }
+        if ($m2 -eq $null) {
+            $sigDiff++
+            if ($sigShown -lt 5) { Write-Host ("        signature changed or missing: {0}::{1}" -f $t.FullName, $m.Name) -ForegroundColor Red; $sigShown++ }
         }
     }
 }
-Check ($broken2 -eq 0) "all branch and switch targets resolve after 1b ($checked2 bodies)"
+Check ($sigDiff -eq 0) "no method signature differs from vanilla (mod compatibility preserved)"
 
-$asm5.Dispose()
+$origAsm.Dispose()
+$asm3.Dispose()
 
 Write-Host ""
 if ($fail -gt 0) {
     Write-Host "$fail assertion(s) FAILED" -ForegroundColor Red
     exit 1
 }
-Write-Host "stages 1a + 1b OK - fields and parameters in place, re-read clean" -ForegroundColor Green
+Write-Host "stage 1a OK - fields added, signatures untouched, assembly re-read clean" -ForegroundColor Green
 exit 0

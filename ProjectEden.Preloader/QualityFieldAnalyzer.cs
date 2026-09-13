@@ -87,8 +87,6 @@ namespace ProjectEden.Preloader
 
             // ── 搬运途中 ──
             "InserterComponent::itemInc",
-            "CourierData::inc",
-            "DroneData::inc",
             "ShipData::inc",
 
             // ── 生产 ──
@@ -111,7 +109,6 @@ namespace ProjectEden.Preloader
             "Mecha::ammoInc",
 
             // ── 零散容器 ──
-            "TrashObject::inc",
             "ItemPackage::inc",
             "CargoView::inc",
             "CountInc::inc",
@@ -120,6 +117,45 @@ namespace ProjectEden.Preloader
             // ——这正是那段反查存在的理由：漏一个缓冲区，品质会在那里静默蒸发，而所有计数都正常。
             "IDCNTINC::inc",
             "IDCNTMAX::inc",
+        };
+
+        /// <summary>
+        /// <b>会被原样上传到 GPU 的载荷结构体——暂时不加孪生字段。</b>
+        ///
+        /// <b>这是实测撞出来的，而且是我漏了一整族。</b> 给 <c>TrashObject</c> 加了一个 Int32
+        /// 之后它从 44 涨到 48 字节，而 <c>TrashContainer.Draw</c> 的 <c>ComputeBuffer</c>
+        /// stride 是写死的 44，游戏一开就崩：
+        /// <code>
+        ///   SetData(): One of C# data stride (48 bytes) and Buffer stride (44 bytes)
+        ///   should be multiple of other.
+        /// </code>
+        ///
+        /// <b>教训是本仓库自己那条规矩的原样重演：把一族枚举一遍。</b>
+        /// 我枚举了「装着物品的结构体」，却没枚举「哪些结构体要原样喂给 GPU」——
+        /// 而后者在 CLAUDE.md 里为 <c>Cargo</c> 写了整整一节，我却默认了 <c>Cargo</c> 是唯一一个。
+        /// 全模块扫 <c>ComputeBuffer.SetData</c> 的实参类型，答案是<b>四个</b>：
+        /// <list type="bullet">
+        /// <item><c>Cargo</c> — <c>CargoContainer.Draw</c>。**已经有对策**：
+        ///       <c>CargoWidening.UploadRepacked</c> 重打包成 32 字节，所以它不在这份名单里。</item>
+        /// <item><c>TrashObject</c> — <c>TrashContainer.Draw</c>。</item>
+        /// <item><c>DroneData</c> — <c>LogisticDroneRenderer.Update</c>。</item>
+        /// <item><c>CourierData</c> — <c>LogisticCourierRenderer.Update</c>。</item>
+        /// </list>
+        /// （<c>ShipData</c> 安全：运输船上传的是另一个结构体 <c>ShipRenderingData</c>。）
+        ///
+        /// <b>摘掉它们的代价不一样，必须说清楚：</b>
+        /// <c>TrashObject</c> 是扔在地上的东西，丢掉品质完全可以接受。
+        /// 但 <c>DroneData</c> / <c>CourierData</c> 是<b>运输机在飞的那一趟货</b>——
+        /// 那是站与站之间的主干道，品质在那里蒸发是个真缺口，**1c 必须解决**。
+        /// 可选路线记在设计稿里：给这三个也做重打包（因为新字段追加在末尾，
+        /// 原布局就是新结构体的前缀，按 <c>原 stride</c> 盲拷即可，不用逐字段写渲染副本），
+        /// 或者给 <c>StationComponent</c> 加一条和 <c>workDroneDatas</c> 平行的品质数组。
+        /// </summary>
+        private static readonly string[] GpuUploaded =
+        {
+            "TrashObject::inc",
+            "DroneData::inc",
+            "CourierData::inc",
         };
 
         /// <summary>
@@ -290,6 +326,7 @@ namespace ProjectEden.Preloader
             if (r.Blockers.Count > 0) return r;
 
             FindSuspects(module, payload, r);
+            CheckGpuUploads(module, payload, r);
 
             // ── 2. 按方法分三类。声明是定义，启发式只用来抓「清单漏了的新形状」 ──
             var declared = new HashSet<string>(DeclaredMixed, StringComparer.Ordinal);
@@ -390,6 +427,11 @@ namespace ProjectEden.Preloader
             IDictionary<string, FieldDefinition> payload, Report r)
         {
             var known = new HashSet<string>(NotPayload, StringComparer.Ordinal);
+
+            // GPU 上传那三个是**故意摘掉的载荷**，不是「不是载荷」。放进 known 只是
+            // 为了不让它们混在噪声里，下面会单独报一条，因为那是一个已知缺口而不是结论。
+            foreach (string g in GpuUploaded) known.Add(g);
+
             var stale = new HashSet<string>(known, StringComparer.Ordinal);
 
             foreach (TypeDefinition t in AllTypes(module))
@@ -423,6 +465,13 @@ namespace ProjectEden.Preloader
             r.Notes.Add(r.Suspects.Count == 0
                 ? $"反查：清单外没有形状像载荷的新字段（{known.Count - stale.Count} 个已知非载荷已排除）"
                 : $"反查：{r.Suspects.Count} 个字段形状像载荷、既不在清单也不在排除表里，逐个确认");
+
+            // 已知缺口必须每次都说出来。**沉默的缺口等于没记住的缺口**——
+            // 尤其 DroneData / CourierData 是站与站之间的主干道，品质在那儿蒸发是真问题。
+            r.Notes.Add(
+                $"**已知缺口**：{GpuUploaded.Length} 个载荷字段因为所属结构体要原样喂给 GPU 而暂时没加孪生（" +
+                string.Join("、", GpuUploaded) +
+                "）。TrashObject 无所谓；DroneData / CourierData 是运输机在飞的那趟货，1c 必须解决。");
         }
 
         /// <summary>
@@ -430,6 +479,72 @@ namespace ProjectEden.Preloader
         /// 真正的判据是数据流（一个参数被当实参传给了已孪生的参数，它自己也得孪生），
         /// 那一步属于改写阶段，这里先把种子数量报出来当基线。
         /// </summary>
+        /// <summary>
+        /// <b>有没有哪个要加字段的结构体，会被原样喂给 GPU。</b>
+        ///
+        /// 这一项是<b>进游戏崩了一次之后补的</b>：给结构体加 4 个字节，它的
+        /// <c>ComputeBuffer</c> stride 就对不上了，而那个 stride 在游戏代码里是写死的字面量。
+        /// 崩的形式是启动即 <c>ArgumentException</c>，栈里只有 Unity 和渲染方法，
+        /// 指不到「你加了一个字段」。
+        ///
+        /// 判据是<b>结果而不是我的记忆</b>：全模块找 <c>ComputeBuffer.SetData</c>，
+        /// 往回看它拿到的数组字段是什么元素类型，命中载荷清单就是 Blocker。
+        /// <c>Cargo</c> 例外，因为那一路已经有 <c>CargoWidening.UploadRepacked</c>
+        /// 在运行时重打包。
+        /// </summary>
+        private static void CheckGpuUploads(ModuleDefinition module,
+            IDictionary<string, FieldDefinition> payload, Report r)
+        {
+            // 运行时已经有重打包对策的，不算问题
+            var handled = new HashSet<string>(new[] { "Cargo" }, StringComparer.Ordinal);
+
+            var owners = new HashSet<string>(
+                payload.Values.Select(f => f.DeclaringType.FullName), StringComparer.Ordinal);
+
+            var hits = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (TypeDefinition t in AllTypes(module))
+            foreach (MethodDefinition m in t.Methods)
+            {
+                if (!m.HasBody) continue;
+
+                var code = m.Body.Instructions;
+
+                for (var i = 0; i < code.Count; i++)
+                {
+                    var mr = code[i].Operand as MethodReference;
+
+                    if (mr == null || mr.Name != "SetData") continue;
+                    if (mr.DeclaringType.Name != "ComputeBuffer") continue;
+
+                    // 往回找最近的一个「数组字段」装载，那就是喂进去的东西
+                    for (int j = i - 1; j >= 0 && j >= i - 8; j--)
+                    {
+                        if (!(code[j].Operand is FieldReference fr)) continue;
+                        if (!(fr.FieldType is ArrayType at)) continue;
+
+                        string elem = at.ElementType.FullName;
+
+                        if (owners.Contains(elem) && !handled.Contains(elem))
+                            hits.Add($"{elem}（{t.FullName}::{m.Name}）");
+
+                        break;
+                    }
+                }
+            }
+
+            foreach (string h in hits.OrderBy(x => x, StringComparer.Ordinal))
+                r.Blockers.Add(
+                    $"载荷结构体 {h} 会被原样上传到 ComputeBuffer——" +
+                    "加字段会让它的 stride 和游戏里写死的那个对不上，表现是启动即 ArgumentException，" +
+                    "栈里指不到你加的字段。要么把它放进 GpuUploaded 暂时摘掉，" +
+                    "要么照 CargoWidening.UploadRepacked 的做法给它加重打包");
+
+            r.Notes.Add(hits.Count == 0
+                ? "GPU 上传核对：清单里的结构体没有一个被原样喂给 ComputeBuffer"
+                : $"GPU 上传核对：{hits.Count} 个结构体会被喂给 GPU，见 Blockers");
+        }
+
         /// <summary>
         /// 要长孪生参数的方法，以及各自哪几个参数位。
         ///

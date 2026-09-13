@@ -43,8 +43,14 @@ namespace ProjectEden.Preloader
             internal int AlreadyThere;
         }
 
-        /// <summary>期望新增的孪生字段数。和 <see cref="QualityFieldAnalyzer"/> 的清单长度一致。</summary>
-        internal const int ExpectedFields = 30;
+        /// <summary>
+        /// 期望新增的孪生字段数。和 <see cref="QualityFieldAnalyzer"/> 的清单长度一致。
+        ///
+        /// 30 → 27：<c>TrashObject</c> / <c>DroneData</c> / <c>CourierData</c> 会被原样上传到
+        /// <c>ComputeBuffer</c>，加字段会让 stride 和游戏里写死的那个对不上（实测启动即崩）。
+        /// 理由和后续路线见 <c>QualityFieldAnalyzer.GpuUploaded</c>。
+        /// </summary>
+        internal const int ExpectedFields = 27;
 
         internal static Report Apply(ModuleDefinition module)
         {

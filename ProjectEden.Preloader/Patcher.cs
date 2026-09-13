@@ -81,40 +81,8 @@ namespace ProjectEden.Preloader
             }
 
             Log.LogWarning(
-                $"物品品质：已添加 {q.Added.Count} 个孪生字段（阶段 1a）。");
-
-            AddQualityParams(assembly);
-        }
-
-        /// <summary>
-        /// 物品品质 · 阶段 1b：90 个方法长出品质尾参，678 个调用点补齐。
-        ///
-        /// <b>只在 1a 成功之后跑</b>——<see cref="QualityParamAdder"/> 自己也会复查一遍
-        /// 字段在不在，接一根不存在的管子没有意义。失败就什么都不改，
-        /// 游戏退回「字段在、管子没接」的状态，插件侧会照实报出来。
-        /// </summary>
-        private static void AddQualityParams(AssemblyDefinition assembly)
-        {
-            QualityParamAdder.Report p = QualityParamAdder.Apply(assembly.MainModule);
-
-            foreach (string n in p.Notes) Log.LogInfo(n);
-
-            if (!p.Applied)
-            {
-                Log.LogError($"物品品质：孪生参数**未添加**，共 {p.Blockers.Count} 条阻塞项：");
-
-                foreach (string b in p.Blockers) Log.LogError("  " + b);
-
-                Log.LogError(
-                    "字段还在，但方法之间传不了品质。插件侧会把这个状态报出来（BeltParamsPresent=false）。");
-
-                return;
-            }
-
-            Log.LogWarning(
-                $"物品品质：已添加 {p.Slots} 个品质尾参（{p.Methods} 个方法，引用型 {p.ByRefSlots} 个）、" +
-                $"补齐 {p.CallSites} 个调用点。管道已通，但此刻传的值恒为 0——" +
-                "真正让品质流动是 1c，所以游戏行为仍与不加时一致。");
+                $"物品品质：已添加 {q.Added.Count} 个孪生字段（阶段 1a）。" +
+                "它们现在恒为 0，方法之间还传不了品质——搬运层改走线程静态侧信道，见 物品品质.md。");
         }
     }
 }
