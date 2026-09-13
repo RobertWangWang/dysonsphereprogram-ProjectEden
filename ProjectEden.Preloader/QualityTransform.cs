@@ -368,19 +368,24 @@ namespace ProjectEden.Preloader
 
                 foreach (Stmt st in stmts)
                 {
-                    if (!DefinesCarrier.Contains(st.Core) || !Emitted.Contains(st.Core)) continue;
+                    if (!DefinesCarrier.Contains(st.Core)) continue;
 
                     VariableDefinition dv = VarOf(m, code[st.To]);
 
                     if (dv == null || !carriers.Contains(dv)) continue;
 
-                    if (Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To }) == null)
+                    if (!Emitted.Contains(st.Core)
+                        || Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To }) == null)
                         doomed.Add(dv);
                 }
 
                 if (doomed.Count == 0) break;
 
                 carriers.ExceptWith(doomed);
+
+                // 合成语句随它服务的局部一起消失——留着只会以「拼不出来」的身份挡住变换
+                stmts.RemoveAll(st => st.Synth && (Orphan(m, code, st.To, carriers)
+                                                   || Orphan(m, code, st.From, carriers)));
             }
 
             // 2) 逐语句匹配
@@ -554,6 +559,14 @@ namespace ProjectEden.Preloader
             internal int From;
             internal int To;
             internal string Core;
+
+            /// <summary>
+            /// <b>合成语句</b>：不是按载荷切出来的，是认定载荷局部之后反过来补进来的
+            /// （零初始化、复制、split_inc）。它只因为那个局部可用才存在，
+            /// 所以局部一旦作废，它必须跟着消失——否则它会以「拼不出来」的身份留在报告里，
+            /// 挡住整个变换，而它描述的那件事其实已经不需要做了。
+            /// </summary>
+            internal bool Synth;
         }
 
         /// <summary>
@@ -679,7 +692,7 @@ namespace ProjectEden.Preloader
 
                     taken.Add(i);
 
-                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldloc stloc" });
+                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldloc stloc", Synth = true });
 
                     if (cand.Add(dst)) grew = true;
                 }
@@ -692,13 +705,16 @@ namespace ProjectEden.Preloader
 
                     if (dst == null) continue;
 
-                    int[] a = SplitIncArgs(m, code, i - 1, out VariableDefinition mv);
+                    int[] a = SplitIncArgs(code, i - 1);
 
-                    if (a == null || mv == null || !cand.Contains(mv)) continue;
+                    // 这里**只认形状不判可行**：ref m 到底能不能给出孪生地址（载荷局部？
+                    // 载荷参数？载荷字段？）由发射器说了算，说不行时后面的收缩不动点
+                    // 会把这个局部再剔掉。在这里重判一遍等于把同一条规则写两份。
+                    if (a == null) continue;
 
                     taken.Add(i);
 
-                    extra.Add(new Stmt { From = a[0], To = i, Core = "call:split_inc stloc" });
+                    extra.Add(new Stmt { From = a[0], To = i, Core = "call:split_inc stloc", Synth = true });
 
                     if (cand.Add(dst)) grew = true;
                 }
@@ -717,7 +733,7 @@ namespace ProjectEden.Preloader
 
                 if (!code[i - 1].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal)) continue;
 
-                extra.Add(new Stmt { From = i - 1, To = i, Core = "ldc stloc" });
+                extra.Add(new Stmt { From = i - 1, To = i, Core = "ldc stloc", Synth = true });
             }
 
             return extra;
@@ -725,48 +741,155 @@ namespace ProjectEden.Preloader
 
         /// <summary>
         /// 认一次 <c>split_inc(ref n, ref m, p)</c> 调用：<paramref name="at"/> 是那条 call。
-        /// 认出来就返回三个（或四个，实例方法多一个 this）实参的起点，
-        /// 并从 <c>ref m</c> 取出被分走点数的那个局部。
+        /// 认出来就返回每个实参表达式的起点（实例方法多一个 this 在最前）。
         ///
-        /// <b>只认 <c>ldloca &lt;局部&gt;</c> 形式的两个 ref 实参。</b> 品质那边要发的是
-        /// <c>Split(n之后的值, ref m的孪生, p)</c>——第一个实参是<b>值</b>不是地址，
-        /// 而原版 split_inc 在调用里已经把 n 减掉了 p，所以调用之后读那个局部
-        /// 拿到的正是 Split 要的 countAfter。这层对应关系只在「n 是个局部」时成立，
-        /// 换成别的表达式就不成立了，所以宁可认不出来。
+        /// 按<b>参数类型</b>分，绝不按名字和个数——原版有两个同名重载
+        /// （Byte 那个是传送带侧、Int32 那个是仓储账本），这正是 CargoIncWidener 踩过的坑。
         /// </summary>
-        private static int[] SplitIncArgs(MethodDefinition m, IList<Instruction> code, int at,
-            out VariableDefinition mv)
+        private static int[] SplitIncArgs(IList<Instruction> code, int at)
         {
-            mv = null;
+            if (!IsSplitIncCall(code[at])) return null;
 
-            if (at < 0 || code[at].OpCode != OpCodes.Call && code[at].OpCode != OpCodes.Callvirt)
-                return null;
-
-            if (!(code[at].Operand is MethodReference mr) || mr.Name != "split_inc") return null;
-
-            // 原版有两个同名重载（byte 那个是传送带侧、Int32 那个是仓储账本），
-            // 按**参数类型**分，绝不按名字和个数——那正是 CargoIncWidener 踩过的坑。
-            if (mr.Parameters.Count != 3) return null;
-            if (!mr.Parameters[0].ParameterType.IsByReference) return null;
-            if (!mr.Parameters[1].ParameterType.IsByReference) return null;
-
+            var mr = (MethodReference)code[at].Operand;
             int argc = mr.Parameters.Count + (mr.HasThis ? 1 : 0);
-            int[] a = ArgStarts(code, at, argc);
 
-            if (a == null) return null;
+            return ArgStarts(code, at, argc);
+        }
 
-            int nAt = a[argc - 3];
-            int mAt = a[argc - 2];
-            int pAt = a[argc - 1];
+        private static bool IsSplitIncCall(Instruction i)
+        {
+            if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) return false;
+            if (!(i.Operand is MethodReference mr) || mr.Name != "split_inc") return false;
+            if (mr.Parameters.Count != 3) return false;
 
-            // 两个 ref 实参各自必须只有一条指令，而且是 ldloca
-            if (mAt - nAt != 1 || pAt - mAt != 1) return null;
-            if (code[nAt].OpCode != OpCodes.Ldloca && code[nAt].OpCode != OpCodes.Ldloca_S) return null;
-            if (code[mAt].OpCode != OpCodes.Ldloca && code[mAt].OpCode != OpCodes.Ldloca_S) return null;
+            return mr.Parameters[0].ParameterType.IsByReference
+                   && mr.Parameters[1].ParameterType.IsByReference;
+        }
 
-            mv = code[mAt].Operand as VariableDefinition;
+        /// <summary>
+        /// <c>split_inc(ref n, ref m, p)</c> 这个表达式的品质版：
+        /// <c>Split(n 调用后的值, ref m 的孪生, p)</c>，在栈上留下一个 int。
+        ///
+        /// 三件事各自都可能认不出来，认不出来就整条放弃：
+        ///
+        /// <b>n 取的是值不是址。</b> 原版调用返回时 n 已经被减掉了 p，而侧信道的
+        /// <c>Split</c> 要的正是这个「减完之后的件数」——所以孪生这边不需要再减一次，
+        /// 也**绝不能改成再调一次原版 split_inc**：那会把 n 再减一次 p，等于凭空吃掉物品。
+        ///
+        /// <b>m 要的是孪生的地址</b>，三种来源：载荷局部 → 孪生局部；载荷参数 → 侧信道
+        /// 寄存器（<c>ldsflda</c>，静态字段一样能取址）；载荷字段 → 孪生字段。
+        ///
+        /// <b>p 原样重放</b>，所以必须是纯取值。
+        /// </summary>
+        private static List<Instruction> SplitTwin(Ctx ctx, IList<Instruction> code, int at, int lo)
+        {
+            if (ctx.ChannelSplit == null) return null;
 
-            return a;
+            int[] a = SplitIncArgs(code, at);
+
+            if (a == null || a.Length < 3 || a[a.Length - 3] < lo) return null;
+
+            int nAt = a[a.Length - 3], mAt = a[a.Length - 2], pAt = a[a.Length - 1];
+
+            List<Instruction> n = SplitCountAfter(ctx, code, nAt, mAt - 1);
+            List<Instruction> mref = SplitTwinAddress(ctx, code, mAt, pAt - 1);
+
+            if (n == null || mref == null) return null;
+
+            var outp = new List<Instruction>();
+
+            outp.AddRange(n);
+            outp.AddRange(mref);
+
+            for (int k = pAt; k < at; k++)
+            {
+                if (!IsPureLoad(code[k])) return null;
+
+                outp.Add(Clone(code[k]));
+            }
+
+            outp.Add(Instruction.Create(OpCodes.Call,
+                ctx.Method.Module.ImportReference(ctx.ChannelSplit)));
+
+            return outp;
+        }
+
+        /// <summary><c>ref n</c> 那个实参在调用之后的<b>值</b>。</summary>
+        private static List<Instruction> SplitCountAfter(Ctx ctx, IList<Instruction> code, int from, int to)
+        {
+            if (from == to)
+            {
+                if (code[to].OpCode == OpCodes.Ldloca || code[to].OpCode == OpCodes.Ldloca_S)
+                {
+                    if (!(code[to].Operand is VariableDefinition v)) return null;
+
+                    return new List<Instruction> { Instruction.Create(OpCodes.Ldloc, v) };
+                }
+
+                ParameterDefinition p = ParamOf(ctx.Method, code[to]);
+
+                if (code[to].OpCode == OpCodes.Ldarga || code[to].OpCode == OpCodes.Ldarga_S)
+                    return p == null ? null : new List<Instruction> { Instruction.Create(OpCodes.Ldarg, p) };
+            }
+
+            // 字段地址：把地址表达式原样重放再解引用。地址表达式是纯取值，重放没有副作用。
+            if (!code[to].OpCode.Name.StartsWith("ldflda", StringComparison.Ordinal)) return null;
+
+            var outp = new List<Instruction>();
+
+            for (int k = from; k <= to; k++)
+            {
+                if (!IsStructural(code[k], false)) return null;
+
+                outp.Add(Clone(code[k]));
+            }
+
+            outp.Add(Instruction.Create(OpCodes.Ldind_I4));
+
+            return outp;
+        }
+
+        /// <summary><c>ref m</c> 那个实参对应的<b>孪生地址</b>。</summary>
+        private static List<Instruction> SplitTwinAddress(Ctx ctx, IList<Instruction> code, int from, int to)
+        {
+            if (from == to)
+            {
+                if (code[to].OpCode == OpCodes.Ldloca || code[to].OpCode == OpCodes.Ldloca_S)
+                {
+                    if (!(code[to].Operand is VariableDefinition v)) return null;
+                    if (!ctx.Locals.TryGetValue(v, out VariableDefinition tv)) return null;
+
+                    // 分类遍里孪生局部还没建，能走到这一步就说明拼得出来
+                    return tv == null
+                        ? new List<Instruction>()
+                        : new List<Instruction> { Instruction.Create(OpCodes.Ldloca, tv) };
+                }
+
+                if (code[to].OpCode == OpCodes.Ldarga || code[to].OpCode == OpCodes.Ldarga_S)
+                {
+                    ParameterDefinition p = ParamOf(ctx.Method, code[to]);
+
+                    if (p == null || !ctx.ParamSlot.TryGetValue(p, out int slot)
+                                  || slot >= ctx.Regs.Count) return null;
+
+                    return new List<Instruction> { Instruction.Create(OpCodes.Ldsflda, ctx.Regs[slot]) };
+                }
+            }
+
+            if (!code[to].OpCode.Name.StartsWith("ldflda", StringComparison.Ordinal)) return null;
+            if (!(code[to].Operand is FieldReference fr)) return null;
+            if (!ctx.Twin.ContainsKey(fr.DeclaringType.FullName + "::" + fr.Name)) return null;
+
+            var outp = new List<Instruction>();
+
+            for (int k = from; k <= to; k++)
+            {
+                if (!IsStructural(code[k], false)) return null;
+
+                outp.Add(CloneSwap(ctx, code[k]));
+            }
+
+            return outp;
         }
 
         /// <summary>
@@ -807,6 +930,17 @@ namespace ProjectEden.Preloader
                 return Instruction.Create(i.OpCode, (FieldReference)tf);
 
             return Clone(i);
+        }
+
+        /// <summary>这条指令引用了一个<b>已经作废</b>的载荷局部吗？</summary>
+        private static bool Orphan(MethodDefinition m, IList<Instruction> code, int at,
+            ICollection<VariableDefinition> carriers)
+        {
+            if (!IsStloc(code[at]) && !IsLdloc(code[at])) return false;
+
+            VariableDefinition v = VarOf(m, code[at]);
+
+            return v != null && !carriers.Contains(v);
         }
 
         private static bool IsLdloc(Instruction i) =>
@@ -907,6 +1041,7 @@ namespace ProjectEden.Preloader
 
                 // X.inc = <栈上的值>  →  X.qua = <那个值的品质版>
                 case "stfld:PAY":
+                case "call:split_inc stfld:PAY":
                 {
                     if (tf == null) return null;
 
@@ -943,6 +1078,8 @@ namespace ProjectEden.Preloader
             // 写进静态寄存器 Q，调用方读回来。**只认地址就是那个出参本身**——
             // 换成别的地址表达式就没有对应的寄存器可写，宁可认不出来。
             case "ldind.i4 ldfld:PAY add stind.i4":
+            case "ldind.i4 ldflda:PAY call:split_inc add stind.i4":
+            case "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4":
             {
                 if (job.To - job.From < 4) return null;
                 if (code[job.To].OpCode != OpCodes.Stind_I4) return null;
@@ -1037,46 +1174,20 @@ namespace ProjectEden.Preloader
             // 不能改成再调一次原版 split_inc：它会把 n **再**减一次 p，那是凭空吃掉物品。
             case "call:split_inc stloc":
             {
-                if (ctx.ChannelSplit == null) return null;
-
-                int[] sa = SplitIncArgs(ctx.Method, code, job.To - 1, out VariableDefinition smv);
-
-                if (sa == null || smv == null) return null;
-
                 VariableDefinition sdst = VarOf(ctx.Method, store);
 
-                if (sdst == null) return null;
-                if (!ctx.Locals.TryGetValue(smv, out VariableDefinition smt)) return null;
-                if (!ctx.Locals.TryGetValue(sdst, out VariableDefinition sdt)) return null;
+                if (sdst == null || !ctx.Locals.TryGetValue(sdst, out VariableDefinition sdt)) return null;
 
-                var snv = code[sa[sa.Length - 3]].Operand as VariableDefinition;
+                List<Instruction> sval = SplitTwin(ctx, code, job.To - 1, job.From);
 
-                if (snv == null) return null;
+                if (sval == null) return null;
 
-                // 第三个实参原样重放——必须是纯取值，否则重放会把副作用做第二遍
-                var sout = new List<Instruction>();
+                // 分类遍里孪生局部还没建，能走到这一步就说明拼得出来
+                if (sdt == null || sval.Count == 0) return new List<Instruction>();
 
-                for (int k = sa[sa.Length - 1]; k < job.To - 1; k++)
-                {
-                    if (!IsPureLoad(code[k])) return null;
+                sval.Add(Instruction.Create(OpCodes.Stloc, sdt));
 
-                    sout.Add(Clone(code[k]));
-                }
-
-                if (smt == null || sdt == null) return new List<Instruction>();
-
-                var body = new List<Instruction>
-                {
-                    Instruction.Create(OpCodes.Ldloc, snv),
-                    Instruction.Create(OpCodes.Ldloca, smt),
-                };
-
-                body.AddRange(sout);
-                body.Add(Instruction.Create(OpCodes.Call,
-                    ctx.Method.Module.ImportReference(ctx.ChannelSplit)));
-                body.Add(Instruction.Create(OpCodes.Stloc, sdt));
-
-                return body;
+                return sval;
             }
 
             // localB = localA  →  twinB = twinA
@@ -1192,6 +1303,12 @@ namespace ProjectEden.Preloader
                 case "ldflda:PAY dup ldind.i4 sub stind.i4":
                 case "ldfld:PAY ldc dup ldind.i4 add stind.i4":
                 case "ldc ldflda:PAY dup ldind.i4 add stind.i4":
+
+                // 值那一侧换成 split_inc(...) 或另一个载荷字段，目的地一侧完全没变——
+                // **值和目的地是正交的**，所以这里只是把形状名加进来，代码一行都不用改。
+                case "ldflda:PAY dup ldind.i4 call:split_inc add stind.i4":
+                case "ldflda:PAY dup ldind.i4 ldflda:PAY call:split_inc add stind.i4":
+                case "ldflda:PAY dup ldind.i4 ldfld:PAY add stind.i4":
                     return BuildReadModifyWrite(ctx, code, job);
 
                 default: return null;
@@ -1357,6 +1474,18 @@ namespace ProjectEden.Preloader
         /// </summary>
         private static List<Instruction> TwinValue(Ctx ctx, IList<Instruction> code, int from, int to)
         {
+            // (0) split_inc(ref n, ref m, p) 这个**表达式**的品质版。
+            //
+            // 放在 TwinValue 里而不是各写一个发射器，是因为它出现在五种不同的目的地上
+            // （加进字段、加进出参、直接赋值、存进局部、写进另一个字段），
+            // 而那五种目的地本来就已经各有发射器了——值和目的地是正交的。
+            if (to >= from && IsSplitIncCall(code[to]))
+            {
+                List<Instruction> sp = SplitTwin(ctx, code, to, from);
+
+                if (sp != null) return sp;
+            }
+
             var outp = new List<Instruction>();
 
             Instruction last = code[to];
@@ -1585,6 +1714,16 @@ namespace ProjectEden.Preloader
             // *outInc += X.inc → Q<槽位> += X.qua。把值带出方法的那一族，走侧信道。
             "ldind.i4 ldfld:PAY add stind.i4",
 
+            // split_inc 一族：值那一侧是「按比例分走点数」，目的地照旧。
+            // 它是剩下缺口里最大的一块，而**值和目的地正交**，所以真正新写的只有
+            // TwinValue 里那一个分支，五种目的地一起通。
+            "ldflda:PAY dup ldind.i4 call:split_inc add stind.i4",
+            "ldflda:PAY dup ldind.i4 ldflda:PAY call:split_inc add stind.i4",
+            "ldflda:PAY dup ldind.i4 ldfld:PAY add stind.i4",
+            "ldind.i4 ldflda:PAY call:split_inc add stind.i4",
+            "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
+            "call:split_inc stfld:PAY",
+
             // 数组本身的一族：分配、清零、改长度。孪生数组与原数组等长同生死，
             // 所以孪生语句就是同一条语句换个字段——**前提是整条语句没有别的副作用**。
             "ldnull stfld:PAY",
@@ -1613,6 +1752,12 @@ namespace ProjectEden.Preloader
             "ldfld:PAY ldc dup ldind.i4 add stind.i4",              // 数组元素 += v
             "ldc ldflda:PAY dup ldind.i4 add stind.i4",             // 同上，常数下标
             "ldind.i4 ldfld:PAY add stind.i4",                      // *out += X.inc
+            "ldflda:PAY dup ldind.i4 call:split_inc add stind.i4",  // X.inc += split_inc(...)
+            "ldflda:PAY dup ldind.i4 ldflda:PAY call:split_inc add stind.i4",
+            "ldflda:PAY dup ldind.i4 ldfld:PAY add stind.i4",       // X.inc += Y.inc
+            "ldind.i4 ldflda:PAY call:split_inc add stind.i4",      // *out += split_inc(..., ref X.inc, ...)
+            "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
+            "call:split_inc stfld:PAY",                             // X.inc = split_inc(...)
             "ldnull stfld:PAY",                                     // X.incServed = null
             "ldlen newarr stfld:PAY",                               // X.incServed = new int[n]
             "newarr stfld:PAY",                                     // 同上，长度在栈上
