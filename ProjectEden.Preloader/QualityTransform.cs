@@ -45,8 +45,14 @@ namespace ProjectEden.Preloader
             internal readonly List<string> Blockers = new List<string>();
             internal readonly List<string> Notes = new List<string>();
 
-            /// <summary>已孪生的语句数</summary>
+            /// <summary>已孪生的语句数（形状认得<b>而且</b>发射代码写好了）</summary>
             internal int Twinned;
+
+            /// <summary>形状认得、但发射代码还没写的语句数</summary>
+            internal int Recognized;
+
+            /// <summary>认得但没实现的形状 → 次数</summary>
+            internal readonly Dictionary<string, int> Pending = new Dictionary<string, int>(StringComparer.Ordinal);
 
             /// <summary>确认不需要孪生的语句数（取数组长度、判空、循环边界）</summary>
             internal int NoTwinNeeded;
@@ -191,11 +197,20 @@ namespace ProjectEden.Preloader
                         .Select(kv => $"{kv.Key}×{kv.Value}")
                         .ToArray()));
 
-            if (r.Unhandled.Count > 0)
-            {
+            CheckEmitters(r);
+
+            if (r.Pending.Count > 0)
                 r.Notes.Add(
-                    $"形状表还缺 {r.Unhandled.Count} 种（共 {r.Unhandled.Values.Sum()} 处）——" +
-                    "变换整个不生效，游戏与不装时一致。补齐形状表即可落地。");
+                    $"形状已识别但**发射代码还没写**：{r.Pending.Count} 种、共 {r.Recognized} 处。" +
+                    "它们和「没识别」一样会挡住变换——认得不等于做得到。");
+
+            if (r.Unhandled.Count > 0 || r.Pending.Count > 0)
+            {
+                if (r.Unhandled.Count > 0)
+                    r.Notes.Add(
+                        $"形状表还缺 {r.Unhandled.Count} 种（共 {r.Unhandled.Values.Sum()} 处）。");
+
+                r.Notes.Add("变换整个不生效，游戏与不装时一致。补齐并实现形状即可落地。");
 
                 return r;
             }
@@ -208,6 +223,19 @@ namespace ProjectEden.Preloader
             r.Applied = r.Blockers.Count == 0;
 
             return r;
+        }
+
+        /// <summary>
+        /// <b>发射器表不许比形状表超前。</b> <see cref="Emitted"/> 里出现了
+        /// <see cref="TwinShapes"/> 没有的形状，说明写了一个永远不会被调用的发射器——
+        /// 它看起来像「已经做了」，实际一次都不会跑。
+        /// </summary>
+        private static void CheckEmitters(Report r)
+        {
+            foreach (string e in Emitted)
+                if (!TwinShapes.Contains(e))
+                    r.Blockers.Add(
+                        $"发射器表里有 {e}，但形状表里没有——这个发射器永远不会被调用");
         }
 
         /// <summary>
@@ -298,7 +326,18 @@ namespace ProjectEden.Preloader
 
                 string core = CoreShape(code, from, to, twin);
 
-                if (TwinShapes.Contains(core)) { r.Twinned++; continue; }
+                // **只有写好发射代码的形状才算认得。** 光在 TwinShapes 里不算——
+                // 那会让变换报成功却什么都不做，品质恒为 0 而日志说一切正常。
+                if (TwinShapes.Contains(core))
+                {
+                    if (Emitted.Contains(core)) { r.Twinned++; continue; }
+
+                    r.Recognized++;
+
+                    r.Pending[core] = r.Pending.TryGetValue(core, out int p) ? p + 1 : 1;
+
+                    continue;
+                }
 
                 if (NoTwinShapes.Contains(core)) { r.NoTwinNeeded++; continue; }
 
@@ -356,7 +395,28 @@ namespace ProjectEden.Preloader
         // 于是变换整个不生效。**这正是增量落地的机制**：
         // 补一条形状，覆盖率涨一点，全齐了才会第一次真的改字节。
 
-        /// <summary>要孪生：发射一条平行语句，把 inc 换成 qua。</summary>
+        /// <summary>
+        /// <b>已经写好发射代码</b>的形状。<see cref="TwinShapes"/> 里只有出现在这里的，
+        /// 才算真的「认得」。
+        ///
+        /// <b>这条约束是补上去的，而它修的是我自己埋的雷。</b> 两遍式只保证
+        /// 「形状表没齐就不改字节」——它保证不了「表齐了但发射器是空的」。
+        /// 那种情况下变换会<b>报成功、实际什么都不做</b>：品质恒为 0，而日志说一切正常。
+        /// 这正是这个仓库最怕的失败形态（每一步都成功、功能却不在），
+        /// 所以「认得」必须等于「有发射器」，由 <see cref="CheckEmitters"/> 每次核对。
+        /// </summary>
+        private static readonly HashSet<string> Emitted = new HashSet<string>(new string[]
+        {
+            // 还没有任何一条：发射代码是下一步。
+            // 在它们被实现之前，这些形状会被报成未处理，于是变换整个不生效——
+            // 这是对的，也是刻意的。
+        }, StringComparer.Ordinal);
+
+        /// <summary>
+        /// 声明「打算孪生」的形状。<b>但只有同时出现在 <see cref="Emitted"/> 里的才真的算数</b>，
+        /// 其余的会被当成未处理，于是变换整个不生效。
+        /// 两张表分开，是为了让「已识别」和「已实现」这两件事在报告里分得开。
+        /// </summary>
         private static readonly HashSet<string> TwinShapes = new HashSet<string>(new[]
         {
             "ldc stfld:PAY",                                        // X.inc = 常数

@@ -79,11 +79,20 @@ $done = Field $r "Twinned"
 $missing = 0
 foreach ($k in $un.Keys) { $missing += $un[$k] }
 $done = (Field $r "Twinned") + (Field $r "NoTwinNeeded") + (Field $r "Dropped")
-$totalStmts = $done + $missing
+$pending = Field $r "Pending"
+$totalStmts = $done + $missing + (Field $r "Recognized")
 
 Write-Host ""
-Write-Host ("=== shape coverage: {0}/{1} statements = {2:P1} ===" -f $done, $totalStmts, ($done / [double]$totalStmts)) -ForegroundColor Green
-Write-Host ("    twinned {0}, no-twin-needed {1}, dropped {2}, methods {3}, twin locals {4}" -f (Field $r "Twinned"), (Field $r "NoTwinNeeded"), (Field $r "Dropped"), (Field $r "Methods"), (Field $r "TwinLocals"))
+# "Done" means the statement needs no further work: an emitter ran, or it was proven to
+# need no twin, or the quality drop is declared. Recognized-but-not-emitted is NOT done -
+# counting it would be the exact self-deception this stage is built to avoid.
+Write-Host ("=== really done: {0}/{1} statements = {2:P1} ===" -f $done, $totalStmts, ($done / [double]$totalStmts)) -ForegroundColor Green
+Write-Host ("    EMITTED {0} | no-twin-needed {1} | dropped {2} | recognized-but-not-emitted {3}" -f (Field $r "Twinned"), (Field $r "NoTwinNeeded"), (Field $r "Dropped"), (Field $r "Recognized"))
+if ($pending.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== recognized but NO EMITTER yet ($($pending.Count) kinds) ===" -ForegroundColor Magenta
+    foreach ($k in ($pending.Keys | Sort-Object { -$pending[$_] })) { Write-Host ("{0,4}x  {1}" -f $pending[$k], $k) -ForegroundColor Magenta }
+}
 
 if ($un.Count -gt 0) {
     Write-Host ""
