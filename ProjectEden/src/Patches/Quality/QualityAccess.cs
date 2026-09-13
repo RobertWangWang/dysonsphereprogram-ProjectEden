@@ -85,5 +85,46 @@ namespace ProjectEden.Patches
                 return null;
             }
         }
+
+        // ── 储物格（储物箱 / 背包 / 物流塔共用的那张表）────────────
+
+        internal delegate int GridGet(ref StorageComponent.GRID g);
+
+        /// <summary>
+        /// <c>StorageComponent.GRID.qua</c> 的读取器。
+        ///
+        /// <b>只读，没有写入器</b>，这是有意的：这条路只服务显示层。品质的搬运在
+        /// preloader 的孪生改写里，由游戏自己的方法完成；显示层要是能写，
+        /// 就多了一条谁都想不到的旁路。真需要写的时候再加，并在这里写明理由。
+        /// </summary>
+        internal static readonly GridGet GetGridQua = MakeGridGet();
+
+        internal static bool GridReady => GetGridQua != null;
+
+        private static GridGet MakeGridGet()
+        {
+            FieldInfo f = AccessTools.Field(typeof(StorageComponent.GRID), "qua");
+
+            if (f == null || f.FieldType != typeof(int)) return null;
+
+            try
+            {
+                var dm = new DynamicMethod("ProjectEden_GetGridQua", typeof(int),
+                    new[] { typeof(StorageComponent.GRID).MakeByRefType() },
+                    typeof(StorageComponent.GRID), true);
+
+                ILGenerator il = dm.GetILGenerator();
+
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldfld, f);
+                il.Emit(OpCodes.Ret);
+
+                return (GridGet)dm.CreateDelegate(typeof(GridGet));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
     }
 }
