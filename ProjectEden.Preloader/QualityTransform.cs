@@ -278,7 +278,26 @@ namespace ProjectEden.Preloader
 
             r.Applied = r.Blockers.Count == 0;
 
+            // **插一块只有「真的改完了」才存在的招牌。**
+            //
+            // 插件那一侧要能分清「品质恒为 0 是因为没矿」和「因为 1c 整体放弃了」,
+            // 而这两种在字段和侧信道都还在的情况下长得一模一样。按字段存不存在去猜
+            // 是不行的：1a 放了字段，1c 失败时它们照样在。
+            // 所以让 1c 自己在成功那一刻留个标记，插件反射探它。
+            if (mutate && r.Applied) MarkFlowing(module, channel);
+
             return r;
+        }
+
+        /// <summary>1c 真的应用之后，在侧信道类型上留一个静态字段当招牌。</summary>
+        internal const string FlowFieldName = "Flowing";
+
+        private static void MarkFlowing(ModuleDefinition module, TypeDefinition channel)
+        {
+            if (channel.Fields.Any(f => f.Name == FlowFieldName)) return;
+
+            channel.Fields.Add(new FieldDefinition(FlowFieldName,
+                FieldAttributes.Public | FieldAttributes.Static, module.TypeSystem.Int32));
         }
 
         /// <summary>

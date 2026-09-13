@@ -102,6 +102,7 @@ namespace ProjectEden
             ReportCargoProbe();
             Patches.CargoWidening.Report();
             Patches.QualityWidening.Report();
+            Patches.QualitySourcePatches.Report();
             // 放在 PatchAll 之后才知道改写了几处，所以这一行挪到下面去打
 
             // 分页要在游戏建立建造栏之前注册，LDBTool 的回调里已经太晚

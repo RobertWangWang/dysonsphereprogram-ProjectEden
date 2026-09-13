@@ -359,6 +359,13 @@ if ($wrote) {
     }
     Check ($bad7 -eq 0) "all branch targets resolve after the full chain writes and re-reads"
 
+    # The "quality really flows" sign the plugin probes for. Without it the plugin cannot
+    # tell "1c gave up" from "no ore mined yet" - both show quality 0 with the fields present.
+    $ch7 = $asm7.MainModule.GetType("ProjectEdenQualityChannel")
+    $flow = $null
+    if ($ch7 -ne $null) { $flow = $ch7.Fields | Where-Object { $_.Name -eq "Flowing" } }
+    Check ($flow -ne $null -and $flow.IsStatic) "1c left the Flowing marker the plugin probes for"
+
     # Still no signature may differ - that is what keeps other mods loading.
     $origAsm3 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($target, $rp2)
     $sigDiff3 = SignatureDiff $origAsm3.MainModule $asm7.MainModule

@@ -44,7 +44,7 @@ namespace ProjectEden.Patches
         /// 写成 <c>static readonly</c> 而不是 <c>const</c>：后者会让编译器证明下面那条
         /// 分支不可达而报 CS0162，而本仓库是 0 警告构建。这里要的是一个<b>运行时</b>的值。
         /// </summary>
-        internal static readonly bool TransportWired = false;
+        internal static readonly bool TransportWired = ProbeTransport();
 
         private static bool Probe()
         {
@@ -57,6 +57,29 @@ namespace ProjectEden.Patches
             catch (Exception)
             {
                 // 反射失败也算没有——绝不让状态探测本身把启动搞挂
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 搬运层到底通没通。
+        ///
+        /// <b>探的是 1c 成功那一刻留下的招牌，不是「字段在不在」。</b>
+        /// 1a 放的孪生字段在 1c 失败时照样在，所以按字段去猜会把
+        /// 「1c 整体放弃了」说成「已接线」——而那两种状态下品质都是 0，日志一模一样。
+        /// preloader 在 1c 真的改完之后才往侧信道类型上加 <c>Flowing</c> 这个静态字段,
+        /// 这里探的就是它。
+        /// </summary>
+        private static bool ProbeTransport()
+        {
+            try
+            {
+                Type t = AccessTools.TypeByName("ProjectEdenQualityChannel");
+
+                return t != null && AccessTools.Field(t, "Flowing") != null;
+            }
+            catch (Exception)
+            {
                 return false;
             }
         }
