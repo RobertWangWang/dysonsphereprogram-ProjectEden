@@ -142,11 +142,40 @@ namespace ProjectEden.Preloader
                 return;
             }
 
-            Log.LogWarning(
+            Log.LogInfo(
                 $"物品品质：品质流动已启用——{q.Twinned} 条孪生语句、{q.TwinLocals} 个孪生局部、" +
-                $"{q.ChannelUses} 处走侧信道，涉及 {q.Methods} 个方法体。" +
-                $"品质**还没进存档**（{q.SaveSkipped} 处），读档归零；" +
-                $"另有 {q.Dropped} 处明确丢弃。");
+                $"{q.ChannelUses} 处走侧信道，涉及 {q.Methods} 个方法体；{q.Dropped} 处明确丢弃。");
+
+            ExtendQualitySave(assembly);
+        }
+
+        /// <summary>
+        /// 阶段 1d：让品质进存档。
+        ///
+        /// <b>失败不中止启动，但要说清楚后果。</b> 前面四刀都成了的话，品质照样在跑——
+        /// 只是每次读档归零。这比半改一半的存档格式安全得多：那会写出缺半截字段的存档。
+        /// </summary>
+        private static void ExtendQualitySave(AssemblyDefinition assembly)
+        {
+            QualitySaveExtender.Report d = QualitySaveExtender.Apply(assembly.MainModule);
+
+            foreach (string n in d.Notes) Log.LogInfo(n);
+
+            if (!d.Applied)
+            {
+                Log.LogError(
+                    $"物品品质：**品质没能进存档**（{d.Blockers.Count} 条阻塞项）。" +
+                    "品质仍然会随货物流动，但每次读档归零。存档格式一个字节都没改。");
+
+                foreach (string b in d.Blockers) Log.LogError("  " + b);
+
+                return;
+            }
+
+            Log.LogWarning(
+                $"物品品质：品质已进存档——{d.Writes} 处写、{d.Reads} 处按版本分流读。" +
+                "**存档格式变了**：新存档必须带着这个 mod 才能打开，老存档照常能读（品质按 0 算）。" +
+                "自动集装机「正在叠的那一堆」的品质仍不入档——它的 Import 没保留版本号，没法分流。");
         }
     }
 }

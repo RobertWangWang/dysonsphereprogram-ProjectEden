@@ -242,8 +242,9 @@ namespace ProjectEden.Preloader
             // 补齐之前从来不打印——正好违反了它自己要执行的那条规矩。
             if (r.SaveSkipped > 0)
                 r.Notes.Add(
-                    $"**品质还没进存档**：{r.SaveSkipped} 处写存档的语句跳过了，读存档一侧一律置零，" +
-                    "所以品质每次读档归零。四个主干道载荷各自的 Export/Import 加版本分支是独立的一步。");
+                    $"品质的写存档语句在 1c 里跳过了 {r.SaveSkipped} 处，读存档一侧一律置零——" +
+                    "**这两件事都是 1d 的锚点**：1d 贴着原版那一笔补写，并在置零后面补一句按版本分流的读。" +
+                    "1d 没跑的话，品质每次读档归零。");
 
             if (r.Dropped > 0)
                 r.Notes.Add(

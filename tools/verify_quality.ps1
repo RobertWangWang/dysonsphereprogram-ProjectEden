@@ -343,6 +343,17 @@ Check ((Field $qr "Twinned") -gt 200) "1c emitted twin statements ($(Field $qr '
 # still reports success.
 Check ((Field $qr "ChannelUses") -gt 0) "1c uses the side channel ($(Field $qr 'ChannelUses') sites)"
 
+# Stage 1d on the same module: quality into the save.
+$dr = Invoke1 "QualitySaveExtender" "Apply" $mod6
+Check ((Field $dr "Blockers").Count -eq 0) "1d reports no blockers"
+Check ((Field $dr "Applied")) "1d applied"
+
+# Writes and reads must balance. A save is a positional stream: one extra write and every
+# field after it is read from the wrong offset - silently, and only on the player's machine.
+Check ((Field $dr "Writes") -eq (Field $dr "Reads")) `
+    "1d writes == reads ($(Field $dr 'Writes') / $(Field $dr 'Reads'))"
+Check ((Field $dr "Writes") -ge 4) "1d covers every mainline container ($(Field $dr 'Writes'))"
+
 $out6 = Join-Path $work "ac-1c-full-out.dll"
 $wrote = $true
 try { $asm6.Write($out6) } catch { $wrote = $false; Write-Host "        $($_.Exception.Message)" -ForegroundColor Red }
@@ -385,5 +396,5 @@ if ($fail -gt 0) {
     Write-Host "$fail assertion(s) FAILED" -ForegroundColor Red
     exit 1
 }
-Write-Host "stages 1a + 1b + 1c OK - fields, side channel, quality flows, signatures untouched" -ForegroundColor Green
+Write-Host "stages 1a + 1b + 1c + 1d OK - fields, channel, quality flows, quality saved, signatures untouched" -ForegroundColor Green
 exit 0
