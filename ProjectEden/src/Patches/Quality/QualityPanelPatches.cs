@@ -171,7 +171,7 @@ namespace ProjectEden.Patches
                 go.transform.SetParent(host, false);
 
                 plate = go.GetComponent<Image>();
-                plate.color = new Color(0.03f, 0.04f, 0.06f, 0.72f);
+                plate.color = new Color(0.03f, 0.04f, 0.06f, 0.82f);
                 plate.raycastTarget = false;
                 plate.enabled = false;
             }
@@ -239,15 +239,18 @@ namespace ProjectEden.Patches
             //
             // 办法是让**轮廓去定义字形**：浅色字 + 实心黑描边。白底上看到的是黑描边勾出的字，
             // 深底上看到的是浅色的字身，两边都成立。游戏 HUD 普遍是这么做的。
-            // 有了底板，底色就由我们自己控制，字色可以随便挑——**这才是解决办法**，
-            // 之前在「深灰还是白」之间挑颜色是在解一个无解的题。
-            // 描边留一层薄的：底板是半透明的，重叠到白色填充上时仍会偏亮。
-            label.color = new Color(1f, 0.95f, 0.85f);
+            // **把克隆体继承来的网格特效全部清掉。**
+            //
+            // 实测撞了：原文本身上挂着发光/阴影一类的 BaseMeshEffect，克隆体一并带过来,
+            // 再叠上我自己加的描边，中文笔画之间的缝隙全被浅色填满——
+            // 屏幕上看到的是几团白块，一个字都认不出来。
+            //
+            // 这是「克隆会把你没要的东西一起带过来」的又一次，和 MultiProductUIPatches
+            // 那次「克隆出两份、你写的那份不是画在上面的那份」同一族。
+            // 有了底板就不需要任何特效了：底色是我们自己控制的，纯色字最干净。
+            foreach (BaseMeshEffect fx in go.GetComponents<BaseMeshEffect>()) Object.Destroy(fx);
 
-            var outline = go.GetComponent<Outline>() ?? go.AddComponent<Outline>();
-
-            outline.effectColor = new Color(0f, 0f, 0f, 0.85f);
-            outline.effectDistance = new Vector2(1f, -1f);
+            label.color = new Color(1f, 0.96f, 0.88f);
 
             if (!_reported)
             {
