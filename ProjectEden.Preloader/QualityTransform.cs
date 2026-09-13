@@ -348,7 +348,7 @@ namespace ProjectEden.Preloader
             // **两遍用同一个上下文。** 分类要调发射器判断「拼不拼得出来」，
             // 所以局部变量映射和参数槽位在分析遍就得建好；
             // 真正往方法体里加孪生局部只在 mutate 那一遍做。
-            var ctx = new Ctx { Method = m, Twin = twin, Regs = regs, ChannelSplit = chSplit };
+            var ctx = new Ctx { Method = m, Twin = twin, Regs = regs, ChannelSplit = chSplit, AllParamSlots = paramSlots };
 
             if (paramSlots.TryGetValue(m, out List<int> slots))
                 for (var s = 0; s < slots.Count && s < regs.Count; s++)
@@ -505,6 +505,15 @@ namespace ProjectEden.Preloader
 
             /// <summary>见 <see cref="Stmt.TrueFrom"/>。</summary>
             internal int TrueFrom;
+
+            /// <summary>
+            /// 孪生语句插在哪条指令<b>之后</b>。<c>-1</c> 表示默认的「整条语句之后」。
+            ///
+            /// 绝大多数形状都插在语句末尾，那样原语句上挂的跳转标签一个都不用动。
+            /// 唯一的例外是<b>把品质传进被调方</b>：寄存器必须在 <c>call</c> 执行之前写好，
+            /// 所以那一族插在 call 的前一条之后。实参已经压完栈，这时插入是栈中性的。
+            /// </summary>
+            internal int Insert = -1;
         }
 
         /// <summary>
@@ -542,7 +551,7 @@ namespace ProjectEden.Preloader
                 r.TwinLocals++;
             }
 
-            foreach (Job job in work.OrderByDescending(j => j.To))
+            foreach (Job job in work.OrderByDescending(j => j.Insert < 0 ? j.To : j.Insert))
             {
                 if (job.To >= code.Count) continue;
 
@@ -560,7 +569,8 @@ namespace ProjectEden.Preloader
                     continue;
                 }
 
-                Instruction at = code[job.To];
+                // Build 可能把插入点挪到 call 之前（见 Job.Insert）
+                Instruction at = code[job.Insert < 0 ? job.To : job.Insert];
 
                 foreach (Instruction ins in emit)
                 {
@@ -670,6 +680,8 @@ namespace ProjectEden.Preloader
             "ldc stloc",            // local = 常量（零初始化，孪生值恒为 0）
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
+            "call:get_Value ldfld:PAY stloc",
+            "ldfld:PAY mul sub stloc",
             "call:split_inc stloc",  // local = split_inc(ref n, ref m, p)
         }, StringComparer.Ordinal);
 
@@ -1052,6 +1064,165 @@ namespace ProjectEden.Preloader
         private static bool IsStind(Instruction i) =>
             i.OpCode.Name.StartsWith("stind.", StringComparison.Ordinal);
 
+        /// <summary>
+        /// 把这条语句里那个 <c>call</c> 的载荷实参翻译成品质，写进<b>被调方槽位</b>的寄存器。
+        ///
+        /// 槽位按**被调方**的形参编号算，不是调用方的——所以要的是全模块那份表。
+        /// 认不出来就整条放弃：被调方解析不出来、它没有载荷形参、实参边界数不出来、
+        /// 或者 call 本身是跳转目标（那样插在它前面会被跳过去，等于没写）。
+        /// </summary>
+        private static List<Instruction> BuildForwardToCallee(Ctx ctx, IList<Instruction> code, Job job)
+        {
+            var callAt = -1;
+
+            for (int k = job.From; k <= job.To; k++)
+                if ((code[k].OpCode == OpCodes.Call || code[k].OpCode == OpCodes.Callvirt)
+                    && code[k].Operand is MethodReference)
+                {
+                    callAt = k;
+
+                    break;
+                }
+
+            if (callAt <= job.From) return null;
+
+            MethodDefinition callee;
+
+            try { callee = ((MethodReference)code[callAt].Operand).Resolve(); }
+            catch { return null; }
+
+            if (callee == null || ctx.AllParamSlots == null
+                || !ctx.AllParamSlots.TryGetValue(callee, out List<int> slots)) return null;
+
+            // call 是跳转目标的话，插在它前面的代码会被跳过去——寄存器没写而调用照常发生，
+            // 表现是那条路径上的品质凭空变成上一次残留的值。宁可认不出来。
+            if (IsBranchTarget(code, code[callAt])) return null;
+
+            int argc = callee.Parameters.Count + (callee.HasThis ? 1 : 0);
+            int[] a = ArgStarts(code, callAt, argc);
+
+            if (a == null) return null;
+
+            var outp = new List<Instruction>();
+
+            for (var si = 0; si < slots.Count && si < ctx.Regs.Count; si++)
+            {
+                // **byref 的载荷形参是出口不是入口**（`out remainInc`），传不进去。
+                // 它的品质由被调方写进同一个槽位，调用方要在 call **之后**才接得回来。
+                // 那一步还没做——现在只是把它跳过，而不是让整条语句因为它拼不出来。
+                // 实测这几处的出参之后都没有再被当成载荷用，所以跳过不丢东西；
+                // 哪天有了，它会以「没识别的形状」露出来，而不是悄悄少一笔。
+                if (callee.Parameters[slots[si]].ParameterType.IsByReference) continue;
+
+                int ai = slots[si] + (callee.HasThis ? 1 : 0);
+
+                if (ai >= argc || a[ai] < job.TrueFrom) return null;
+
+                int end = ai + 1 < argc ? a[ai + 1] - 1 : callAt - 1;
+
+                List<Instruction> v = TwinValue(ctx, code, a[ai], end);
+
+                if (v == null) return null;
+
+                outp.AddRange(v);
+                outp.Add(Instruction.Create(OpCodes.Stsfld, ctx.Regs[si]));
+            }
+
+            if (outp.Count == 0) return null;
+
+            job.Insert = callAt - 1;
+
+            return outp;
+        }
+
+        private static bool IsBranchTarget(IList<Instruction> code, Instruction target)
+        {
+            foreach (Instruction i in code)
+            {
+                if (ReferenceEquals(i.Operand, target)) return true;
+
+                if (i.Operand is Instruction[] many)
+                    foreach (Instruction x in many)
+                        if (ReferenceEquals(x, target)) return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsArith(Instruction i) =>
+            i.OpCode == OpCodes.Add || i.OpCode == OpCodes.Sub
+            || i.OpCode == OpCodes.Mul || i.OpCode == OpCodes.Div;
+
+        /// <summary>
+        /// 二元算术表达式的品质版。
+        ///
+        /// <b>加减：两侧各取品质</b>，认不出来的一侧按 0 算（没有品质来源就是没有品质）。
+        /// <b>乘除：只有一侧能带品质</b>，另一侧原样重放当系数——`等级 × 件数` 的品质版是
+        /// `品质分 × 件数`。两侧都能带品质就说明这不是缩放，含义不明，宁可认不出来。
+        ///
+        /// 任何一侧要原样重放时都必须是纯取值：重放一条带副作用的指令是静默的。
+        /// </summary>
+        private static List<Instruction> TwinArith(Ctx ctx, IList<Instruction> code, int from, int to)
+        {
+            int[] a = ArgStarts(code, to, 2);
+
+            if (a == null || a[0] < from) return null;
+
+            int lf = a[0], lt = a[1] - 1, rf = a[1], rt = to - 1;
+
+            if (lt < lf || rt < rf) return null;
+
+            List<Instruction> lv = TwinValue(ctx, code, lf, lt);
+            List<Instruction> rv = TwinValue(ctx, code, rf, rt);
+
+            if (code[to].OpCode == OpCodes.Mul || code[to].OpCode == OpCodes.Div)
+            {
+                // 两侧都能带品质就不是缩放，含义不明；除法的品质只能在左边
+                // （品质分 ÷ 件数 = 单件品质分；件数 ÷ 品质分 没有含义）。
+                if (lv != null && rv != null) return null;
+                if (lv == null && code[to].OpCode == OpCodes.Div) return null;
+
+                var outp = new List<Instruction>();
+
+                if (lv != null) outp.AddRange(lv);
+                else if (!PureRange(code, lf, lt)) return null;
+                else for (int k = lf; k <= lt; k++) outp.Add(Clone(code[k]));
+
+                if (rv != null) outp.AddRange(rv);
+                else if (!PureRange(code, rf, rt)) return null;
+                else for (int k = rf; k <= rt; k++) outp.Add(Clone(code[k]));
+
+                outp.Add(Instruction.Create(code[to].OpCode));
+
+                return outp;
+            }
+
+            if (lv == null && rv == null) return null;
+
+            var sum = new List<Instruction>();
+
+            if (lv != null) sum.AddRange(lv);
+            else if (!PureRange(code, lf, lt)) return null;
+            else sum.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+
+            if (rv != null) sum.AddRange(rv);
+            else if (!PureRange(code, rf, rt)) return null;
+            else sum.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+
+            sum.Add(Instruction.Create(code[to].OpCode));
+
+            return sum;
+        }
+
+        private static bool PureRange(IList<Instruction> code, int from, int to)
+        {
+            for (int k = from; k <= to; k++)
+                if (!IsPureLoad(code[k]) && !IsArith(code[k]))
+                    return false;
+
+            return true;
+        }
+
         /// <summary>这条指令引用了一个<b>已经作废</b>的载荷局部吗？</summary>
         private static bool Orphan(MethodDefinition m, IList<Instruction> code, int at,
             ICollection<VariableDefinition> carriers)
@@ -1146,6 +1317,7 @@ namespace ProjectEden.Preloader
             {
                 // X.inc = 常数  →  X.qua = 0
                 case "ldc stfld:PAY":
+                case "call:get_package ldc stfld:PAY":
                 {
                     if (tf == null) return null;
 
@@ -1167,6 +1339,7 @@ namespace ProjectEden.Preloader
                 // X.inc = <栈上的值>  →  X.qua = <那个值的品质版>
                 case "stfld:PAY":
                 case "call:split_inc stfld:PAY":
+                case "ldfld:PAY ldfld:PAY add stfld:PAY":
                 {
                     if (tf == null) return null;
 
@@ -1374,6 +1547,20 @@ namespace ProjectEden.Preloader
                 return sval;
             }
 
+            // 把品质**传进被调方**：在 call 之前写好侧信道寄存器。
+            //
+            // <b>这是侧信道缺的那一半。</b> 在这之前只有「被调方把结果写出来」
+            // （出参那一族 `Q = ...`），没有「调用方把品质送进去」——寄存器有人读没人写，
+            // 品质在第一个方法边界上就断了，而报告里一切正常。
+            //
+            // 插在 call 的前一条之后：实参已经压完栈，这时插入是栈中性的，
+            // 而寄存器在 call 执行前就位。
+            case "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc":
+            case "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc":
+            case "ldfld:PAY call:AddItemStacked bge.s":
+            case "ldfld:PAY call:AddItemStacked stloc":
+                return BuildForwardToCallee(ctx, code, job);
+
             // local = <载荷参数>  →  twinLocal = Q<槽位>
             case "ldarg:PAY stloc":
             {
@@ -1438,6 +1625,8 @@ namespace ProjectEden.Preloader
 
                 // local = X.inc  →  twinLocal = X.qua
                 case "ldfld:PAY stloc":
+                case "call:get_Value ldfld:PAY stloc":   // V = kvp.Value.inc（取值器已核实是纯读字段）
+                case "ldfld:PAY mul sub stloc":          // V = X.inc - 等级 × 件数
                 {
                     VariableDefinition dst = VarOf(ctx.Method, store);
 
@@ -1663,6 +1852,13 @@ namespace ProjectEden.Preloader
 
             /// <summary>侧信道的 <c>Split(countAfter, ref qua, p)</c>——原版 split_inc 的品质版。</summary>
             internal MethodDefinition ChannelSplit;
+
+            /// <summary>
+            /// <b>全模块</b>的「哪个方法的哪几个形参是载荷」。
+            /// 往被调方传品质时要按<b>被调方</b>的槽位写寄存器，所以这里要的是全局表，
+            /// 不是当前方法那一份。
+            /// </summary>
+            internal IDictionary<MethodDefinition, List<int>> AllParamSlots;
             internal Dictionary<VariableDefinition, VariableDefinition> Locals =
                 new Dictionary<VariableDefinition, VariableDefinition>();
             internal Dictionary<ParameterDefinition, int> ParamSlot =
@@ -1688,6 +1884,18 @@ namespace ProjectEden.Preloader
                 List<Instruction> sp = SplitTwin(ctx, code, to, from);
 
                 if (sp != null) return sp;
+            }
+
+            // (0.5) 算术：加减各取两侧的品质，乘除把品质按同一个系数缩放。
+            //
+            // 这是**表达式递归**，不是又一个形状：`X.inc + Y.inc`、`X.inc - 等级 * 件数`
+            // 都是同一条规则的实例。加减法里认不出品质的那一侧记 0——那一侧没有品质来源，
+            // 0 就是它的品质，不是「拼不出来」；但它必须是纯取值，否则重放会把副作用做两遍。
+            if (to > from && IsArith(code[to]))
+            {
+                List<Instruction> ar = TwinArith(ctx, code, from, to);
+
+                if (ar != null) return ar;
             }
 
             var outp = new List<Instruction>();
@@ -1760,7 +1968,38 @@ namespace ProjectEden.Preloader
                    || n.StartsWith("ldsfld", StringComparison.Ordinal)
                    || n.StartsWith("ldelem", StringComparison.Ordinal)
                    || n.StartsWith("ldc", StringComparison.Ordinal)
-                   || n == "dup" || n == "conv.i4" || n == "conv.u1" || n == "conv.i2";
+                   || n == "dup" || n == "conv.i4" || n == "conv.u1" || n == "conv.i2"
+                   || IsTrivialGetter(i);
+        }
+
+        /// <summary>
+        /// 这条 <c>call</c> 是不是一个<b>只读一个字段的取值器</b>——例如
+        /// <c>KeyValuePair&lt;,&gt;::get_Value</c>、<c>Player::get_package</c>。
+        ///
+        /// <b>这是核实过的，不是按名字猜的。</b> 把方法解析出来看方法体：
+        /// 只有 <c>ldarg.0 ; ldfld ; ret</c> 这种形状才算数。按 <c>get_</c> 前缀放行会
+        /// 放进带副作用的属性（惰性初始化、计数器），而重放一条带副作用的指令是静默的。
+        /// 解析不出来（跨程序集拿不到方法体）就当不纯——宁可认不出来。
+        /// </summary>
+        private static bool IsTrivialGetter(Instruction i)
+        {
+            if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) return false;
+            if (!(i.Operand is MethodReference mr) || mr.HasParameters || !mr.HasThis) return false;
+
+            MethodDefinition md;
+
+            try { md = mr.Resolve(); }
+            catch { return false; }
+
+            if (md?.Body == null) return false;
+
+            IList<Instruction> b = md.Body.Instructions;
+
+            if (b.Count != 3) return false;
+
+            return b[0].OpCode == OpCodes.Ldarg_0
+                   && (b[1].OpCode == OpCodes.Ldfld || b[1].OpCode == OpCodes.Ldflda)
+                   && b[2].OpCode == OpCodes.Ret;
         }
 
         private static VariableDefinition VarOf(MethodDefinition m, Instruction i)
@@ -1939,6 +2178,18 @@ namespace ProjectEden.Preloader
             "stfld:PAY [merge]",
             "ldflda:PAY dup ldind.i2 add stind.i2",
 
+            // 表达式递归（加减乘除）打通的几种：取值器前缀、两个载荷相加、按系数缩放
+            "call:get_Value ldfld:PAY stloc",
+            "call:get_package ldc stfld:PAY",
+            "ldfld:PAY ldfld:PAY add stfld:PAY",
+            "ldfld:PAY mul sub stloc",
+
+            // 把品质传进被调方：在 call 之前写好寄存器。侧信道缺的那一半。
+            "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc",
+            "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc",
+            "ldfld:PAY call:AddItemStacked bge.s",
+            "ldfld:PAY call:AddItemStacked stloc",
+
             // 存档读侧：读进来的品质一律 0（写侧见 SaveWriteShapes，还没进存档）
             "call:ReadInt32 stfld:PAY",
             "call:ReadByte stfld:PAY",
@@ -1979,6 +2230,14 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY call:split_inc add stind.i4",      // *out += split_inc(..., ref X.inc, ...)
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",                             // X.inc = split_inc(...)
+            "call:get_Value ldfld:PAY stloc",                       // V = kvp.Value.inc
+            "call:get_package ldc stfld:PAY",                       // package.X.inc = 常数
+            "ldfld:PAY ldfld:PAY add stfld:PAY",                    // X.inc = A.inc + B.inc
+            "ldfld:PAY mul sub stloc",                              // V = X.inc - 等级 × 件数
+            "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc",     // 把品质传进被调方
+            "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc",
+            "ldfld:PAY call:AddItemStacked bge.s",
+            "ldfld:PAY call:AddItemStacked stloc",
             "ldfld:PAY stind.i2",                                   // *out = X.inc
             "ldfld:PAY stind.i4",
             "ldflda:PAY ldind.i4 call:split_inc stind.i4",          // *out = split_inc(...)
@@ -2012,6 +2271,12 @@ namespace ProjectEden.Preloader
             "ldfld:PAY ldlen call:Write",                           // 存长度，不是存点数
             "ldfld:PAY brfalse.s",                                  // if (incServed == null)
             "ldfld:PAY ldc ble.s",
+
+            // **只是拿去显示。** 悬浮面板的物品汇总、生产统计面板的投入格——
+            // 它们接过载荷数组或点数只为了画出来，一个点数都没有搬走。
+            // 品质面板是第 4 阶段的事，1c 在这里什么都不用做。
+            "ldfld:PAY call:set_incServed",                         // 统计面板接过 incServed 数组
+            "ldfld:PAY call:Add",                                   // 悬浮面板的物品汇总
         }, StringComparer.Ordinal);
 
         /// <summary>
