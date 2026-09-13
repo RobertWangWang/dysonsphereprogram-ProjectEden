@@ -78,7 +78,10 @@ $done = Field $r "Twinned"
 
 $missing = 0
 foreach ($k in $un.Keys) { $missing += $un[$k] }
-$done = (Field $r "Twinned") + (Field $r "NoTwinNeeded") + (Field $r "Dropped")
+# SaveSkipped counts too, and it MUST be visible on its own: it is not "nothing to do",
+# it is "quality does not go into the save yet, so it resets on load". Folding it into
+# Dropped would make a to-do look like an accepted cost.
+$done = (Field $r "Twinned") + (Field $r "NoTwinNeeded") + (Field $r "Dropped") + (Field $r "SaveSkipped")
 $pending = Field $r "Pending"
 $totalStmts = $done + $missing + (Field $r "Recognized")
 
@@ -87,7 +90,7 @@ Write-Host ""
 # need no twin, or the quality drop is declared. Recognized-but-not-emitted is NOT done -
 # counting it would be the exact self-deception this stage is built to avoid.
 Write-Host ("=== really done: {0}/{1} statements = {2:P1} ===" -f $done, $totalStmts, ($done / [double]$totalStmts)) -ForegroundColor Green
-Write-Host ("    EMITTED {0} | no-twin-needed {1} | dropped {2} | recognized-but-not-emitted {3}" -f (Field $r "Twinned"), (Field $r "NoTwinNeeded"), (Field $r "Dropped"), (Field $r "Recognized"))
+Write-Host ("    EMITTED {0} | no-twin-needed {1} | dropped {2} | not-saved-yet {3} | recognized-but-not-emitted {4}" -f (Field $r "Twinned"), (Field $r "NoTwinNeeded"), (Field $r "Dropped"), (Field $r "SaveSkipped"), (Field $r "Recognized"))
 if ($pending.Count -gt 0) {
     Write-Host ""
     Write-Host "=== recognized but NO EMITTER yet ($($pending.Count) kinds) ===" -ForegroundColor Magenta

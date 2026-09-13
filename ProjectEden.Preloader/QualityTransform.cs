@@ -60,6 +60,16 @@ namespace ProjectEden.Preloader
             /// <summary>品质被<b>明确丢弃</b>的语句数</summary>
             internal int Dropped;
 
+            /// <summary>
+            /// 因为<b>还没进存档</b>而被跳过的语句数：读写存档的那一族。
+            ///
+            /// 和上面的 Dropped 分开计，因为两者的性质完全不同：Dropped 是主干道之外
+            /// 没有槽位可去，是这一期范围的边界；这一个是**还没做**，做法也已经清楚
+            /// （四个载荷各自的 Export/Import 加版本分支），只是不在最短路径上。
+            /// 混在一起计会让「已知代价」和「待办」长得一样。
+            /// </summary>
+            internal int SaveSkipped;
+
             /// <summary>丢弃发生在哪些方法里——这条要打进日志，缺口不许沉默</summary>
             internal readonly Dictionary<string, int> DropSites = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -230,6 +240,11 @@ namespace ProjectEden.Preloader
             // **缺口不许沉默，而且必须排在提前返回之前。**
             // 第一版把这一段写在「形状表没补齐就返回」的后面，结果丢弃信息在
             // 补齐之前从来不打印——正好违反了它自己要执行的那条规矩。
+            if (r.SaveSkipped > 0)
+                r.Notes.Add(
+                    $"**品质还没进存档**：{r.SaveSkipped} 处写存档的语句跳过了，读存档一侧一律置零，" +
+                    "所以品质每次读档归零。四个主干道载荷各自的 Export/Import 加版本分支是独立的一步。");
+
             if (r.Dropped > 0)
                 r.Notes.Add(
                     $"**品质在 {r.Dropped} 处被明确丢弃**（主干道之外没有孪生槽位可去）：" +
@@ -448,6 +463,8 @@ namespace ProjectEden.Preloader
                 }
 
                 if (NoTwinShapes.Contains(core)) { r.NoTwinNeeded++; continue; }
+
+                if (SaveWriteShapes.Contains(core)) { r.SaveSkipped++; continue; }
 
                 if (DropShapes.Contains(core))
                 {
@@ -932,6 +949,37 @@ namespace ProjectEden.Preloader
             return Clone(i);
         }
 
+        /// <summary>
+        /// 「把 0 写进孪生槽位」：目的地表达式原样重放（载荷字段换孪生），值一律 0。
+        /// 用在从存档读进来的那一族上——原版读到什么不重要，品质那边就是没有。
+        /// </summary>
+        private static List<Instruction> BuildZeroWrite(Ctx ctx, IList<Instruction> code, Job job)
+        {
+            Instruction last = code[job.To];
+            bool toField = last.OpCode.Name.StartsWith("stfld", StringComparison.Ordinal);
+
+            if (!toField && !last.OpCode.Name.StartsWith("stelem", StringComparison.Ordinal)) return null;
+
+            int argc = toField ? 2 : 3;
+            int[] a = ArgStarts(code, job.To, argc);
+
+            if (a == null || a[0] < job.From) return null;
+
+            var outp = new List<Instruction>();
+
+            for (int k = a[0]; k < a[argc - 1]; k++)
+            {
+                if (!IsStructural(code[k], false)) return null;
+
+                outp.Add(CloneSwap(ctx, code[k]));
+            }
+
+            outp.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+            outp.Add(CloneSwap(ctx, last));
+
+            return outp;
+        }
+
         /// <summary>这条指令引用了一个<b>已经作废</b>的载荷局部吗？</summary>
         private static bool Orphan(MethodDefinition m, IList<Instruction> code, int at,
             ICollection<VariableDefinition> carriers)
@@ -1071,7 +1119,17 @@ namespace ProjectEden.Preloader
                     return outp;
                 }
 
-                // *outInc += X.inc  →  Q<槽位> += X.qua
+                // 从存档读进来的那一族：X.inc = reader.ReadXxx()  →  X.qua = 0
+            //
+            // **必须真的写个 0，不能什么都不做。** Import 可能读进一个复用的结构体，
+            // 那时字段里留着的是上一个实体的品质——不报错，只是品质串了。
+            // 这是「品质还没进存档」这个缺口的读侧，写侧见 SaveWriteShapes。
+            case "call:ReadInt32 stfld:PAY":
+            case "call:ReadByte stfld:PAY":
+            case "ldfld:PAY call:ReadInt32 stelem":
+                return BuildZeroWrite(ctx, code, job);
+
+            // *outInc += X.inc  →  Q<槽位> += X.qua
             //
             // 这是**把值带出方法**的那一族：被加的地址是一个 `ref int` 出参。
             // 出参那条路正是被推翻的「给方法加参数」方案要走的，所以品质这边改走侧信道：
@@ -1724,6 +1782,11 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",
 
+            // 存档读侧：读进来的品质一律 0（写侧见 SaveWriteShapes，还没进存档）
+            "call:ReadInt32 stfld:PAY",
+            "call:ReadByte stfld:PAY",
+            "ldfld:PAY call:ReadInt32 stelem",
+
             // 数组本身的一族：分配、清零、改长度。孪生数组与原数组等长同生死，
             // 所以孪生语句就是同一条语句换个字段——**前提是整条语句没有别的副作用**。
             "ldnull stfld:PAY",
@@ -1758,6 +1821,9 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY call:split_inc add stind.i4",      // *out += split_inc(..., ref X.inc, ...)
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",                             // X.inc = split_inc(...)
+            "call:ReadInt32 stfld:PAY",                             // 从存档读：品质置零
+            "call:ReadByte stfld:PAY",
+            "ldfld:PAY call:ReadInt32 stelem",
             "ldnull stfld:PAY",                                     // X.incServed = null
             "ldlen newarr stfld:PAY",                               // X.incServed = new int[n]
             "newarr stfld:PAY",                                     // 同上，长度在栈上
@@ -1805,6 +1871,22 @@ namespace ProjectEden.Preloader
             "ldfld:PAY call:AddTrashOnPlanet",                      // 扔到地上（TrashObject 没有孪生字段）
             "ldfld:PAY mul call:AddTrashOnPlanet",
             "ldfld:PAY call:AddTempCargo",                          // 拆传送带时的临时货包
+        }, StringComparer.Ordinal);
+
+        /// <summary>
+        /// <b>品质还没进存档</b>：写的时候不写，读的时候置零。
+        ///
+        /// 四个主干道载荷各有自己的 Export/Import，要加字段就要各自加版本分支——
+        /// 那是一次独立的、会改变存档格式的改动（本仓库的既定政策是「存档跟着 mod 走」，
+        /// 所以做得了，只是不该顺手做）。在那之前品质**每次读档归零**，
+        /// 这是说出来的代价，不是静默的：报告里单列一档，日志里看得见。
+        ///
+        /// 读那一侧必须发射「置零」而不是什么都不做：Import 有可能读进一个复用的结构体，
+        /// 那时字段里留着的是上一个实体的品质——不报错，只是品质串了。
+        /// </summary>
+        private static readonly HashSet<string> SaveWriteShapes = new HashSet<string>(new[]
+        {
+            "ldfld:PAY call:Write",                                 // writer.Write(X.inc)
         }, StringComparer.Ordinal);
 
         // ── 小工具 ─────────────────────────────────────────────
