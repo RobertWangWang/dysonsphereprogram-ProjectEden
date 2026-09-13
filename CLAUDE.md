@@ -32,6 +32,46 @@ Three things this rule buys, all of which have already paid off here:
 
 **A comment can describe a link the data does not implement, and nothing checks that.** `钒渣油`’s own `//` said "「钒块 · 残渣提取」提的就是它" for as long as both existed, while that recipe consumed `精炼油 ×40` and never touched the residue — so the residue’s only use was as a fuel and the vacuum-distillation recipe had no reason to be run. It was found by listing producers and consumers of every oil item, not by reading either file. **When a `//` asserts a relationship between two entries, the relationship is a claim until the other entry’s `items`/`results` are checked** — same family as "a named constant with zero readers is a claim, not a guarantee".
 
+**The recipe graph was leaking energy, and the audit that found it should have existed from the
+start.** Scanning all 77 recipes for "burnable output worth more than burnable input" returned
+**14 positives totalling +528.6 MJ**, the worst being 苯 · 蒸汽裂解 at **+114.8 MJ per 4-second
+craft**. Since a mega building's electricity is spread across 10000 crafts, that is a working
+perpetual motion machine: ~30× return in a 1× plant and ~800× in a mega one.
+
+Three separate errors, and only the third is vanilla's fault:
+
+1. **The accounting unit had two contradictory answers in the same config.** 丙烯 · 催化裂化's
+   comment said "6 份 × 4 = 24 个 CH₂" (one oil item = 4 CH₂) while 精炼油 · 费托合成
+   (`4 CO + 8 H₂ → 精炼油 ×4 + 水 ×4`) only balances carbon if one item = **1** CH₂. Two readings
+   of the same item, a factor of 4 apart, so every hydrocarbon recipe's ratios were wrong.
+2. **The four oil cuts' heat values were set on a per-volume intuition** (3.0 / 4.5 / 8.0 / 12.0,
+   "heavier = denser") **while the accounting unit is per-CH₂** — equal carbon per item must mean
+   equal heat value. That ladder is what let cracking turn a cheap light cut into expensive
+   products and mint energy.
+3. **Vanilla hydrogen is 4.1× over the mod's anchor** (286 kJ/mol → 1.96 MJ; vanilla says 8.0).
+   This file already recorded that vanilla is not self-consistent here; what was new is that a
+   reforming recipe yielding **8 hydrogen per craft** turns that inconsistency into free energy.
+
+**The decisive measurement is that vanilla itself picks one CH₂ per item**: the combustion enthalpy
+of one CH₂ (679 kJ/mol) maps to **4.66 MJ** on the coal anchor, and vanilla's 精炼油 is **4.50** —
+4% apart. So the fix is to align *to* vanilla, not to override it: all four cuts are now 4.5 MJ and
+the six hydrocarbon recipes were re-derived at 1 CH₂ per item.
+
+Hydrogen is the one place the mod does override a vanilla value, through `ores.json`'s
+`vanillaHeat` (with a `Name` cross-check, because a wrong hardcoded id would silently retune a
+different item). Residual after all three fixes: **+67.2 MJ across 11 recipes**, and most of what
+remains is legitimate — genuine endothermicity (steam reforming +5.5, steam cracking +4.6, water
+gas +2.4), sunlight (the greenhouse's zero-input recipes), or an artefact of a deliberately
+unburnable intermediate (甲醛 and PAN carry no heat value by the `fuelType` rule, so recipes
+consuming them look like they create energy while the full chain is net negative).
+
+**It is now a startup self-check, not a one-off.** `EnergyAudit.Run` is registered last on `PostAddDataAction` beside `I18N.VerifyCoverage` and `ProtoArrayCheck`, reads the **final** `HeatValue` out of LDB (so it sees the `vanillaHeat` override rather than what the config claims), and warns for any recipe whose products outvalue its inputs by more than 1 MJ. The three legitimate shapes — real endothermicity, sunlight, and deliberately unburnable intermediates — are declared per recipe in `energyNote`, **whose value is the reason**; a hardcoded whitelist would rot silently and explain nothing. Current state: 77 recipes, 11 exempt with stated reasons, 0 unexplained. **If you cannot write the reason, it is a hole.**
+
+**What no number can fix: a 10000× machine makes electricity free.** 电解水 still yields 3.9 MJ of
+hydrogen for 1.2 kJ of power in the 综合化学厂. Any endothermic fuel-producing recipe is a generator
+at that speed; the only real levers are which recipes a mega building may run, and whether the
+product is burnable at all.
+
 The one property that is **not** physical is `stackSize`: it is a pure balance knob, and this mod uses a flat 300 for everything (vanilla is 100 for solids, 20 for fluids). Don't try to justify it chemically.
 
 ## Content rule: everything player-facing ships in both Chinese and English

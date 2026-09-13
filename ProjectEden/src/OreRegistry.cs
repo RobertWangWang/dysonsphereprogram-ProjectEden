@@ -949,8 +949,71 @@ namespace ProjectEden
 
         // ── LDB 建表之后：矿脉、主题、图标 ────────────────────
 
+        /// <summary>
+        /// 按 <c>ores.json</c> 的 <c>vanillaHeat</c> 改原版物品的热值。
+        ///
+        /// <b>这是本 mod 唯一一处改原版物品数值的地方，所以校验要紧。</b>
+        /// ID 是写死的，而原版 proto 在 resources.assets 里、离线枚举不了——写错一个号
+        /// 就会静默地把别的物品改掉。所以配置里同时写名字，这里交叉核对，对不上就拒绝改。
+        /// 做法和 <c>MetalPropertyPatches</c> 核 <c>Name</c> 是同一条：
+        /// <b>比的是 <c>Name</c>（原始键）不是 <c>name</c>（翻译后）</b>，否则英文客户端下全部失配。
+        ///
+        /// 关着也打一行——沉默的诊断分不出「没配」和「没跑」。
+        /// </summary>
+        private static void ApplyVanillaHeat()
+        {
+            VanillaHeatConfig cfg = Config?.vanillaHeat;
+
+            if (cfg == null || !cfg.enabled || cfg.items == null || cfg.items.Length == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo("原版热值改写：未启用，原版燃料保持原值");
+
+                return;
+            }
+
+            var done = 0;
+
+            foreach (VanillaHeatEntry e in cfg.items)
+            {
+                if (e == null || e.id <= 0) continue;
+
+                ItemProto proto = LDB.items.Select(e.id);
+
+                if (proto == null)
+                {
+                    ProjectEdenPlugin.Log.LogError($"原版热值改写：找不到物品 {e.id}，跳过");
+
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(e.name) && proto.Name != e.name)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"原版热值改写：ID {e.id} 实际是「{proto.Name}」，配置写的是「{e.name}」——" +
+                        "对不上就不改，免得静默改掉别的物品");
+
+                    continue;
+                }
+
+                long before = proto.HeatValue;
+
+                proto.HeatValue = e.heatValue;
+                done++;
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"原版热值改写：「{proto.Name}」{before / 1e6:0.##} MJ → {e.heatValue / 1e6:0.##} MJ。" +
+                    "本 mod 的热值锚在煤上（393.5 kJ/mol ↔ 2.7 MJ），而原版自己不自洽；" +
+                    "不改的话蒸汽重整一条 4 秒配方就能凭空多出约 50 MJ 可燃热值。" +
+                    "**代价：烧它发电的收益按同比例变化。** 不想要就改 ores.json 的 vanillaHeat.enabled");
+            }
+
+            if (done > 0) ProjectEdenPlugin.Log.LogInfo($"原版热值改写：共 {done} 项");
+        }
+
         internal static void OnPostAddData()
         {
+            ApplyVanillaHeat();
+
             foreach (ExtraItem extra in ExtraItems)
             {
                 VerifyId(extra.ItemId, extra.Entry.name);

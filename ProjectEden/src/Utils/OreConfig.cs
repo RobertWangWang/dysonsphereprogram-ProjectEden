@@ -27,6 +27,35 @@ namespace ProjectEden.Utils
 
         /// <summary>投放到气态巨星、由轨道采集器收集的气体</summary>
         public GasEntry[] gases;
+
+        /// <summary>
+        /// 改**原版物品**的热值。本 mod 的热值全部锚在煤上（393.5 kJ/mol ↔ 2.7 MJ），
+        /// 而原版自己并不自洽——它的氢按摩尔算比煤慷慨约 4 倍，这一条 CLAUDE.md 早就记着。
+        ///
+        /// 以前这只是个不整齐，直到本 mod 加了一次出 8 份氢的蒸汽重整：
+        /// 一条 4 秒的配方凭空多出约 50 MJ 可燃热值，而万倍速建筑的耗电被摊薄到近乎为零，
+        /// 于是它成了真正的永动机。
+        /// </summary>
+        public VanillaHeatConfig vanillaHeat;
+    }
+
+    [Serializable]
+    internal class VanillaHeatConfig
+    {
+        public bool enabled;
+
+        public VanillaHeatEntry[] items;
+    }
+
+    [Serializable]
+    internal class VanillaHeatEntry
+    {
+        public int id;
+
+        /// <summary>原版那个物品的中文名。**和 ID 交叉核对**——写错号会静默改掉别的物品。</summary>
+        public string name;
+
+        public long heatValue;
     }
 
     /// <summary>
@@ -295,6 +324,24 @@ namespace ProjectEden.Utils
     [Serializable]
     internal class OreRecipeEntry
     {
+        /// <summary>
+        /// 能量审计的豁免理由。<b>有值即豁免，而值本身就是它为什么该被豁免。</b>
+        ///
+        /// 审计查的是「产出可燃热值 &gt; 投入可燃热值」，因为万倍速建筑把耗电摊薄到近乎为零，
+        /// 任何这样的配方都是一台发电机。但有三类是正当的，必须能声明出来，
+        /// 否则审计每次启动都在报同样几条，真出了新洞反而淹没在噪声里：
+        ///
+        /// <list type="bullet">
+        /// <item><b>真实吸热</b> —— 蒸汽重整、蒸汽裂解、水煤气，现实中就要外部供热</item>
+        /// <item><b>阳光</b> —— 生物温室的零原料配方，能量来自恒星，而那座建筑本来就受日照约束</item>
+        /// <item><b>刻意不给热值的中间体</b> —— 甲醛、聚丙烯腈按 fuelType 判据不给热值，
+        ///       于是吃它们的配方看着在造能量，而整条链是负的</item>
+        /// </list>
+        ///
+        /// <b>不要拿它去盖真正的洞。</b> 写理由的时候如果写不出上面三类之一，那就是个洞。
+        /// </summary>
+        public string energyNote;
+
         public bool enabled;
 
         /// <summary>配方名，同时是 LDBTool 记 ID 用的键——<b>改名等于换一条新配方</b></summary>

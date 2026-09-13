@@ -182,6 +182,9 @@ namespace ProjectEden
             LDBTool.PostAddDataAction += UniverseMatrixPatches.OnPostAddData;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
+            // 能量审计排在最后：它要读 LDB 里的最终热值，
+            // 而原版热值改写、物品注册都得先完成
+            LDBTool.PostAddDataAction += EnergyAudit.Run;
             LDBTool.PostAddDataAction += ProtoArrayCheck.Verify;
 
             Logger.LogInfo($"{NAME} v{VERSION} 已加载");

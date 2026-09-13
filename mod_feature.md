@@ -1443,7 +1443,7 @@ benzene → cumene → phenol + acetone, four new items net.
 
 | Recipe | Machine | Contents | Time |
 |---|---|---|---|
-| **Benzene · Steam Cracking** | Redox Chemical Plant | Refined Oil ×6 → **Ethylene ×6 + Propylene ×2 + Benzene ×1 + Hydrogen ×3** | 4 s |
+| **Benzene · Steam Cracking** | Redox Chemical Plant | Naphtha ×18 → **Ethylene ×3 + Propylene ×2 + Benzene ×1 + Hydrogen ×3** | 4 s |
 | **Benzene · Methanol to Aromatics** | **Catalytic Reactor** | Methanol ×6 → **Benzene ×1 + Water ×6 + Hydrogen ×3** | 5 s |
 | **Cumene · Benzene Alkylation** | Chemical Plant | Benzene ×1 + Propylene ×1 → **Cumene ×1** | 2.5 s |
 | **Phenol · Cumene Oxidation and Cleavage** | Redox Chemical Plant | Cumene ×2 + Oxygen ×2 → **Phenol ×2 + Acetone ×2** | 3 s |
@@ -1542,7 +1542,7 @@ none — **the vanadium was concentrated into the bottom of the column all along
 
 #### 2. Real catalytic reforming (the trunk source of aromatics, and of hydrogen)
 
-**Benzene · Catalytic Reforming: Refined Oil ×3 → Benzene ×2 + Hydrogen ×6** (exactly balanced),
+**Benzene · Catalytic Reforming: Naphtha ×12 → Benzene ×2 + Hydrogen ×6** (exactly balanced),
 on the Catalytic Reactor.
 
 Before this, benzene could only come from steam cracking (where it is one of four byproducts) or
@@ -1634,7 +1634,7 @@ products is exactly this mod's proven ceiling.
 #### Hydrocracking: turning the heavy into the wanted
 
 ```
-Naphtha · Hydrocracking    Vacuum Gas Oil ×4 + Hydrogen ×3 → Naphtha ×3 + Refined Oil ×2
+Naphtha · Hydrocracking    Vacuum Gas Oil ×5 + Hydrogen ×1 → Naphtha ×3 + Refined Oil ×2
 ```
 
 The core conversion unit of a refinery, and its purpose fits in one line: **turn what is heavy and
@@ -2441,12 +2441,12 @@ it takes to hold that output. So switching liquids is invisible on the power gri
 | Temp. | Liquid | Heat | Efficiency | Per unit | At full load |
 |---|---|---|---|---|---|
 | 250 °C | Algal Oil | 4.2 MJ | 30% | 1.26 MJ | 170.8 /s |
-| 500 °C | **Vanadium Residue Oil** | 12.0 MJ | 43% | 5.16 MJ | 41.9 /s |
-| 600 °C | **Vacuum Gas Oil** | 8.0 MJ | 46% | 3.69 MJ | 58.6 /s |
+| 500 °C | **Vanadium Residue Oil** | 4.5 MJ | 43% | 1.94 MJ | 111.6 /s |
+| 600 °C | **Vacuum Gas Oil** | 4.5 MJ | 46% | 2.07 MJ | 104.1 /s |
 | 700 °C | **Benzene** | 22.4 MJ | 49% | 10.88 MJ | 19.9 /s |
 | 750 °C | Refined Oil | 4.5 MJ | 50% | 2.23 MJ | 96.8 /s |
 | 800 °C | **Cumene** | 35.8 MJ | 51% | 18.10 MJ | 11.9 /s |
-| 900 °C | **Naphtha** | 3.0 MJ | 52% | 1.57 MJ | 137.9 /s |
+| 900 °C | **Naphtha** | 4.5 MJ | 52% | 2.35 MJ | 91.9 /s |
 | 950 °C | **Propylene** | 14.1 MJ | 53% | 7.46 MJ | 28.9 /s |
 | 1000 °C | Ethylene | 9.7 MJ | 54% | 5.20 MJ | 41.5 /s |
 | 1300 °C | **Acetone** | 12.3 MJ | 57% | 6.98 MJ | 31.0 /s |
@@ -2459,7 +2459,7 @@ it takes to hold that output. So switching liquids is invisible on the power gri
 >
 > **And the four cuts of a single barrel of crude demonstrate the whole rule by themselves**, with no need to reach for algal oil and ammonia:
 >
-> | Residue 12.0 MJ / 500 °C | Gas oil 8.0 / 600 | Refined oil 4.5 / 750 | Naphtha 3.0 / 900 |
+> | Residue 500 °C | Gas oil 600 | Refined oil 750 | Naphtha 900 |
 > |---|---|---|---|
 >
 > The further down the column, the heavier and the denser in energy — and also the more sulfur and metal, and the less heat the hot gas path will tolerate. **The two ladders run strictly opposite**, and they are four things separated out of one barrel.
@@ -3067,8 +3067,8 @@ nothing in the first place, and **not a point of activity is spent**. You will n
 | Recipe | In → Out |
 |---|---|
 | Ethylene · Methanol to Olefins (Fluidised Bed) | Methanol ×7 → Ethylene ×2 + Propylene ×1 + Water ×7 |
-| Propylene · Catalytic Cracking | Refined Oil ×6 → Propylene ×4 + Ethylene ×6 |
-| Hydrogen · Catalytic Reforming | Refined Oil ×1 + Water ×4 → Carbon Monoxide ×4 + Hydrogen ×8 |
+| Propylene · Catalytic Cracking | Vacuum Gas Oil ×12 → Propylene ×2 + Ethylene ×3 |
+| Hydrogen · Steam Reforming | Naphtha ×4 + Water ×4 → Carbon Monoxide ×4 + Hydrogen ×8 |
 
 All three are real molecular-sieve processes, and **the carbon and hydrogen balance
 exactly**: the first is `4 CH₃OH → 2 C₂H₄ + 4 H₂O` and `3 CH₃OH → C₃H₆ + 3 H₂O` merged;
