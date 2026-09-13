@@ -360,7 +360,7 @@ namespace ProjectEden.Preloader
             List<Stmt> stmts = Split(m, code, twin);
 
             // 载荷局部的零初始化不含载荷字段，切不出来，得反过来补——理由见 ConstInits。
-            stmts.AddRange(ConstInits(m, code, stmts));
+            stmts.AddRange(ConstInits(ctx, m, code, stmts));
             stmts.Sort((x, y) => x.To.CompareTo(y.To));
 
             // **但「形状对」不等于「拼得出来」**，而拼不拼得出来又要先知道载荷局部——这是个环。
@@ -669,6 +669,7 @@ namespace ProjectEden.Preloader
             "ldfld:PAY div stloc",  // local = X.inc / count（求等级）
             "ldc stloc",            // local = 常量（零初始化，孪生值恒为 0）
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
+            "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
             "call:split_inc stloc",  // local = split_inc(ref n, ref m, p)
         }, StringComparer.Ordinal);
 
@@ -683,7 +684,7 @@ namespace ProjectEden.Preloader
         ///
         /// <b>顺序上它必须在载荷语句之后算</b>：谁是候选载荷局部，要先看载荷语句。
         /// </summary>
-        private static List<Stmt> ConstInits(MethodDefinition m, IList<Instruction> code,
+        private static List<Stmt> ConstInits(Ctx ctx, MethodDefinition m, IList<Instruction> code,
             List<Stmt> stmts)
         {
             var extra = new List<Stmt>();
@@ -698,8 +699,10 @@ namespace ProjectEden.Preloader
                 if (v != null) cand.Add(v);
             }
 
-            if (cand.Count == 0) return extra;
-
+            // **不能在这里因为「没有种子」提前返回。** 载荷参数复制进局部（`V_1 = inc`）
+            // 自己就是种子，不需要先有一条含载荷字段的语句——而
+            // StationComponent::DispatchSupplyShip 恰好是这样：它的局部全部来自参数和
+            // split_inc，一条载荷字段语句都没有，于是提前返回把整个方法的品质流断在了开头。
             var taken = new HashSet<int>();
 
             // (1) 复制传播与 split_inc，一起跑到不动点——它们互相喂：
@@ -732,6 +735,26 @@ namespace ProjectEden.Preloader
                     extra.Add(new Stmt { From = i - 1, To = i, Core = "ldloc stloc", Synth = true });
 
                     if (cand.Add(dst)) grew = true;
+                }
+
+                // 载荷**参数**复制进局部：`V_1 = inc`。和局部之间的复制是两回事——
+                // 参数那一侧的品质在侧信道寄存器里，不在某个孪生局部里。
+                // StationComponent::DispatchSupplyShip 开头就是这个形状，它不通，
+                // 后面 split_inc 和五处 `X.inc -= 份额` 全都拼不出来。
+                for (var i = 1; i < code.Count; i++)
+                {
+                    if (taken.Contains(i) || !IsStloc(code[i])) continue;
+
+                    VariableDefinition adst = VarOf(m, code[i]);
+                    ParameterDefinition ap = IsLdarg(code[i - 1]) ? ParamOf(m, code[i - 1]) : null;
+
+                    if (adst == null || ap == null || !ctx.ParamSlot.ContainsKey(ap)) continue;
+
+                    taken.Add(i);
+
+                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldarg:PAY stloc", Synth = true });
+
+                    if (cand.Add(adst)) grew = true;
                 }
 
                 for (var i = 1; i < code.Count; i++)
@@ -1040,6 +1063,11 @@ namespace ProjectEden.Preloader
             return v != null && !carriers.Contains(v);
         }
 
+        private static bool IsLdarg(Instruction i) =>
+            i.OpCode == OpCodes.Ldarg || i.OpCode == OpCodes.Ldarg_S ||
+            i.OpCode == OpCodes.Ldarg_0 || i.OpCode == OpCodes.Ldarg_1 ||
+            i.OpCode == OpCodes.Ldarg_2 || i.OpCode == OpCodes.Ldarg_3;
+
         private static bool IsLdloc(Instruction i) =>
             i.OpCode == OpCodes.Ldloc || i.OpCode == OpCodes.Ldloc_S ||
             i.OpCode == OpCodes.Ldloc_0 || i.OpCode == OpCodes.Ldloc_1 ||
@@ -1344,6 +1372,25 @@ namespace ProjectEden.Preloader
                 sval.Add(Instruction.Create(OpCodes.Stloc, sdt));
 
                 return sval;
+            }
+
+            // local = <载荷参数>  →  twinLocal = Q<槽位>
+            case "ldarg:PAY stloc":
+            {
+                ParameterDefinition qp = ParamOf(ctx.Method, code[job.From]);
+                VariableDefinition qdst = VarOf(ctx.Method, store);
+
+                if (qp == null || qdst == null) return null;
+                if (!ctx.ParamSlot.TryGetValue(qp, out int qslot) || qslot >= ctx.Regs.Count) return null;
+                if (!ctx.Locals.TryGetValue(qdst, out VariableDefinition qtv)) return null;
+
+                var qout = new List<Instruction> { Instruction.Create(OpCodes.Ldsfld, ctx.Regs[qslot]) };
+
+                if (qtv == null) return qout;
+
+                qout.Add(Instruction.Create(OpCodes.Stloc, qtv));
+
+                return qout;
             }
 
             // localB = localA  →  twinB = twinA
@@ -1852,6 +1899,10 @@ namespace ProjectEden.Preloader
             // localB = localA → twinB = twinA。同样是补进去的。
             "ldloc stloc",
 
+            // local = 载荷参数 → twinLocal = Q<槽位>。和上一条是两回事：
+            // 参数那一侧的品质在侧信道寄存器里，不在某个孪生局部里。
+            "ldarg:PAY stloc",
+
             // local = split_inc(ref n, ref m, p)。**split_inc 一族的入口**：
             // 站点内搬运那 9 处 `X.inc -= 份额` 的被减数就是它定义的局部。
             "call:split_inc stloc",
@@ -1915,6 +1966,7 @@ namespace ProjectEden.Preloader
             "ldfld:PAY stloc",                                      // local = X.inc
             "ldc stloc",                                            // local = 常量（载荷局部的零初始化）
             "ldloc stloc",                                          // local = 另一个载荷局部
+            "ldarg:PAY stloc",                                      // local = 载荷参数
             "call:split_inc stloc",                                 // local = split_inc(...)
             "ldflda:PAY dup ldind.i4 add stind.i4",                 // X.inc += v
             "ldflda:PAY dup ldind.i4 sub stind.i4",                 // X.inc -= v

@@ -147,6 +147,13 @@ namespace ProjectEden.Preloader
             "StorageComponent/GRID::inc",
             "StationStore::inc",
             "AssemblerComponent::incServed",
+
+            // 这两个不是「又一个载荷」，是**主干道内部的临时元组**：
+            // StorageComponent::Sort 把格子归并整理时，点数先落到 IDCNTINC 再写回格子。
+            // 不把它们算进主干道，Sort 就会用一个没有孪生的临时值覆盖 grids[i].inc，
+            // 而 grids[i].qua 留着上一次的旧值——不报错，整理一次品质就串一次。
+            "IDCNTINC::inc",
+            "IDCNTMAX::inc",
         };
 
         /// <summary>
