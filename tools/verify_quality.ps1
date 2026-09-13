@@ -70,6 +70,7 @@ Write-Host ("  MIXED (hand work)       : {0} methods, {1} accesses" -f (Field $r
 Write-Host ("  effect-only (untouched) : {0} methods" -f (Field $r "EffectOnlyMethods"))
 Write-Host ("  display only (stage 4)  : {0} methods, {1} accesses" -f (Field $r "UiMethods"), (Field $r "UiAccesses"))
 Write-Host ("  twin-parameter seeds    : {0} methods, {1} slots" -f (Field $r "ParamMethods"), (Field $r "ParamSlots"))
+Write-Host ("  notify sink (skipped)   : {0} methods" -f (Field $r "SkippedParamMethods"))
 Write-Host ("  save streams to branch  : {0}" -f (Field $r "SaveStreams"))
 
 if ($suspects.Count -gt 0) {

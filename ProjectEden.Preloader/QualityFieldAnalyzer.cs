@@ -51,6 +51,9 @@ namespace ProjectEden.Preloader
             internal int UiAccesses;
             internal int ParamMethods;
             internal int ParamSlots;
+
+            /// <summary>通知汇里被跳过的方法数</summary>
+            internal int SkippedParamMethods;
             internal int SaveStreams;
 
             /// <summary>按访问数排序的纯搬运方法，用来核对改写阶段的命中数</summary>
@@ -148,6 +151,31 @@ namespace ProjectEden.Preloader
             "PrefabDesc::unitColdSpeedInc",
             "DFGBaseComponent::incomingSkillsCursor",
             "DefenseSystem::incomingSupernovaTime",
+        };
+
+        /// <summary>
+        /// <b>通知汇：品质不往这里流，按设计丢弃。</b>
+        ///
+        /// 这一族是「玩家背包收到东西了」的事件广播，下游是成就、统计和机甲，
+        /// 没有一个需要知道品质——和燃料、弹药一样属于设计稿 B 组的「终端消耗」。
+        ///
+        /// 而摘掉它还顺带消掉了整个 1b 里最麻烦的一个形状：<c>Player/DItemNotify</c>
+        /// 是个<b>委托类型</b>，它的 <c>Invoke</c> / <c>BeginInvoke</c> 带着 inc 参数，
+        /// 还有两个处理器（<c>GameHistoryData::OnPlayerPackageAddItem</c> 和
+        /// <c>Mecha::OnPlayerPackageAddItem</c>）是靠 <c>ldftn</c> 绑上去的。
+        /// 要给它加参数，就得同时改委托的两个虚方法签名和两个处理器，
+        /// 而委托签名一旦和处理器差一个参数，绑定会在**运行时**才炸。
+        /// 实测过这一族是整个目标集里<b>唯一</b>的虚方法与 <c>ldftn</c> 来源，
+        /// 摘掉之后剩下的全是普通实例/静态方法，加参数是纯机械操作。
+        /// </summary>
+        private static readonly string[] NotifySink =
+        {
+            "Player/DItemNotify::Invoke",
+            "Player/DItemNotify::BeginInvoke",
+            "Player::NotifyPackageAddItem",
+            "Player::NotifyDeliveryPackageAddItem",
+            "GameHistoryData::OnPlayerPackageAddItem",
+            "Mecha::OnPlayerPackageAddItem",
         };
 
         /// <summary>
@@ -405,6 +433,8 @@ namespace ProjectEden.Preloader
         private static void CountParams(ModuleDefinition module,
             IDictionary<string, FieldDefinition> payload, Report r)
         {
+            var skip = new HashSet<string>(NotifySink, StringComparer.Ordinal);
+
             foreach (TypeDefinition t in AllTypes(module))
             {
                 if (IsDisplayOnly(t)) continue;
@@ -414,6 +444,8 @@ namespace ProjectEden.Preloader
                     int slots = m.Parameters.Count(p => LooksLikeInc(p.Name) && IsIntegerPayload(p.ParameterType));
 
                     if (slots == 0) continue;
+
+                    if (skip.Contains(t.FullName + "::" + m.Name)) { r.SkippedParamMethods++; continue; }
 
                     r.ParamMethods++;
                     r.ParamSlots += slots;
@@ -446,9 +478,20 @@ namespace ProjectEden.Preloader
 
         // ── 小工具 ──────────────────────────────────────────────
 
+        /// <summary>
+        /// 整数、整数数组，或者<b>整数的引用</b>。
+        ///
+        /// 最后那一条是补上的，而它漏掉时的表现正是这个仓库最怕的那种：
+        /// <c>Int32&amp;</c> 的 <c>MetadataType</c> 是 <c>ByReference</c> 而不是 <c>Int32</c>，
+        /// 所以第一版把<b>每一个 out / ref 的 inc 参数都判成了「不是载荷」</b>——
+        /// 参数种子数报 55，真实是 83，而报告上一切正常。
+        /// out 参数恰恰是「取货时把点数带出来」那一侧，漏掉它等于品质只进不出。
+        /// </summary>
         private static bool IsIntegerPayload(TypeReference t)
         {
             if (t is ArrayType arr) return IsIntegerPayload(arr.ElementType);
+
+            if (t is ByReferenceType byRef) return IsIntegerPayload(byRef.ElementType);
 
             switch (t.MetadataType)
             {
