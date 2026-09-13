@@ -141,7 +141,20 @@ namespace ProjectEden.Patches
             int itemId = pool[index].protoId;
             int count = pool[index].itemRequired;
 
+            // **调用前后各清一次品质侧信道。** preloader 把 TakeTailItems 改写成了
+            // 「读寄存器（入参方向）+ 在 ret 前写寄存器（出参方向）」，而那条协议
+            // 只在游戏自己的调用点上接好了。我们不清的话：进去时它消费上一个人留下的值，
+            // 出来时它留下的值又会被下一个读它的人当成自己的——两头都会让品质凭空长出来。
+            //
+            // 这一处是 tools/verify_quality.ps1 新加的那道检查第一次跑就抓出来的，
+            // 而肉眼扫「谁调了搬运方法」时它被漏掉了：建造扣料看着和物品搬运不是一回事。
+            //
+            // 建好的建筑不保留品质（建筑没有品质槽位），所以这里是清零而不是赋值。
+            if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+
             player.package.TakeTailItems(ref itemId, ref count, out int _, false);
+
+            if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
 
             if (count <= 0) return false;
 

@@ -391,6 +391,83 @@ if ($wrote) {
     $asm7.Dispose()
 }
 
+# ---------------------------------------------------------------------------
+# Our own assembly must not call a channel-consuming game method unguarded.
+#
+# The side channel's contract is "the caller writes the register just before the
+# call". The preloader wires that up for the GAME's own call sites only - when
+# THIS mod calls the same methods, nobody writes the register, so the callee
+# consumes whatever the previous caller left behind and quality is invented out
+# of nowhere (measured: per-item climbed from a cap of 100 to 7600).
+#
+# We cannot check "is this call gated" reliably from IL, but we CAN check that
+# the SET of such call sites has not grown. A new one appearing is exactly the
+# failure mode that actually happened, and it is silent in game.
+$plugin = Join-Path $PSScriptRoot "..\ProjectEden\bin\$Config\ProjectEden.dll"
+
+if (Test-Path $plugin) {
+    $rpP = New-Object Mono.Cecil.ReaderParameters
+    $rpP.AssemblyResolver = $resolver
+    $ours = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($plugin, $rpP)
+
+    # Methods whose rewritten body reads the channel, so a caller must write it first.
+    $consumers = @(
+        "PlanetFactory::InsertInto", "StationComponent::AddItem", "StationComponent::TakeItem",
+        "StationComponent::InputItem", "StorageComponent::AddItem", "StorageComponent::TakeItem",
+        "StorageComponent::AddItemStacked", "StorageComponent::AddItemFiltered",
+        "StorageComponent::AddItemFilteredBanOnly", "StorageComponent::AddItemForSort",
+        "StorageComponent::AddItemBanGridFirst", "StorageComponent::AddCargo",
+        "StorageComponent::TakeItemFromGrid", "StorageComponent::TakeHeadItems",
+        "StorageComponent::TakeTailItems", "StorageComponent::TakeTailFuel",
+        "StorageComponent::TakeTailItemsFiltered", "StorageComponent::Sort",
+        "CargoPath::TryPickItem", "CargoPath::TryPickItemAtRear", "CargoPath::TryPickFuel",
+        "CargoPath::TryUpdateItemAtHeadAndFillBlank", "CargoTraffic::TryPickItemAtRear",
+        "CargoContainer::AddCargo", "CargoContainer::AddItemStackToCargo"
+    )
+
+    # Declared and reviewed: each of these sits behind QualityAccess.ClearChannel /
+    # SetChannel0. Adding a row here means you have gated that call site.
+    #
+    # BLIND SPOT, stated rather than papered over: CargoWidening reaches
+    # TryInsertItemAtHeadAndFillBlank / TryPickItemAtRear through runtime-bound
+    # DELEGATES (that is how it survives the preloader changing their signatures),
+    # so its calls carry no MethodReference and this scan cannot see them. Those
+    # three wrappers - InsertAtHead, PickAtRearCore x2 - are gated by hand and must
+    # be re-checked by hand. They are the only delegate-bound calls in the mod;
+    # if a second such mechanism ever appears, this check goes blind for it too.
+    $declared = @(
+        "HubCourierPatches::Drain", "HubCourierPatches::TopUp",
+        "InstantBuildPatches::Pay"
+    )
+
+    $found = @()
+    foreach ($t in $ours.MainModule.Types) {
+        foreach ($m in $t.Methods) {
+            if (-not $m.HasBody) { continue }
+            foreach ($i in $m.Body.Instructions) {
+                if ($i.Operand -eq $null) { continue }
+                $r = $i.Operand -as [Mono.Cecil.MethodReference]
+                if ($r -eq $null) { continue }
+                $key = "{0}::{1}" -f $r.DeclaringType.Name, $r.Name
+                if ($consumers -contains $key) { $found += "{0}::{1}" -f $t.Name, $m.Name }
+            }
+        }
+    }
+
+    $found = $found | Sort-Object -Unique
+    foreach ($f in $found) { Write-Host ("        call site: $f") -ForegroundColor DarkGray }
+    $extra = $found | Where-Object { $declared -notcontains $_ }
+
+    foreach ($e in $extra) {
+        Write-Host ("        ungated call into a channel-consuming method: $e") -ForegroundColor Red
+    }
+
+    Check ($extra.Count -eq 0) ("this mod's calls into channel-consuming game methods are all declared (" + $found.Count + " site(s))")
+    $ours.Dispose()
+} else {
+    Write-Host "        skipped: $plugin not built" -ForegroundColor DarkYellow
+}
+
 Write-Host ""
 if ($fail -gt 0) {
     Write-Host "$fail assertion(s) FAILED" -ForegroundColor Red
