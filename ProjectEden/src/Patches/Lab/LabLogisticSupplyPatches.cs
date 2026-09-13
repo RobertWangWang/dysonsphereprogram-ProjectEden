@@ -227,6 +227,11 @@ namespace ProjectEden.Patches
                         // 原来那一整份点数，相当于凭空多出增产——研究站这边不吃点数（见 GiveAssemble）。
                         int incTake = (int)((long)station.storage[s].inc * take / station.storage[s].count);
 
+                        // 品质同理，而且必须在 count 扣减**之前**算比例。研究站没有品质槽位，
+                        // 所以取走的这一份就地丢掉——丢是有界的损失，不扣才是凭空增长：
+                        // 剩下的货会顶着整格的点数，单件分数当场跳上去。
+                        QualityAccess.TakeStationQua(ref station.storage[s], (int)take);
+
                         station.storage[s].count -= (int)take;
                         station.storage[s].inc -= incTake;
 

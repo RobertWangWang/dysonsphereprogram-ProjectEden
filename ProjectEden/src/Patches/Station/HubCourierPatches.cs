@@ -475,14 +475,44 @@ namespace ProjectEden.Patches
                 if (room <= 0) continue;
 
                 int move = surplus < room ? surplus : room;
+
+                // **调用前清零**：StorageComponent.TakeItem 既读侧信道也写侧信道
+                // （实测读 3 写 2），不清的话它读到的是上一个人留下的值。
+                if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+
                 int taken = buffer.TakeItem(itemId, move, out int inc);
+
+                // **调用后读一次**：取货类的方法是「被调方写、调用方读」，
+                // 这一笔就是它从缓冲仓里带出来的品质。读完清掉，别留给下一个人。
+                int qua = QualityAccess.ChannelReady ? QualityAccess.GetChannel0() : 0;
+
+                if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
 
                 if (taken <= 0) continue;
 
                 slots[slot].itemId = itemId;
                 slots[slot].count += taken;
                 slots[slot].inc += inc;
+
+                QualityAccess.GiveStationQua(ref slots[slot], qua);
             }
+        }
+
+        /// <summary>
+        /// 这一格里 <paramref name="move"/> 件货对应多少品质。<b>只算不扣</b>——
+        /// 实际扣多少要等 AddItem 告诉我们它吃下了多少（和 <c>remainInc</c> 同构）。
+        /// </summary>
+        private static int QuaShareOf(StationStore store, int move)
+        {
+            if (!QualityAccess.Ready || move <= 0 || store.count <= 0) return 0;
+
+            int qua = QualityAccess.GetStationQua(ref store);
+
+            if (qua <= 0) return 0;
+
+            long share = (long)qua * move / store.count;
+
+            return share > qua ? qua : (int)share;
         }
 
         /// <summary>这一格的物品在前面的格子里出现过吗——用来做「每种货只处理一次」。</summary>
@@ -518,14 +548,22 @@ namespace ProjectEden.Patches
                 // 按比例带走增产点数——只扣数量不扣 inc 等于凭空增产
                 int inc = slots[s].count > 0 ? (int)((long)slots[s].inc * move / slots[s].count) : 0;
 
-                // **调游戏的搬运方法之前把品质侧信道清零。** preloader 把
-                // StorageComponent.AddItem 改写成了「从 ProjectEdenQualityChannel 读品质」,
-                // 协议是调用方在调用前写——它只在游戏自己的调用点上接好了。
-                // 我们不清的话，它消费的是上一个人留下的值，品质会凭空长出来。
-                // 清零 = 这一笔不带品质（品质在这条路上被丢掉，有界且可解释）。
-                if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+                // **把这一笔的品质写进侧信道，再调 AddItem。**
+                // preloader 把它改写成了「从 ProjectEdenQualityChannel 读品质」，
+                // 协议是调用方在调用前写——而这条协议它只在游戏自己的调用点上接好了。
+                // 不写的话它消费的是上一个人留下的值，品质会凭空长出来。
+                //
+                // 这里能把品质真的送过去（而不是像传送带那几条路那样丢掉），
+                // 因为两头都是有品质槽位的容器。
+                int qua = QuaShareOf(slots[s], move);
+
+                if (QualityAccess.SetChannel0 != null) QualityAccess.SetChannel0(qua);
 
                 int added = buffer.AddItem(itemId, move, inc, out int remainInc, false);
+
+                // **没吃下的那部分还留在寄存器里**（部分入库时 AddItem 走的是按比例的 Split），
+                // 所以真正被带走的是差额——和 remainInc 完全同构。读完清掉。
+                int remainQua = QualityAccess.ChannelReady ? QualityAccess.GetChannel0() : 0;
 
                 if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
 
@@ -536,6 +574,12 @@ namespace ProjectEden.Patches
 
                 slots[s].count -= added;
                 slots[s].inc -= usedInc;
+
+                int usedQua = qua - remainQua;
+
+                if (usedQua > 0 && QualityAccess.Ready)
+                    QualityAccess.SetStationQua(ref slots[s],
+                        QualityAccess.GetStationQua(ref slots[s]) - usedQua);
             }
         }
 

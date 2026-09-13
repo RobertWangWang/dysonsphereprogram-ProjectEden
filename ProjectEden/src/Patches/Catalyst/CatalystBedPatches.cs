@@ -329,6 +329,11 @@ namespace ProjectEden.Patches
 
             if (slot < 0 || station.storage[slot].count < need) return false;
 
+            // 催化剂本身通常没有品质，但**不扣就是不变量的漏洞**：万一哪天有一笔品质
+            // 落到这一格上，只扣件数会让剩下的催化剂单件分数一路涨上去。
+            // 比例要在 count 扣减之前算。
+            QualityAccess.TakeStationQua(ref station.storage[slot], need);
+
             station.storage[slot].count -= need;
 
             return true;

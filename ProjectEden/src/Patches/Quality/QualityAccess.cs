@@ -210,6 +210,76 @@ namespace ProjectEden.Patches
         /// <summary>数出来的寄存器个数，只用于开机那行状态。</summary>
         internal static int Registers;
 
+        internal delegate void ChannelSet(int v);
+
+        /// <summary>
+        /// 往 0 号寄存器写一笔品质，<b>紧接着</b>调游戏的入库方法。
+        /// 这是把品质真的送过去，而不是 <see cref="ClearChannel"/> 那样丢掉它。
+        /// </summary>
+        internal static readonly ChannelSet SetChannel0 = MakeChannelSet();
+
+        private static ChannelSet MakeChannelSet()
+        {
+            Type t = AccessTools.TypeByName("ProjectEdenQualityChannel");
+
+            FieldInfo f = t != null ? AccessTools.Field(t, "Q0") : null;
+
+            if (f == null || !f.IsStatic || f.FieldType != typeof(int)) return null;
+
+            try
+            {
+                var dm = new DynamicMethod("ProjectEden_SetQ0", null, new[] { typeof(int) }, t, true);
+
+                ILGenerator il = dm.GetILGenerator();
+
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Stsfld, f);
+                il.Emit(OpCodes.Ret);
+
+                return (ChannelSet)dm.CreateDelegate(typeof(ChannelSet));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        // ── 手写搬运的两个口子 ────────────────────────────────
+
+        /// <summary>
+        /// 从这一格<b>按件数比例</b>取走品质并扣掉，返回取走的那一份。
+        ///
+        /// <b>必须在 <c>count -= take</c> 之前调</b>：比例要拿扣减前的件数算。
+        ///
+        /// 这是本仓库所有手写搬运的必修课。只扣件数不扣品质，剩下的货就顶着整格的点数——
+        /// 一格 100 件 100 分的铜块拿走 80 件，剩下 20 件却还挂着 10000 点，
+        /// <b>单件从 100 跳到 500</b>。实测报上来的 694 分就是这么来的，
+        /// 而它和 <c>StationStore.inc</c> 上那条「每次搬运都白送一次增产」是同一个形状。
+        /// </summary>
+        internal static int TakeStationQua(ref StationStore store, int take)
+        {
+            if (!Ready || take <= 0) return 0;
+
+            int qua = GetStationQua(ref store);
+
+            if (qua <= 0 || store.count <= 0) return 0;
+
+            long share = (long)qua * take / store.count;
+
+            if (share > qua) share = qua;
+
+            SetStationQua(ref store, qua - (int)share);
+
+            return (int)share;
+        }
+
+        internal static void GiveStationQua(ref StationStore store, int qua)
+        {
+            if (!Ready || qua <= 0) return;
+
+            SetStationQua(ref store, GetStationQua(ref store) + qua);
+        }
+
         // ── 储物格（储物箱 / 背包 / 物流塔共用的那张表）────────────
 
         internal delegate int GridGet(ref StorageComponent.GRID g);
