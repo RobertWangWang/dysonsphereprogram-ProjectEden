@@ -17,9 +17,15 @@ namespace ProjectEden.Patches
     /// 屏幕上显示成「当前5000 品质 10」——数字被标签盖掉了一半。
     /// 往一个右对齐的文本后面追加内容，视觉上等于往它**前面**插内容。
     ///
-    /// 所以品质单独一个 Text，**挂成数字的子物体并锚在它的右边缘**。
-    /// 这样不需要知道父级的布局、锚点和 pivot 是什么（那些在 prefab 里，离线读不到），
-    /// 而且 vanilla 或 <c>StationExpandPatches</c> 把那一行挪到哪里，它都跟着走。
+    /// 所以品质单独一个 Text，放在**进度条的右内侧**——条是从左往右填的，右端最不占用。
+    ///
+    /// <b>它必须是「整行」的最后一个子物体，挂进进度条里面不行。</b> 挂进滑块内部试过,
+    /// 照样被白色填充盖住：<c>countBar</c> 是 <c>maxSlider</c> 的**兄弟节点**且排在它后面,
+    /// 而层级顺序就是渲染顺序，所以滑块的任何子物体都在填充之下。
+    /// 「画在最上面」只能靠成为**共同父级的最后一个子物体**。
+    ///
+    /// 位置是**照抄进度条的矩形**再靠右对齐：锚点、pivot、拉伸方式都在 prefab 里，
+    /// 离线读不到，照抄就不必知道它们分别是什么。
     ///
     /// 显示的是<b>每件品质分</b>而不是总分：总分随件数变，看不出好坏；每件分才是玩家要比的量。
     /// </summary>
@@ -78,17 +84,20 @@ namespace ProjectEden.Patches
 
             if (src == null) return null;
 
-            // **挂到进度条上，不是挂到数字右边。** 数字右边紧接着就是进度条，字一伸出去就压在
-            // 条上，而且被条的填充盖掉一半——渲染顺序是层级顺序，兄弟节点里它排在条前面。
-            // 条是从左往右填的，所以**右端**是最不占用的地方；挂成条的最后一个子物体,
-            // 就一定画在填充之上。
-            Transform host = ui.maxSlider != null ? ui.maxSlider.transform : src.transform;
+            // **挂到整行上，排在最后**，而不是挂进进度条里面。
+            //
+            // 挂进滑块内部试过，仍然被白色填充盖住——因为 `countBar` 是 `maxSlider` 的
+            // **兄弟节点**且排在它后面，滑块的任何子物体都在它下面。层级顺序就是渲染顺序,
+            // 所以「画在最上面」只能靠成为**共同父级的最后一个子物体**，
+            // 挂进其中一个兄弟里面是够不着的。
+            var bar = ui.maxSlider != null ? ui.maxSlider.transform as RectTransform : null;
+            Transform host = bar != null && bar.parent != null ? bar.parent : src.transform;
 
             // 已经建过就捡回来：换场景之后字典是空的，而物体还在。
             // 不捡的话会在克隆体里再克隆一层，一层套一层——那是 MultiProductUIPatches
             // 记过的「克隆出两份、你写的那份不是画在上面的那份」。
             Transform had = host.Find(LabelName);
-            Text label = had != null ? had.GetComponent<Text>() : Build(src, host);
+            Text label = had != null ? had.GetComponent<Text>() : Build(src, host, bar);
 
             if (label == null) return null;
 
@@ -97,7 +106,7 @@ namespace ProjectEden.Patches
             return label;
         }
 
-        private static Text Build(Text src, Transform host)
+        private static Text Build(Text src, Transform host, RectTransform bar)
         {
             var go = Object.Instantiate(src.gameObject, host, false);
 
@@ -111,17 +120,32 @@ namespace ProjectEden.Patches
             for (int k = label.transform.childCount - 1; k >= 0; k--)
                 Object.Destroy(label.transform.GetChild(k).gameObject);
 
-            // 排在最后 = 画在最上面。条的填充和滑块都是它的兄弟节点，排在前面。
+            // 排在最后 = 画在最上面。进度条、填充、滑块都是它的兄弟节点，排在前面。
             label.transform.SetAsLastSibling();
 
             RectTransform r = label.rectTransform;
 
-            // 贴住宿主的**右内侧**，pivot 也在右边：字往左长，离填充的推进方向最远。
-            r.anchorMin = new Vector2(1f, 0.5f);
-            r.anchorMax = new Vector2(1f, 0.5f);
-            r.pivot = new Vector2(1f, 0.5f);
-            r.anchoredPosition = new Vector2(-10f, 0f);
-            r.sizeDelta = new Vector2(150f, src.rectTransform.rect.height);
+            if (bar != null)
+            {
+                // **整个矩形照抄进度条**，再靠右对齐把字顶到条的右端。
+                // 抄比算可靠：锚点、pivot、拉伸方式都是 prefab 里的，离线读不到,
+                // 照抄就不必知道它们分别是什么。
+                r.anchorMin = bar.anchorMin;
+                r.anchorMax = bar.anchorMax;
+                r.pivot = bar.pivot;
+                r.anchoredPosition = bar.anchoredPosition;
+                r.sizeDelta = bar.sizeDelta;
+                r.offsetMin = bar.offsetMin;
+                r.offsetMax = bar.offsetMax - new Vector2(10f, 0f);   // 右内侧留一点边
+            }
+            else
+            {
+                r.anchorMin = new Vector2(1f, 0.5f);
+                r.anchorMax = new Vector2(1f, 0.5f);
+                r.pivot = new Vector2(1f, 0.5f);
+                r.anchoredPosition = new Vector2(-10f, 0f);
+                r.sizeDelta = new Vector2(150f, src.rectTransform.rect.height);
+            }
 
             label.alignment = TextAnchor.MiddleRight;
             label.horizontalOverflow = HorizontalWrapMode.Overflow;
@@ -131,12 +155,12 @@ namespace ProjectEden.Patches
             // **颜色要在两种底色上都读得出来。** 条的填充是浅色、未填充部分是深色,
             // 而这个标签会随着填充推进从深底变成浅底。暖色加一圈黑描边,
             // 两种底色下都不会消失——只挑一种颜色的话，总有一半时间看不见。
-            label.color = new Color(1f, 0.78f, 0.35f);
+            label.color = new Color(1f, 0.72f, 0.22f);
 
             var outline = go.GetComponent<Outline>() ?? go.AddComponent<Outline>();
 
-            outline.effectColor = new Color(0f, 0f, 0f, 0.85f);
-            outline.effectDistance = new Vector2(1.2f, -1.2f);
+            outline.effectColor = new Color(0f, 0f, 0f, 1f);
+            outline.effectDistance = new Vector2(1.5f, -1.5f);
 
             if (!_reported)
             {
@@ -145,10 +169,10 @@ namespace ProjectEden.Patches
                 // 布局出问题时要能从**数字**上改，不是从截图上估——这条规矩本仓库
                 // 在物流站面板上付过三次学费。
                 ProjectEdenPlugin.Log.LogInfo(
-                    $"物品品质：槽位品质标签已建，挂在 {host.name} 上（{host.childCount} 个子物体）。" +
-                    $"宿主 rect={((RectTransform)host).rect}；" +
-                    $"源文本 rect={src.rectTransform.rect}、对齐 {src.alignment}。" +
-                    "标签贴宿主右内侧 10 像素、右对齐、排在最后一个子物体。");
+                    $"物品品质：槽位品质标签已建，挂在 {host.name} 上，排第 " +
+                    $"{label.transform.GetSiblingIndex() + 1}/{host.childCount} 个子物体。" +
+                    $"进度条 rect={(bar != null ? bar.rect.ToString() : "（没找到）")}；" +
+                    $"标签 rect={r.rect}。整个矩形照抄进度条，文字右对齐顶到右端。");
             }
 
             return label;
