@@ -46,11 +46,11 @@ namespace ProjectEden.Preloader
         /// <summary>
         /// 期望新增的孪生字段数。和 <see cref="QualityFieldAnalyzer"/> 的清单长度一致。
         ///
-        /// 30 → 27：<c>TrashObject</c> / <c>DroneData</c> / <c>CourierData</c> 会被原样上传到
+        /// 31 → 29：<c>TrashObject</c> / <c>DroneData</c> / <c>CourierData</c> 会被原样上传到
         /// <c>ComputeBuffer</c>，加字段会让 stride 和游戏里写死的那个对不上（实测启动即崩）。
         /// 理由和后续路线见 <c>QualityFieldAnalyzer.GpuUploaded</c>。
         /// </summary>
-        internal const int ExpectedFields = 27;
+        internal const int ExpectedFields = 29;
 
         internal static Report Apply(ModuleDefinition module)
         {
@@ -251,7 +251,25 @@ namespace ProjectEden.Preloader
             if (name.EndsWith("Inc", StringComparison.Ordinal) && name.Length > 3)
                 return name.Substring(0, name.Length - 3) + "Qua";
 
+            // cacheCargoInc1 → cacheCargoQua1。**编号后缀是这一族的第三种写法**,
+            // 而它躲过了上面两条：既不以 inc 开头，也不以 Inc 结尾。
+            // 自动集装机那两个缓存字段就是这么被整套名字启发式漏掉的——
+            // 和加宽那一期被 `_stack` / `itemInc` 漏掉是同一个坑：**按名字挑，就会按名字漏**。
+            int at = name.LastIndexOf("Inc", StringComparison.Ordinal);
+
+            if (at > 0 && at + 3 < name.Length && AllDigits(name, at + 3))
+                return name.Substring(0, at) + "Qua" + name.Substring(at + 3);
+
             return null;
+        }
+
+        private static bool AllDigits(string s, int from)
+        {
+            for (int i = from; i < s.Length; i++)
+                if (!char.IsDigit(s[i]))
+                    return false;
+
+            return true;
         }
     }
 }

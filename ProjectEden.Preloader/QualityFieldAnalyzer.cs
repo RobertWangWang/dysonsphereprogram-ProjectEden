@@ -123,6 +123,13 @@ namespace ProjectEden.Preloader
             // ——这正是那段反查存在的理由：漏一个缓冲区，品质会在那里静默蒸发，而所有计数都正常。
             "IDCNTINC::inc",
             "IDCNTMAX::inc",
+
+            // 自动集装机「正在叠的那一堆」的暂存。**整套名字启发式都漏掉了它们**：
+            // `cacheCargoInc1` 既不以 inc 开头、也不以 Inc 结尾，所以 LooksLikeInc 认不出,
+            // FindSuspects 的反查跟着也不认——和加宽那一期被 `_stack` 漏掉是同一个坑：
+            // **按名字挑，就会按名字漏。**
+            "PilerComponent::cacheCargoInc1",
+            "PilerComponent::cacheCargoInc2",
         };
 
         /// <summary>
@@ -154,6 +161,13 @@ namespace ProjectEden.Preloader
             // 而 grids[i].qua 留着上一次的旧值——不报错，整理一次品质就串一次。
             "IDCNTINC::inc",
             "IDCNTMAX::inc",
+
+            // 集装机的两个缓存。它们**也不是「又一个载荷」**，是主干道上的一段暂存：
+            // 货从带上取下来、攒够一层再放回去，中间就存在这两个字段里。
+            // 不算进主干道，叠一次货品质就掉一次——而这个 mod 的带子是 5000 层集装,
+            // 几乎所有货都要过集装机一趟，品质在这里掉等于品质走不出传送带。
+            "PilerComponent::cacheCargoInc1",
+            "PilerComponent::cacheCargoInc2",
         };
 
         /// <summary>

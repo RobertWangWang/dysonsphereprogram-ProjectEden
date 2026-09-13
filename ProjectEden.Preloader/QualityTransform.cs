@@ -503,6 +503,20 @@ namespace ProjectEden.Preloader
 
                 touched = true;
 
+                // **存档读入按语义认，不按形状认。**
+                //
+                // PilerComponent::Import 把整条记录读成**一条语句**：开头那个版本号读出来之后
+                // 一直留在栈上（末尾要拿它比大小），所以栈深中途从不归零，十来个字段的读写
+                // 全挤成一个形状串。把那一串写进形状表是没有意义的——它跟着游戏版本改字段就会变。
+                //
+                // 但语义是清楚的：这条语句从存档读东西，而且里面只有**一处**写载荷字段。
+                // 那一处的品质就是 0（写侧还没进存档）。按这两个条件归一化成一个形状名,
+                // 比列举那一串稳得多。
+                if (!TwinShapes.Contains(core) && !NoTwinShapes.Contains(core)
+                    && !DropShapes.Contains(core) && !SaveWriteShapes.Contains(core)
+                    && ReadsSave(code, from, to) && PayloadStores(code, from, to, twin) == 1)
+                    core = SaveReadCore;
+
                 // **只有写好发射代码的形状才算认得。** 光在 TwinShapes 里不算——
                 // 那会让变换报成功却什么都不做，品质恒为 0 而日志说一切正常。
                 if (TwinShapes.Contains(core))
@@ -807,6 +821,7 @@ namespace ProjectEden.Preloader
             "call:get_Value ldfld:PAY stloc",
             "ldfld:PAY mul sub stloc",
             "ldfld:PAY div mul ldc add stloc",
+            "ldfld:PAY ldfld:PAY add stloc",
             "call:split_inc stloc",  // local = split_inc(ref n, ref m, p)
         }, StringComparer.Ordinal);
 
@@ -918,7 +933,15 @@ namespace ProjectEden.Preloader
 
                     VariableDefinition cdst = VarOf(m, code[i]);
 
-                    if (cdst == null || !IsArith(code[i - 1])) continue;
+                    // 收尾可能有一条收窄：`… add ; conv.i2 ; stloc`。跳过它再看是不是算术,
+                    // 否则集装机那条 `V_17 = V_16 / V_15 × 4 + 0.5f` 就认不出来,
+                    // 而下游 `cacheCargoInc1 = V_16 - V_17` 整条跟着拼不出来。
+                    int cend = i - 1;
+
+                    if (cend > 0 && code[cend].OpCode.Name.StartsWith("conv.", StringComparison.Ordinal))
+                        cend--;
+
+                    if (cdst == null || !IsArith(code[cend])) continue;
 
                     int[] va = ArgStarts(code, i, 1);
 
@@ -1728,6 +1751,23 @@ namespace ProjectEden.Preloader
             return false;
         }
 
+        /// <summary>「从存档读进来的一条语句」的归一化形状名。</summary>
+        internal const string SaveReadCore = "存档读入 stfld:PAY";
+
+        /// <summary>这一段里写了几次主干道载荷字段。</summary>
+        private static int PayloadStores(IList<Instruction> code, int from, int to,
+            IDictionary<string, FieldDefinition> twin)
+        {
+            var n = 0;
+
+            for (int k = from; k <= to; k++)
+                if (code[k].OpCode == OpCodes.Stfld && code[k].Operand is FieldReference fr
+                    && twin.ContainsKey(fr.DeclaringType.FullName + "::" + fr.Name))
+                    n++;
+
+            return n;
+        }
+
         /// <summary>这一段里有没有 <c>BinaryReader</c> 的读调用——即「值来自存档」。</summary>
         private static bool ReadsSave(IList<Instruction> code, int from, int to)
         {
@@ -1932,6 +1972,12 @@ namespace ProjectEden.Preloader
                 case "stfld:PAY":
                 case "call:split_inc stfld:PAY":
                 case "ldfld:PAY ldfld:PAY add stfld:PAY":
+
+                // 集装机把「正在叠的那一堆」在两个缓存之间倒来倒去：A.inc = B.inc、
+                // A.inc = B.inc - n。目的地一侧没变，值一侧 TwinValue 本来就认得。
+                case "ldfld:PAY stfld:PAY":
+                case "ldfld:PAY sub stfld:PAY":
+                case "sub stfld:PAY":
                 {
                     if (tf == null) return null;
 
@@ -2062,6 +2108,38 @@ namespace ProjectEden.Preloader
                 obj.Add(Instruction.Create(OpCodes.Stfld, tf));
 
                 return obj;
+            }
+
+            // 整条记录读进来、里面只有一处写载荷：把那一处的孪生置零，别的一概不碰。
+            case SaveReadCore:
+            {
+                for (int k = job.From; k <= job.To; k++)
+                {
+                    if (code[k].OpCode != OpCodes.Stfld
+                        || !(code[k].Operand is FieldReference fr)
+                        || !ctx.Twin.TryGetValue(fr.DeclaringType.FullName + "::" + fr.Name,
+                            out FieldDefinition rtf)) continue;
+
+                    int[] ra = ArgStarts(code, k, 2);
+
+                    if (ra == null || ra[0] < job.From) return null;
+
+                    var rout = new List<Instruction>();
+
+                    for (int q = ra[0]; q < ra[1]; q++)
+                    {
+                        if (!IsPureLoad(code[q])) return null;
+
+                        rout.Add(Clone(code[q]));
+                    }
+
+                    rout.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+                    rout.Add(Instruction.Create(OpCodes.Stfld, rtf));
+
+                    return rout;
+                }
+
+                return null;
             }
 
             // 从存档读进来的那一族：X.inc = reader.ReadXxx()  →  X.qua = 0
@@ -2214,6 +2292,8 @@ namespace ProjectEden.Preloader
             case "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc":
             case "ldfld:PAY call:AddItemStacked bge.s":
             case "ldfld:PAY call:AddItemStacked stloc":
+            case "ldfld:PAY call:AddCargo stloc":
+            case "add ldfld:PAY ldfld:PAY add call:AddCargo stloc":
                 return BuildForwardToCallee(ctx, code, job);
 
             // 被调方通过 out 形参写回来：twinLocal = Q<槽位>，插在 call 之后。
@@ -2353,6 +2433,7 @@ namespace ProjectEden.Preloader
                 case "call:get_Value ldfld:PAY stloc":   // V = kvp.Value.inc（取值器已核实是纯读字段）
                 case "calc stloc":                       // V = 件数 × 每件品质分（纯算术）
                 case "ldfld:PAY mul sub stloc":          // V = X.inc - 等级 × 件数
+                case "ldfld:PAY ldfld:PAY add stloc":    // V = A.inc + B.inc（两堆合并）
                 case "ldfld:PAY div mul ldc add stloc":   // V = (点数/件数) × 新件数 + 0.5（自动集装机）
                 {
                     VariableDefinition dst = VarOf(ctx.Method, store);
@@ -2995,13 +3076,22 @@ namespace ProjectEden.Preloader
             "ldfld:PAY ldfld:PAY add stfld:PAY",
             "ldfld:PAY mul sub stloc",
 
+            // 集装机在两个缓存之间倒腾「正在叠的那一堆」
+            "ldfld:PAY stfld:PAY",
+            "ldfld:PAY sub stfld:PAY",
+            "sub stfld:PAY",
+            "ldfld:PAY ldfld:PAY add stloc",
+
             // 把品质传进被调方：在 call 之前写好寄存器。侧信道缺的那一半。
+            "ldfld:PAY call:AddCargo stloc",
+            "add ldfld:PAY ldfld:PAY add call:AddCargo stloc",
             "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc",
             "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc",
             "ldfld:PAY call:AddItemStacked bge.s",
             "ldfld:PAY call:AddItemStacked stloc",
 
             // 存档读侧：读进来的品质一律 0（写侧见 SaveWriteShapes，还没进存档）
+            SaveReadCore,
             "call:ReadInt32 stfld:PAY",
             "call:ReadByte stfld:PAY",
             "ldfld:PAY call:ReadInt32 stelem",
@@ -3048,7 +3138,13 @@ namespace ProjectEden.Preloader
             "call:get_package ldc stfld:PAY",                       // package.X.inc = 常数
             "ldfld:PAY ldfld:PAY add stfld:PAY",                    // X.inc = A.inc + B.inc
             "ldfld:PAY mul sub stloc",                              // V = X.inc - 等级 × 件数
-            "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc",     // 把品质传进被调方
+            "ldfld:PAY stfld:PAY",                                  // A.inc = B.inc
+            "ldfld:PAY sub stfld:PAY",                              // A.inc = B.inc - n
+            "sub stfld:PAY",
+            "ldfld:PAY ldfld:PAY add stloc",                        // V = A.inc + B.inc
+            "ldfld:PAY call:AddCargo stloc",                        // 把品质传进被调方
+            "add ldfld:PAY ldfld:PAY add call:AddCargo stloc",
+            "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc",
             "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc",
             "ldfld:PAY call:AddItemStacked bge.s",
             "ldfld:PAY call:AddItemStacked stloc",
@@ -3058,6 +3154,7 @@ namespace ProjectEden.Preloader
             "ldflda:PAY ldind.i4 call:split_inc stind.i4",          // *out = split_inc(...)
             "stfld:PAY [merge]",                                    // X.inc = 条件 ? a : b（保留模式凭空生成）
             "ldflda:PAY dup ldind.i2 add stind.i2",                 // 加宽之后的字节读-改-写
+            SaveReadCore,                                           // 整条记录读进来，里面一处载荷
             "call:ReadInt32 stfld:PAY",                             // 从存档读：品质置零
             "call:ReadByte stfld:PAY",
             "ldfld:PAY call:ReadInt32 stelem",
@@ -3130,6 +3227,7 @@ namespace ProjectEden.Preloader
         private static readonly HashSet<string> SaveWriteShapes = new HashSet<string>(new[]
         {
             "ldfld:PAY call:Write",                                 // writer.Write(X.inc)
+            "ldfld:PAY ldc call:Min call:Write",                    // writer.Write(Math.Min(X.inc, 255))
         }, StringComparer.Ordinal);
 
         // ── 小工具 ─────────────────────────────────────────────

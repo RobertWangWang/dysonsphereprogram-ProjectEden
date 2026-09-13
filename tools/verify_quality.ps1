@@ -168,7 +168,12 @@ $vFound = Field $vr "Added"
 
 foreach ($b in $vBlock) { Check $false $b }
 Check ($vBlock.Count -eq 0) "re-derived twin check reported no problems"
-Check ($vFound.Count -eq 27) "twin field count is 27 (got $($vFound.Count))"
+# Read the expected count out of the preloader itself rather than repeating it here.
+# Two hand-kept copies of one number always separate; the only question is when - and this
+# check exists precisely to catch a payload list that drifted.
+$expected = $pre.GetType("ProjectEden.Preloader.QualityFieldAdder").GetField("ExpectedFields",
+    [Reflection.BindingFlags]"NonPublic,Static,Public").GetRawConstantValue()
+Check ($vFound.Count -eq $expected) "twin field count is $expected (got $($vFound.Count))"
 
 # 3. Cargo specifically - this is the one whose struct size the GPU path cares about
 $cargo = $mod3.GetType("Cargo")
