@@ -2154,6 +2154,32 @@ These are **unavoidable side effects** of the changes above, not bugs:
   building being driven by two sets of belt logic
 - The mega buildings' icons and models are drawn from scratch: the icons come out of `tools/make_icons.py` and the meshes and textures are generated procedurally at runtime — **no GenesisBook art asset is used**
 
+### UXAssist: two features conflict, everything else works
+
+This mod's preloader widens the belt API's `byte` parameters to `Int16` — that is what makes 5000-layer
+stacking possible — and UXAssist is compiled against the vanilla signatures. Measured, **exactly two**
+features are affected:
+
+| Feature | State |
+|---|---|
+| **Belt signals for buy-out** | **Does not work**, and cannot be repaired or even disabled from outside |
+| **Protect veins from exhaustion** | **Turn it off** — it is mutually exclusive with this mod's mining machine changes |
+
+Why *belt signals* cannot even be switched off: any Harmony patch — including a prefix whose only job is to
+skip the method entirely — has to **re-emit the whole method body**, and that body contains a reference to a
+signature that no longer exists. It reads back as null and writing it fails. Using the feature means removing
+this mod's preloader, which drops stacking from 5000 back to 63.
+
+*Protect veins* is implemented as a **prefix that returns `false` and skips vanilla's mining logic outright**.
+This mod's ore→ingot remap, internal buffer cap, drill-bit consumption and the plain miner's throttle all live
+inside the code it skips — so turning it on makes those **silently stop working**: no error, they just do
+nothing.
+
+> **Turning it off costs nothing.** This mod already makes veins non-depleting on its own: the advanced miner,
+> water pumps and oil extractors through `forceMiningCostRate`, the plain miner through
+> `protectSmallMinerVeins`. If you forget, this mod notices while mining and says so in the log — **the check
+> runs at mining time rather than at startup**, because that switch can be toggled mid-game.
+
 ---
 
 ## XIX. The Biodome: a light-bound biological chain

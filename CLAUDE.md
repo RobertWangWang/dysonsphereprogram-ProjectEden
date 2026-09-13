@@ -2200,7 +2200,27 @@ startup**, because that switch can be toggled mid-game, and by reading Harmony's
 table rather than UXAssist's config field (the applied state is the fact; a config field
 name is a guess that rots).
 
-`UXAssistCompat` repairs the other one by **transpiling UXAssist's `BeltSignalsForBuyOut`**, swapping the
+**And the other one cannot be repaired either — nor even switched off.** Three attempts, each
+failing differently, before the diagnostic settled it: matching the call by name (never fired),
+matching it by `operand == null` (fired, replaced, and the write still threw on the same
+instruction), and finally giving up on repair and trying to install a prefix that returns
+`false` to disable the method (failed identically). Dumping every call instruction with its
+actual operand made the reason plain: **HarmonyX has to re-emit the entire original method
+body for any patch at all**, and that body holds a MemberRef to a signature the preloader has
+removed. It reads back null and the write fails no matter what the patch does. **This is not
+"the technique has not been found"; the route does not exist.**
+
+So `UXAssistCompat` patches nothing. It reports both limitations — once, at startup for the
+belt one, and from the miner tick for the vein one — and the delegates, shims and transpiler
+written for the abandoned repair were deleted rather than left as dead code. The limitation is
+recorded in `README.md` and both feature guides.
+
+**The general rule this establishes: a preloader signature change is unrepairable from
+outside for any third-party method that calls it.** Harmony can only patch a method it can
+re-emit. Weigh that before widening anything else — the blast radius is every mod compiled
+against the old signature, and there is no compat layer that can cover it.
+
+The repair that *was* attempted for **`BeltSignalsForBuyOut` by transpiling**, swapping the
 call to the old signature for a shim in this assembly that reaches the widened API through
 a runtime-bound delegate — the same technique `CargoWidening` already uses for this mod's
 own calls. Harmony's transpiler runs before JIT, so the broken MemberRef is never resolved.

@@ -1,46 +1,37 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
 using System.Threading;
 using HarmonyLib;
 
 namespace ProjectEden.Compatibility
 {
     /// <summary>
-    /// 修好被本 mod 的 preloader 打断的两个 UXAssist 功能。
+    /// UXAssist 与本 mod 的两处冲突。<b>两处都不修，都只是说清楚</b>——而这不是偷懒，
+    /// 是各自有一条不能绕过的理由。
     ///
-    /// <b>破坏是我们造成的，所以修它是我们的事。</b>
-    /// <c>CargoIncWidener</c> 把传送带那条链上 <b>33 个签名</b>的
-    /// <c>byte inc</c> / <c>byte stack</c> 加宽成了 <c>Int16</c>。UXAssist 是按<b>原版</b>
-    /// 签名编译的，它 IL 里那条 MemberRef 于是解析不上，头一次执行到就抛
-    /// <c>MissingMethodException</c>。
+    /// <b>一、传送带信号购买：从外部修不了，也关不掉。</b>
+    /// 本 mod 的 preloader 把传送带那条链上 <b>33 个签名</b>的 <c>byte inc/stack</c>
+    /// 加宽成了 <c>Int16</c>（那是 5000 层集装的前提）。UXAssist 按原版签名编译，
+    /// 它 <c>BeltSignalsForBuyOut</c> 里那条
+    /// <c>CargoPath.TryInsertItem(int,int,byte,byte)</c> 于是解析不上。
     ///
-    /// <b>实测只有两处</b>（全模块比对加宽前后的签名，再扫 profile 里每个插件的调用点）：
-    /// <list type="bullet">
-    /// <item><c>BeltSignalsForBuyOut</c> → <c>CargoPath.TryInsertItem(int,int,byte,byte)</c>
-    ///       ——「传送带信号购买」</item>
-    /// <item><c>ProtectVeinsFromExhaustion</c> → <c>PlanetFactory.InsertInto(int,int,int,byte,byte,out byte)</c>
-    ///       ——「矿脉保护」</item>
-    /// </list>
-    /// 其余七个插件（CommonAPI / DSPModSave / LDBTool / InstantDelivery / ErrorAnalyzer /
-    /// CloseError / Newtonsoft.Json）一处都没有。
+    /// 试过三轮：按方法名匹配（没中）、按 <c>operand == null</c> 匹配（中了、换了垫片，
+    /// 写回仍然在同一条指令上抛）、再退一步只加个前置把它停掉（同样失败）。
+    /// 诊断把每条调用指令原样打出来之后结论才清楚：<b>HarmonyX 打任何补丁都要把
+    /// 原方法体重新发射一遍</b>，而那个方法体里有一条指向已不存在签名的 MemberRef——
+    /// 读进来是 null，写回就炸，换成什么补丁都一样。**这不是没找到办法，是这条路不存在。**
     ///
-    /// <b>这两个功能在 1.7.0 里就已经是坏的</b>，只是没人报过——大概那两条路很少走到。
+    /// <b>二、矿脉保护：修得了，但修好更糟。</b>
+    /// 它的前置<b>返回 false、完整重实现了 <c>MinerComponent.InternalUpdate</c></b>，
+    /// 而本 mod 的 <see cref="Patches.AdvancedMinerPatches"/> 是<b>转译那同一个方法体</b>的——
+    /// 矿石→锭替换、机内缓存上限、钻头消耗、小型采矿机节流全在里面。让它跑起来
+    /// 只会买到一个<b>静默的功能互斥</b>。
     ///
-    /// <b>为什么不在游戏程序集里合成旧签名的重载。</b> 那样确实能让任何按原版编译的
-    /// 程序集继续解析，但它会让<b>按名字打补丁</b>的 Harmony patch 多认出一个目标：
-    /// 本 mod 自己的 <c>MegaAssemblerPatches</c> 就用 <c>TargetMethods()</c> 按名字
-    /// 拿 <c>InsertInto</c> 的<b>每一个</b>重载，转发方法会被一起转译，于是同一份逻辑
-    /// 跑两遍。别的 mod 怎么打补丁我们更控制不了。
-    ///
-    /// <b>做法是转译 UXAssist 自己那两个方法</b>，把对旧签名的调用换成本类的垫片，
-    /// 垫片再经<b>运行时绑定的委托</b>去调实际存在的那个签名——和
-    /// <see cref="Patches.CargoWidening"/> 处理本 mod 自己调用时是同一套办法。
-    /// Harmony 的转译器跑在 JIT 之前，所以那条坏掉的 MemberRef <b>一次都不会被解析</b>。
-    ///
-    /// 没装 UXAssist、或者 preloader 没生效（签名还是 byte）时，这里整个不动。
+    /// 而这两个功能本来就重叠：<c>advancedminer.json</c> 的 <c>forceMiningCostRate=0</c>
+    /// 早就让大型采矿机 / 抽水站 / 采油站「矿脉完全不消耗」，
+    /// 唯一的缺口小型采矿机也已由 <c>protectSmallMinerVeins</c> 补上。
+    /// 所以关掉 UXAssist 那个开关<b>不损失任何效果</b>，这里只负责把话说到。
     /// </summary>
     internal static class UXAssistCompat
     {
@@ -48,17 +39,8 @@ namespace ProjectEden.Compatibility
 
         internal static bool Installed => CompatibilityRegistry.IsLoaded(Guid);
 
-        // ── 运行时绑定：只有加宽之后才存在的那两个签名 ──
-
-        private delegate bool TryInsertWide(CargoPath path, int index, int itemId, short stack, short inc);
-
-        private delegate int InsertIntoWide(PlanetFactory factory, int entityId, int slot, int itemId,
-            short count, short inc, out short remainInc);
-
-        private static TryInsertWide _tryInsert;
-        private static InsertIntoWide _insertInto;
-
-        private static int _patched;
+        private static int _limitReported;
+        private static int _minerConflictChecked;
 
         internal static void ApplyPatches(Harmony harmony)
         {
@@ -66,7 +48,7 @@ namespace ProjectEden.Compatibility
 
             if (!Installed)
             {
-                ProjectEdenPlugin.Log.LogInfo("UXAssist 没装，跳过它的兼容补丁");
+                ProjectEdenPlugin.Log.LogInfo("UXAssist 没装，跳过它的兼容检查");
 
                 return;
             }
@@ -75,58 +57,44 @@ namespace ProjectEden.Compatibility
             {
                 ProjectEdenPlugin.Log.LogInfo(
                     "UXAssist 兼容：Cargo.inc 没有被加宽（preloader 没装或放弃了改写），" +
-                    "那两处调用本来就好的，不用动");
+                    "传送带 API 还是原版签名，UXAssist 的功能都正常");
 
                 return;
             }
 
-            if (!Bind()) return;
-
-            // 类型全名是从 UXAssist.dll 里读出来的，不是猜的——第一版写成了 PlanetPatch，
-            // 实际是 FactoryPatch。猜错的后果是补丁静默不生效（只会多一条 WARNING）。
-            Fix(harmony, "UXAssist.Patches.FactoryPatch+BeltSignalsForBuyOut",
-                "GameLogic_OnFactoryFrameBegin_Postfix", "传送带信号购买");
-
-            // **矿脉保护刻意不修，理由不是修不动，是修好了更糟。**
-            //
-            // 读它的源码才看清：ProtectVeinsFromExhaustion 的前置**返回 false**，
-            // 整个重实现了 MinerComponent.InternalUpdate（矿脉 / 原油 / 抽水三条分支）。
-            // 而本 mod 的 AdvancedMinerPatches 是**转译原版方法体**的——矿石→锭替换、
-            // 缓存上限、钻头消耗、小型采矿机的节流分母，全在那个被跳过的方法体里。
-            //
-            // 所以把签名修好只会得到一个**静默的功能互斥**：矿脉保护能用了，
-            // 但铜矿不再自动变铜块、缓存回到 50、钻头不再消耗，而且一条报错都没有。
-            //
-            // 而这两个功能本来就重叠：advancedminer.json 的 forceMiningCostRate 为 0，
-            // 本 mod 对大型采矿机 / 抽水站 / 采油站早就是「矿脉完全不消耗」；
-            // 它唯一多给的是小型采矿机，而那一块已经由 protectSmallMinerVeins 补上了。
-            //
-            // 于是这里改成**检测并说清楚**，检测点在采矿 tick 上（玩家可能中途才打开开关，
-            // 启动时检查会漏）。见 CheckMinerConflictOnce。
-
-            // 状态行无论成败都打：**「补了几处」是这条兼容唯一能被看见的证据**，
-            // 而它修的那两个功能平时很少走到，坏了也不会有人立刻发现。
-            if (_patched > 0)
-                ProjectEdenPlugin.Log.LogInfo(
-                    $"UXAssist 兼容：已重接 {_patched} 处被 Cargo.inc 加宽打断的调用" +
-                    "（传送带信号购买 / 矿脉保护）");
-            else
-                ProjectEdenPlugin.Log.LogWarning(
-                    "UXAssist 兼容：一处都没接上——它的内部类名或方法名可能变了。" +
-                    "那两个功能在本 mod 下会抛 MissingMethodException，" +
-                    "对照 UXAssist 的版本重新确认类名");
+            ReportBeltSignalLimit();
         }
 
-        private static int _minerConflictChecked;
+        /// <summary>
+        /// 把「传送带信号购买用不了」说清楚，一次。
+        ///
+        /// <b>只说不修，是因为修不了</b>（见类注释）。这条日志的意义是：
+        /// 让玩家在<b>用到它之前</b>就看到一条能对上的解释，而不是某天吃一个
+        /// 指不到原因的 <c>MissingMethodException</c>。
+        /// </summary>
+        private static void ReportBeltSignalLimit()
+        {
+            if (Interlocked.Exchange(ref _limitReported, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogWarning(
+                "已知限制：UXAssist 的「传送带信号购买」在本 mod 下用不了。" +
+                "本 mod 的 preloader 把传送带 API 的 byte 参数加宽成了 Int16" +
+                "（那是 5000 层集装的前提），而 UXAssist 按原版签名编译，那条调用解析不上。");
+
+            ProjectEdenPlugin.Log.LogWarning(
+                "这个**从外部修不了也关不掉**：Harmony 打任何补丁都要重发射整个方法体，" +
+                "而方法体里那条引用已经不存在了。要用它就得卸掉本 mod 的 preloader" +
+                "（代价：集装层数从 5000 退回 63）。UXAssist 的其余功能不受影响。");
+        }
 
         /// <summary>
         /// 检测 UXAssist 的「矿脉保护」有没有真的挂在 <c>MinerComponent.InternalUpdate</c> 上，
         /// 挂了就把互斥说清楚。
         ///
         /// <b>检测点必须在采矿 tick 上，不能在启动时。</b> 那是个可以在游戏里随时勾的开关，
-        /// UXAssist 是在勾选的那一刻才打补丁的——启动时查一定查不到。
+        /// UXAssist 是在勾选的那一刻才打补丁的——启动时查一定查不到。实测过。
         ///
-        /// <b>查的是 Harmony 的实际补丁表，不是配置项。</b> 别人的配置字段名会变，
+        /// <b>查的是 Harmony 的实际补丁表，不是对方的配置项。</b> 别人的配置字段名会变，
         /// 而「这个方法上到底挂了谁」是结果本身。
         ///
         /// 采矿 tick 跑在 <c>_miner_parallel</c> 上，一次性标志必须用 Interlocked 抢，
@@ -168,246 +136,6 @@ namespace ProjectEden.Compatibility
             {
                 ProjectEdenPlugin.Log.LogWarning($"检查 UXAssist 采矿机冲突时出错（不影响游戏）：{e.Message}");
             }
-        }
-
-        /// <summary>把加宽后的两个签名绑成委托。绑不上就整个不动，而不是打半截补丁。</summary>
-        private static bool Bind()
-        {
-            try
-            {
-                MethodInfo insert = Pick(typeof(CargoPath), "TryInsertItem", 4, typeof(short));
-                MethodInfo into = Pick(typeof(PlanetFactory), "InsertInto", 6, typeof(short));
-
-                if (insert == null || into == null)
-                {
-                    ProjectEdenPlugin.Log.LogWarning(
-                        "UXAssist 兼容：找不到加宽后的 TryInsertItem / InsertInto，跳过");
-
-                    return false;
-                }
-
-                _tryInsert = AccessTools.MethodDelegate<TryInsertWide>(insert);
-                _insertInto = AccessTools.MethodDelegate<InsertIntoWide>(into);
-
-                return true;
-            }
-            catch (Exception e)
-            {
-                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：绑定加宽后的传送带 API 失败，跳过：{e.Message}");
-
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// 按<b>形状</b>挑重载，不按名字。<c>PlanetFactory.InsertInto</c> 有两个重载
-        /// （<c>int entityId</c> 和 <c>uint ioTargetTypedId</c>），而且参数类型在加宽前后不同，
-        /// 所以既不能按名字拿、也不能写死类型列表——只能按「参数个数 + 第一个参数是 Int32 +
-        /// 含有那个被加宽的类型」来认。
-        /// </summary>
-        private static MethodInfo Pick(Type owner, string name, int argc, Type widened) =>
-            AccessTools.GetDeclaredMethods(owner)
-                .FirstOrDefault(m =>
-                    m.Name == name &&
-                    m.GetParameters().Length == argc &&
-                    m.GetParameters()[0].ParameterType == typeof(int) &&
-                    m.GetParameters().Any(p =>
-                        p.ParameterType == widened ||
-                        (p.ParameterType.IsByRef && p.ParameterType.GetElementType() == widened)));
-
-        private static void Fix(Harmony harmony, string typeName, string methodName, string what)
-        {
-            Type t = AccessTools.TypeByName(typeName);
-
-            if (t == null)
-            {
-                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：找不到类型 {typeName}（{what}），跳过");
-
-                return;
-            }
-
-            MethodInfo target = AccessTools.Method(t, methodName);
-
-            if (target == null)
-            {
-                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：找不到 {typeName}::{methodName}（{what}），跳过");
-
-                return;
-            }
-
-            try
-            {
-                harmony.Patch(target,
-                    transpiler: new HarmonyMethod(AccessTools.Method(typeof(UXAssistCompat), nameof(Reroute))));
-            }
-            catch (Exception e)
-            {
-                // **打全异常链，不要只打 Message。** HarmonyX 把真正的原因包在
-                // 「IL Compile Error (unknown location)」里面，只看 Message 等于什么都没说，
-                // 而这一条已经害得诊断多走了一轮。
-                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：给 {what} 打补丁失败：{e.Message}");
-
-                for (Exception inner = e.InnerException; inner != null; inner = inner.InnerException)
-                    ProjectEdenPlugin.Log.LogWarning($"    ← {inner.GetType().Name}: {inner.Message}");
-
-                Disable(harmony, target, what);
-            }
-        }
-
-        /// <summary>
-        /// 把对<b>原版字节签名</b>的调用换成本类的垫片。
-        ///
-        /// <b>判据是「操作数为 null」，这一点和直觉相反，是实测逼出来的。</b>
-        /// 第一版按「方法名 + 参数里有 Byte」匹配，一处都没命中，而且让 Harmony 当场炸：
-        /// <code>
-        ///   Failed to patch ...: ArgumentNullException: Invalid argument for callvirt NULL
-        /// </code>
-        /// 原因是 Harmony 读 IL 时要把每条 MemberRef 解析成 <c>MethodInfo</c>，
-        /// 而这条 MemberRef 指向的签名<b>已经被 preloader 改掉、不存在了</b>——
-        /// 解析不出来，<c>operand</c> 就是 <c>null</c>。于是
-        /// <c>ins.operand as MethodInfo</c> 永远是 null、永远不匹配，
-        /// 那条 <c>callvirt null</c> 原样留下，Harmony 写回时抛异常。
-        ///
-        /// CLAUDE.md 里记的是这个错误的<b>另一半</b>——「<b>我们自己</b>把 null 当操作数发射出去」。
-        /// 这次是反过来：<b>Harmony 读进来就是 null</b>。同一个异常，来源相反。
-        ///
-        /// 所以改成：找那条<b>操作数为 null 的调用</b>。身份信息已经在解析时丢了，
-        /// 但离线实测早就确定了每个方法各自调的是哪一个（一个方法一处），
-        /// 所以按 <paramref name="original"/> 的所属类型分派，并且<b>断言正好一处</b>——
-        /// 多了少了都说明 UXAssist 变了，那时宁可不改。
-        /// </summary>
-        private static IEnumerable<CodeInstruction> Reroute(
-            IEnumerable<CodeInstruction> instructions, MethodBase original)
-        {
-            var code = new List<CodeInstruction>(instructions);
-
-            string owner = original?.DeclaringType?.Name ?? "?";
-
-            MethodInfo shim =
-                owner == "BeltSignalsForBuyOut"
-                    ? AccessTools.Method(typeof(UXAssistCompat), nameof(ShimTryInsertItem))
-                    : owner == "ProtectVeinsFromExhaustion"
-                        ? AccessTools.Method(typeof(UXAssistCompat), nameof(ShimInsertInto))
-                        : null;
-
-            if (shim == null)
-            {
-                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：不认识的宿主类型 {owner}，不改");
-
-                return code;
-            }
-
-            // **把每一条调用指令连同它的操作数原样打出来。**
-            // 到这一步我已经为「那条指令到底长什么样」猜过两轮：先按方法名+Byte 参数匹配
-            // （一处没中），再按 operand == null 匹配（报了命中，Harmony 仍然在同一条
-            // TryInsertItem 上写回失败）。两轮都是在推测 Harmony 读进来的是什么。
-            // 这个仓库的规矩本来就是「日志驱动诊断，不要从症状反推」——照做。
-            for (var i = 0; i < code.Count; i++)
-            {
-                if (code[i].opcode != OpCodes.Call && code[i].opcode != OpCodes.Callvirt) continue;
-
-                object op = code[i].operand;
-
-                ProjectEdenPlugin.Log.LogInfo(
-                    $"    [{owner} #{i}] {code[i].opcode.Name} " +
-                    (op == null ? "<null>" : $"{op.GetType().Name} :: {op}"));
-            }
-
-            var spots = new List<int>();
-
-            for (var i = 0; i < code.Count; i++)
-            {
-                if (code[i].opcode != OpCodes.Call && code[i].opcode != OpCodes.Callvirt) continue;
-
-                object op = code[i].operand;
-
-                // 两种都认：解析不出来（null），以及解析出来了但签名里还带 Byte
-                // ——加宽之后游戏里真正存在的那个签名一个 Byte 都没有。
-                bool broken = op == null || (op is MethodInfo mi && HasByte(mi));
-
-                if (broken) spots.Add(i);
-            }
-
-            if (spots.Count != 1)
-            {
-                ProjectEdenPlugin.Log.LogWarning(
-                    $"UXAssist 兼容：{owner} 里解析不出来的调用有 {spots.Count} 处，期望正好 1 处——" +
-                    "UXAssist 的实现可能变了，这次不改（它仍会抛 MissingMethodException）");
-
-                return code;
-            }
-
-            // 就地改写而不是换对象：原指令上可能挂着跳转标签。
-            // **绝不写 null 操作数**——那会活过转译器、活过写盘，等 MonoMod 写 IL 时
-            // 才抛「Invalid argument for callvirt NULL」，栈里指不到这一行。
-            // CLAUDE.md 已经为这条付过一次账。
-            if (shim == null)
-            {
-                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：{owner} 的垫片方法解析不到，不改");
-
-                return code;
-            }
-
-            code[spots[0]].opcode = OpCodes.Call;
-            code[spots[0]].operand = shim;
-
-            _patched++;
-
-            return code;
-        }
-
-        private static bool HasByte(MethodInfo m) =>
-            m.GetParameters().Any(p =>
-                p.ParameterType == typeof(byte) ||
-                (p.ParameterType.IsByRef && p.ParameterType.GetElementType() == typeof(byte)));
-
-        /// <summary>
-        /// 补丁打不上时的兜底：<b>把那个方法整个停掉</b>，而不是留着它在运行路径上抛异常。
-        ///
-        /// 一个前置返回 <c>false</c> 就够——它是个 <c>Postfix</c>，不跑等于那个功能不生效。
-        /// <b>少一个功能好过每帧一个 <c>MissingMethodException</c></b>，而且它是<b>说出来</b>的，
-        /// 不是静默的。
-        /// </summary>
-        private static void Disable(Harmony harmony, MethodInfo target, string what)
-        {
-            try
-            {
-                harmony.Patch(target,
-                    prefix: new HarmonyMethod(AccessTools.Method(typeof(UXAssistCompat), nameof(SkipIt))));
-
-                ProjectEdenPlugin.Log.LogWarning(
-                    $"UXAssist 兼容：「{what}」修不好，已把它**停用**——" +
-                    "少一个功能好过让它在运行时每次都抛 MissingMethodException。" +
-                    "要用它就得卸掉本 mod 的 preloader（那样 5000 层集装会退回 63 层）。");
-            }
-            catch (Exception e)
-            {
-                ProjectEdenPlugin.Log.LogError(
-                    $"UXAssist 兼容：「{what}」既修不好也停不掉（{e.Message}）——" +
-                    "用到它的时候会抛 MissingMethodException。");
-            }
-        }
-
-        private static bool SkipIt() => false;
-
-        // ── 垫片：字节进、字节出，中间走加宽后的真实 API ──
-        //
-        // 夹在 255 而不是截断：截断会回绕成垃圾值，夹取是确定的降级。
-        // 这两条路上的 stack / inc 本来也远到不了 255（UXAssist 传的是个位数）。
-
-        internal static bool ShimTryInsertItem(CargoPath path, int index, int itemId, byte stack, byte inc) =>
-            _tryInsert != null && _tryInsert(path, index, itemId, stack, inc);
-
-        internal static int ShimInsertInto(PlanetFactory factory, int entityId, int slot, int itemId,
-            byte count, byte inc, out byte remainInc)
-        {
-            if (_insertInto == null) { remainInc = inc; return 0; }
-
-            int used = _insertInto(factory, entityId, slot, itemId, count, inc, out short remain);
-
-            remainInc = (byte)(remain > 255 ? 255 : remain < 0 ? 0 : remain);
-
-            return used;
         }
     }
 }
