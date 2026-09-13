@@ -38,16 +38,23 @@
 
 ## 安装
 
-**1. 先装四个前置**，都在 Thunderstore 上，装进同一个 profile：
+**1. 先装八个前置**，都在 Thunderstore 上，装进同一个 profile：
 
-| 前置 | 版本 |
-|---|---|
-| BepInEx | 5.4.17 |
-| LDBTool | 3.0.3 |
-| CommonAPI | 1.6.7 |
-| DSPModSave | 1.2.2 |
+| 前置 | 版本 | 作用 |
+|---|---|---|
+| BepInEx | 5.4.17 | mod 框架 |
+| LDBTool | 3.0.3 | 注册新物品 / 配方 / 矿脉 |
+| CommonAPI | 1.6.7 | 合成面板的自有分页 |
+| DSPModSave | 1.2.2 | 本 mod 自己那块存档数据 |
+| InstantDelivery | 1.2.0 | 物流即时送达 |
+| ErrorAnalyzer | 1.3.3 | 报错时直接给出可读的堆栈 |
+| UXAssist | 1.5.8 | 一批操作体验改进 |
+| CloseError | 1.0.0 | 关掉挡住画面的报错弹窗 |
 
-缺任意一个，游戏启动即报错。
+**前四个缺任意一个，游戏启动即报错**——它们是真正的代码依赖。
+后四个不是本 mod 跑起来所必需的，列进依赖是为了**让所有人的环境和这边一致**：
+这个 mod 的每一次验证都是在装齐这八个的 profile 里做的，
+日志、行为、兼容性的结论全部来自那个组合。
 
 **2. 导入本体**：r2modman 左侧 `Settings` → `Import local mod` → 选发布包的 zip，
 然后从 r2modman 点 **`Start modded`** 启动（直接开 Steam 不会加载 mod）。
@@ -67,7 +74,7 @@ patchers/ProjectEden.Preloader.dll  →  BepInEx/patchers/ProjectEden/ProjectEde
 **3. 确认装对了**：`BepInEx/LogOutput.log` 里应该有这两行——
 
 ```
-Project Eden v1.6.0 已加载
+Project Eden v1.6.5 已加载
 Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 ```
 

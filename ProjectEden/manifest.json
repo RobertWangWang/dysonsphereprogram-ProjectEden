@@ -1,12 +1,16 @@
 {
   "name": "ProjectEden",
-  "version_number": "1.6.0",
+  "version_number": "1.6.5",
   "website_url": "https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden",
   "description": "把戴森球计划的后期产线整体拉满：八座万倍速巨型建筑、九种新矿脉（含一种只在外星系、挖它要烧钻头的）、一整条从煤和水通到有机化学的化工链（烯烃、芳烃、高分子），外加把一桶原油切成四个馏分、各有各下游的炼油线；九种合金与四维属性、看天吃饭的生物温室、烧什么决定效率的液体发电厂、碳化硅功率半导体、长在温室里的第七种科研矩阵、从熔岩星抽岩浆再结晶回矿石、会结焦失活再烧碳再生的催化剂床、5000 层集装（带 preloader）。每个数值都是推出来的，全在 JSON 里可调。",
   "dependencies": [
     "xiaoye97-BepInEx-5.4.17",
     "xiaoye97-LDBTool-3.0.3",
     "CommonAPI-CommonAPI-1.6.7",
-    "CommonAPI-DSPModSave-1.2.2"
+    "CommonAPI-DSPModSave-1.2.2",
+    "dsp_lxb007981-InstantDelivery-1.2.0",
+    "starfi5h-ErrorAnalyzer-1.3.3",
+    "soarqin-UXAssist-1.5.8",
+    "crecheng-CloseError-1.0.0"
   ]
 }
