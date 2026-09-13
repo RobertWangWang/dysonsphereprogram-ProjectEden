@@ -108,41 +108,19 @@ namespace ProjectEden.Patches
 
             int per = QualityAccess.GetGridQua(ref ui.storage.grids[index]) / count;
 
-            WarnIfOverCap(itemId, count, per);
-
-            return per;
+            // **显示也压在上限之内。**
+            //
+            // 上限的执行在 QualityRepairPatches 那边，每 30 秒压一次——两次之间
+            // 完全可能读到一个越了界的瞬时值。让玩家看到「品质 顶尖（11140）」，
+            // 只会把一个本来在量纲内的设计（0~100）显示成一个看不懂的数。
+            //
+            // 这里**只压显示，不改数据**：改数据是那边的职责，显示层能写数据
+            // 就多了一条谁都想不到的旁路。
+            return per > QualityRefineryPatches.MaxPerItem
+                ? QualityRefineryPatches.MaxPerItem
+                : per;
         }
 
-        /// <summary>报过的最高单件分数。<b>只报一次是不够的</b>——见 WarnIfOverCap。</summary>
-        private static int _warnedAt;
-
-        /// <summary>
-        /// 单件品质超过上限就吼一声。<b>这不是装饰，它抓到过一个真的洞</b>：
-        /// 实测报上来「不断电解铜，品质到了 502」，而上限是 100——病因是
-        /// <c>StationExpandPatches</c> 那个 <c>return false</c> 的前缀顶掉了
-        /// preloader 改写过的 <c>StationComponent.AddItem</c>，
-        /// 侧信道寄存器里的品质既没入库、也没被消费，留给了下一个读它的方法。
-        ///
-        /// 上限是个<b>不变量</b>，而不变量要在能查到的地方查。显示层是最省的那个地方：
-        /// 它本来就要算单件分数，多一句比较不花钱。
-        ///
-        /// <b>报的是「又创新高」，不是「报过就闭嘴」。</b> 只报一次的话，
-        /// 「修完之后还在涨」和「这是修复前留下的存量」在日志上长得一模一样——
-        /// 而这两件事的处理完全相反（一个要继续查，一个只要修一次存档）。
-        /// 数字每涨一次就再吼一次，「还在漏」自己就会现形。
-        /// </summary>
-        private static void WarnIfOverCap(int itemId, int count, int perItem)
-        {
-            if (perItem <= QualityRefineryPatches.MaxPerItem || perItem <= _warnedAt) return;
-
-            _warnedAt = perItem;
-
-            ProjectEdenPlugin.Log.LogError(
-                $"物品品质：**单件品质越界**——物品 {itemId}（{LDB.items.Select(itemId)?.name}）" +
-                $"在储物格里 {count} 件、单件 {perItem} 分，而上限是 " +
-                $"{QualityRefineryPatches.MaxPerItem}。说明有一条搬运路径只搬了件数没搬品质，" +
-                "或者顶掉了某个 preloader 改写过的方法而没接管它的侧信道那一步。");
-        }
 
         // ── transpiler：把这一行插进原版自己的行计数里 ────────────
 

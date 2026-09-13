@@ -3,27 +3,29 @@ using HarmonyLib;
 namespace ProjectEden.Patches
 {
     /// <summary>
-    /// 读档后把<b>越界的品质夹回上限</b>，并报出修了多少格。
+    /// 品质的<b>总量上限</b>：一格货的品质总点数不得超过 <c>件数 × 每件上限</c>，
+    /// 超了就削到上限。读档时扫一遍，之后每 30 秒再扫一遍。
     ///
-    /// <b>为什么需要它：病因修掉了，存量不会自己好。</b>
-    /// 品质是按比例跟着货走的——一格 502 分的铜块，搬到哪儿都还是 502 分，
-    /// 分一半走也是两堆 502 分。所以只要那批货还在，屏幕上就一直是错的数，
-    /// 而玩家没有任何办法分辨「这是老账」还是「还在漏」。
+    /// <b>这是所有者拍板的定位改变，值得写清楚。</b> 早先它叫「读档修复」，
+    /// 立场是「病因修掉了，这是存量，修一次就该干净」——于是每修一次就 ERROR 一次，
+    /// 把「还在漏」当成待查的缺陷。追了四轮，堵掉的洞一个比一个深
+    /// （前缀顶掉改写过的方法、本 mod 直接调搬运方法没写侧信道、手写搬运只扣件数），
+    /// 每次都还剩下一条。
     ///
-    /// 病因是 <c>StationExpandPatches</c> 那个 <c>return false</c> 的前缀顶掉了
-    /// preloader 改写过的 <c>StationComponent.AddItem</c>：侧信道寄存器里的品质
-    /// 既没入库、也没被消费，留给了下一个读它的方法（实测单件涨到 502，上限是 100）。
+    /// 所以立场改成：**不追了，但保证有界。** 品质是可加点数，
+    /// 而可加量真正危险的不是「偏高」，是<b>没有上限</b>——那就是无限循环。
+    /// 一条常设的上限把它钉死在「每件都是满分」这个物理意义上的天花板上，
+    /// 剩下的偏差是有界的、可解释的，而且玩家看到的数永远在量纲内。
     ///
-    /// <b>夹而不是清零。</b> 夹回上限保留了「这批货是提纯过的」这个事实，
-    /// 清零会把玩家真的炼出来的东西也一起没收——修复不该比 bug 本身更伤人。
+    /// <b>削而不清零。</b> 削到上限保留了「这批货是提纯过的」这个事实，
+    /// 清零会把玩家真炼出来的东西一起没收。
     ///
-    /// <b>每次读档都跑，不是只跑一次。</b> 它同时是一道<b>常设的安全网</b>：
-    /// 将来再出现一条只搬件数不搬品质的路径，这里会把它夹住并报出来，
-    /// 而不是让那个数悄悄涨到天上去。这和 <c>CargoIncClampPatches</c> 的定位一样——
-    /// <b>把静默的错误变成确定的降级加一行日志</b>。
+    /// <b>不再报 ERROR。</b> 它现在是常设机制而不是缺陷探针——每 30 秒吼一次
+    /// 只会把日志填满，而且会让真正的新问题淹在里面。整局只在第一次真的削了东西时
+    /// 说一句，说明这条上限在工作。
     ///
     /// 传送带上的货（<c>Cargo.qua</c>）没扫：它在传送带上停留的时间以秒计，
-    /// 而且两头的容器都扫了，扫它只是在追一个正在流动的影子。
+    /// 而两头的容器都扫了，扫它只是在追一个正在流动的影子。
     /// </summary>
     [HarmonyPatch]
     internal static class QualityRepairPatches
@@ -33,7 +35,7 @@ namespace ProjectEden.Patches
         private static void GameData_Import()
         {
             _nextWatch = 0f;
-            _worstSeen = 0;
+            _saidSoOnce = false;
 
             Run("读档后");
         }
@@ -41,22 +43,21 @@ namespace ProjectEden.Patches
         // ── 玩的过程中也盯着，而不是只在读档时查一次 ──────────
 
         private static float _nextWatch;
-        private static int _worstSeen;
+        private static bool _saidSoOnce;
 
         /// <summary>
-        /// 每 30 秒扫一遍<b>机甲背包</b>，越界就夹回并报出来。
+        /// 每 30 秒把上限重新压一遍：<b>机甲背包</b> + <b>当前所在星球</b>的物流站槽位。
         ///
-        /// <b>为什么要它：读档时查一次不够。</b> 读档那一次只能证明<b>存档</b>是干净的；
-        /// 漏不漏是玩的过程中的事，而那时唯一的探针是提示栏——
-        /// 那要玩家正好把鼠标停在一格胀了的货上才会响。
-        /// 「这一局没漏」和「玩家没去悬停」在日志上长得一模一样，
-        /// 于是每次都只能说「再玩一会儿看看」。
+        /// <b>它是执行机制，不是探针。</b> 读档那一次只能保证存档进来时是有界的；
+        /// 品质是在玩的过程中流动的，不定期压一次就等于没有上限。
         ///
-        /// 只扫背包：它是一个 <c>StorageComponent</c>、几十格，代价可以忽略，
-        /// 而玩家手上那一堆恰恰是最容易被污染也最容易被看见的。
+        /// 范围有意收窄到「玩家看得见的那一圈」：背包是一个 <c>StorageComponent</c>、
+        /// 几十格；本星球的物流站是有界的一批。全图每颗星球扫一遍留给读档那一次，
+        /// 每 30 秒做那件事会在大存档上变成一次可感的卡顿，而收益只是让看不见的货
+        /// 早几分钟被压回去。
         ///
         /// 挂在 <c>UIGame._OnUpdate</c> 上是因为它<b>在主线程</b>——
-        /// 物流站那条 tick 是跨星球并行的（约 31 个工作线程），在那上面扫共享状态
+        /// 物流站那条 tick 是跨星球并行的（约 31 个工作线程），在那上面改共享状态
         /// 是本仓库记过的第 4 号坑。节流用 <c>realtimeSinceStartup</c> 而不是
         /// <c>gameTick</c>：后者换存档时会往回跳，定时就再也不会到期，而且悄无声息。
         /// </summary>
@@ -64,7 +65,7 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(UIGame), "_OnUpdate")]
         private static void UIGame_OnUpdate()
         {
-            if (!QualityAccess.GridWritable) return;
+            if (!QualityAccess.GridWritable && !QualityAccess.Ready) return;
 
             float now = UnityEngine.Time.realtimeSinceStartup;
 
@@ -72,22 +73,38 @@ namespace ProjectEden.Patches
 
             _nextWatch = now + 30f;
 
-            StorageComponent package = GameMain.mainPlayer?.package;
-
-            if (package == null) return;
-
             var worst = 0;
-            int fixedUp = ClampStorage(package, ref worst);
+            var touched = 0;
 
-            if (fixedUp <= 0 || worst <= _worstSeen) return;
+            if (QualityAccess.GridWritable)
+                touched += ClampStorage(GameMain.mainPlayer?.package, ref worst);
 
-            _worstSeen = worst;
+            // 本星球的物流站槽位。跨星球那一圈交给读档那一次。
+            PlanetTransport transport = GameMain.localPlanet?.factory?.transport;
 
-            ProjectEdenPlugin.Log.LogError(
-                $"物品品质：**背包里的品质还在涨**——{fixedUp} 格越界，最高每件 {worst} 分" +
-                $"（上限 {QualityRefineryPatches.MaxPerItem}），已夹回。" +
-                "读档时是干净的，所以这是玩的过程中漏出来的：" +
-                "还有一条搬运路径只搬了件数没搬品质，或者顶掉了某个 preloader 改写过的方法。");
+            if (QualityAccess.Ready && transport?.stationPool != null)
+                for (var s = 1; s < transport.stationCursor; s++)
+                {
+                    StationComponent station = transport.stationPool[s];
+
+                    if (station == null || station.id != s || station.storage == null) continue;
+
+                    for (var k = 0; k < station.storage.Length; k++)
+                        if (ClampStore(ref station.storage[k], ref worst))
+                            touched++;
+                }
+
+            if (touched <= 0 || _saidSoOnce) return;
+
+            _saidSoOnce = true;
+
+            // **整局只说一次。** 它是常设机制而不是缺陷探针——每 30 秒吼一次
+            // 只会把日志填满，还会让真正的新问题淹在里面。说一次是为了让
+            // 「上限在工作」和「这段代码根本没跑」在日志上分得开。
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物品品质：品质总量上限正在生效——这一局第一次压回，{touched} 格超过了" +
+                $"「件数 × {QualityRefineryPatches.MaxPerItem}」，最高曾到每件 {worst} 分。" +
+                "上限每 30 秒压一次，之后不再重复这一行。");
         }
 
         internal static void Run(string why)
@@ -201,23 +218,25 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// <b>干净也要报一行。</b> 只在修了东西时说话，会让「这一局没问题」和
+        /// <b>干净也要报一行。</b> 只在削了东西时说话，会让「这一局没有越界」和
         /// 「这段代码根本没跑」在日志上长得一模一样——本仓库为这个形状付过五次往返。
+        ///
+        /// <b>但它不再是 ERROR。</b> 上限是常设机制：削到了就是它在干活，
+        /// 不是待查的缺陷。把它报成错误，只会让日志里真正的新问题被淹掉。
         /// </summary>
         private static void Report(string why, int slots, int grids, int worst)
         {
             if (slots == 0 && grids == 0)
             {
-                ProjectEdenPlugin.Log.LogInfo($"物品品质：{why}核对完毕，没有越界的品质。");
+                ProjectEdenPlugin.Log.LogInfo($"物品品质：{why}核对完毕，没有超过总量上限的。");
 
                 return;
             }
 
-            ProjectEdenPlugin.Log.LogWarning(
-                $"物品品质：{why}修正了越界的品质——物流站槽位 {slots} 格、储物格 {grids} 格，" +
-                $"最高曾到每件 {worst} 分（上限 {QualityRefineryPatches.MaxPerItem}）。" +
-                "这是修掉病因之前留下的存量，已按上限夹回；" +
-                "**如果以后每次读档都还在报，说明还有一条只搬件数不搬品质的路径。**");
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物品品质：{why}按总量上限压回——物流站槽位 {slots} 格、储物格 {grids} 格，" +
+                $"最高曾到每件 {worst} 分。上限是「件数 × {QualityRefineryPatches.MaxPerItem}」，" +
+                "也就是「这一格每一件都是满分」——削而不清零，提纯过的事实保留着。");
         }
     }
 }
