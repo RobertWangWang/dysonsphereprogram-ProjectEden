@@ -242,6 +242,22 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // **先把所有矿石收齐，再开始推导。**
+            //
+            // 因为推导的结果要拿来和这张表比：**产物不能自己也是一种矿石**。
+            // 实测出的那一条是石矿——原版有一条熔炉配方「硅石」把 10 份石矿烧成 1 份硅石，
+            // 而硅石的物品 ID（1003）比石材（1108）小，于是「ID 最小」把它选了出来，
+            // 候选表里就多了一格「硅石」。提纯的是从矿里炼出来的东西，
+            // 一种矿烧成另一种矿不是冶炼的终点，它只是换了个矿。
+            //
+            // 边推边收是不行的：`veins` 的遍历顺序决定了那时表里有哪些矿，
+            // 答案会随顺序变——这正是「用一个还在生长的集合做判据」的老陷阱。
+            var ores = new HashSet<int>();
+
+            foreach (VeinProto v in veins)
+                if (v != null && v.MiningItem > 0)
+                    ores.Add(v.MiningItem);
+
             var seenOre = new HashSet<int>();
             var seenProduct = new HashSet<int>();
 
@@ -262,9 +278,9 @@ namespace ProjectEden.Patches
                     continue;
                 }
 
-                int product = DeriveProduct(v.MiningItem, out string how);
+                int product = DeriveProduct(v.MiningItem, ores, out string how);
 
-                if (product <= 0 || product == v.MiningItem)
+                if (product <= 0)
                 {
                     Skipped.Add(ore.name);
 
@@ -273,7 +289,10 @@ namespace ProjectEden.Patches
 
                 ItemProto made = LDB.items.Select(product);
 
-                if (made == null || made.IsFluid)
+                // 产物不能是流体、也不能是另一种矿石。这两条放在这里而不是只放在第三级里，
+                // 是为了让**三级推导共用同一道出口判据**——前两级读的是别处维护的表，
+                // 哪天那边加了一条奇怪的映射，这里照样挡得住。
+                if (made == null || made.IsFluid || ores.Contains(product))
                 {
                     Skipped.Add(ore.name);
 
@@ -317,7 +336,7 @@ namespace ProjectEden.Patches
         /// <b>原版配方表在 <c>resources.assets</c> 里，离线读不到</b>（CLAUDE.md 记着），
         /// 所以这一级只能靠启动日志验收——推导表每条都会打出是哪条配方定的。
         /// </summary>
-        private static int DeriveProduct(int oreId, out string how)
+        private static int DeriveProduct(int oreId, HashSet<int> ores, out string how)
         {
             how = null;
 
@@ -366,7 +385,7 @@ namespace ProjectEden.Patches
                 // 万一哪天某一级的试剂被去掉，这一句挡住自指
                 if (FindTier(r.ID) != null) continue;
 
-                int solid = FirstSolid(r.Results, oreId);
+                int solid = FirstSolid(r.Results, ores);
 
                 if (solid <= 0) continue;
 
@@ -394,14 +413,20 @@ namespace ProjectEden.Patches
             return product;
         }
 
-        /// <summary>这一串产物里第一个不是流体、也不是矿石本身的。都不合格就返回 0。</summary>
-        private static int FirstSolid(int[] results, int oreId)
+        /// <summary>
+        /// 这一串产物里第一个既<b>不是流体</b>、也<b>不是矿石</b>的。都不合格就返回 0。
+        ///
+        /// 两条判据各是被一次实测逼出来的：流体那条是可燃冰配方把氢排在了第一位，
+        /// 矿石那条是石矿的熔炉配方「硅石」——一种矿烧成另一种矿，不是冶炼的终点。
+        /// </summary>
+        private static int FirstSolid(int[] results, HashSet<int> ores)
         {
             if (results == null) return 0;
 
             for (var i = 0; i < results.Length; i++)
             {
-                if (results[i] <= 0 || results[i] == oreId) continue;
+                if (results[i] <= 0) continue;
+                if (ores != null && ores.Contains(results[i])) continue;
 
                 ItemProto p = LDB.items.Select(results[i]);
 
@@ -469,8 +494,9 @@ namespace ProjectEden.Patches
 
             if (Skipped.Count > 0)
                 ProjectEdenPlugin.Log.LogInfo(
-                    "物品品质：这些矿推不出可提纯的产物，不进候选（没有「只吃这一种矿」的原版配方，" +
-                    "也没有本 mod 声明的锭）：" + string.Join("、", Skipped.ToArray()));
+                    "物品品质：这些矿推不出可提纯的产物，不进候选（采矿机产物映射里没有、" +
+                    "本 mod 也没给它声明锭、又没有一条只吃它的熔炉配方能烧出固体非矿产物）：" +
+                    string.Join("、", Skipped.ToArray()));
         }
     }
 }

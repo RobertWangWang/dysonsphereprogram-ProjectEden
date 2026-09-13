@@ -674,7 +674,11 @@ namespace ProjectEden.Patches
             // 拿去和 `Screen.width`（1920）比，一次修正就把窗口推出一千多个世界单位。
             //
             // 这正是本仓库记过的坑：**屏幕坐标和世界坐标长得一样，都是两个 float。**
-            // 传 (0, 0) 让它落在父级的锚点原点——那是原版自己的默认位置，确定、可见、不会算错。
+            //
+            // 但「干脆不挪」也是错的，日志证明了：窗口确实开了（锚定位置 (0, 0)），
+            // 屏幕上还是没有——(0, 0) 是<b>父级的锚点原点</b>，不是屏幕中心，
+            // 锚点在哪由 prefab 说了算，离线读不到。原版每个调用方都自己算位置，
+            // 这本身就是「默认值不可用」的证据。
             UIItemPicker.Popup(Vector2.zero, OnRefinePicked);
 
             // **没开起来就当场把白名单撤掉。** `Popup` 在 UIRoot 还没就绪或窗口已激活时
@@ -683,8 +687,60 @@ namespace ProjectEden.Patches
             bool opened = UIItemPicker.isOpened;
 
             if (!opened) ItemPickerSearchPatches.Restrict(null, null);
+            else PlacePicker();
 
             ReportPickerOnce(opened, pool.Count);
+        }
+
+        /// <summary>
+        /// 把选择器挪到这一行的正上方，并保证整块留在父级矩形内。
+        ///
+        /// <b>两次都错在单位上，所以这一版一个单位都不跨。</b>
+        /// 第一版拿 <c>GetWorldCorners</c> 的结果去比 <c>Screen.width</c>——世界坐标对屏幕像素，
+        /// 一次修正把窗口推出一千多个世界单位；第二版索性不挪，窗口就落在父级锚点原点，
+        /// 那同样不是屏幕中心。
+        ///
+        /// 现在：定位用<b>世界坐标</b>（与锚点、pivot 无关，是本仓库在多产物面板上验证过的写法），
+        /// 夹取全程在<b>父级的局部坐标</b>里做——矩形和角点都换算到同一个空间，
+        /// 没有相机、没有屏幕像素，也就没有可跨的单位。
+        /// </summary>
+        private static void PlacePicker()
+        {
+            UIItemPicker picker = UIRoot.instance?.uiGame?.itemPicker;
+            RectTransform p = picker != null ? picker.pickerTrans : null;
+
+            if (p == null || Rows[0]?.Track == null) return;
+
+            var parent = p.parent as RectTransform;
+
+            if (parent == null) return;
+
+            // 先把它的**下沿**顶到这一行上方一点：面板贴在装配器窗口下沿，往上开最不容易出屏。
+            // 偏移量用它自己的 rect 高度换算成世界向量，所以缩放怎么设都对。
+            float gap = p.rect.height * p.pivot.y + 12f;
+
+            p.position = Rows[0].Track.position + p.TransformVector(new Vector3(0f, gap, 0f));
+
+            // 再夹回父级矩形内。两边都换算到父级局部坐标，量纲一致。
+            var corners = new Vector3[4];
+
+            p.GetWorldCorners(corners);
+
+            Vector3 min = parent.InverseTransformPoint(corners[0]);
+            Vector3 max = parent.InverseTransformPoint(corners[2]);
+            Rect box = parent.rect;
+
+            var dx = 0f;
+            var dy = 0f;
+
+            if (min.x < box.xMin) dx = box.xMin - min.x;
+            else if (max.x > box.xMax) dx = box.xMax - max.x;
+
+            if (min.y < box.yMin) dy = box.yMin - min.y;
+            else if (max.y > box.yMax) dy = box.yMax - max.y;
+
+            if (dx != 0f || dy != 0f)
+                p.position += parent.TransformVector(new Vector3(dx, dy, 0f));
         }
 
         private static bool _pickerReported;
@@ -705,10 +761,44 @@ namespace ProjectEden.Patches
             UIItemPicker picker = UIRoot.instance?.uiGame?.itemPicker;
             RectTransform p = picker != null ? picker.pickerTrans : null;
 
+            if (p == null)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"同位提纯：第一次点开选料——候选 {candidates} 种，" +
+                    $"物品选择器 {(opened ? "已打开" : "**没打开**")}，但拿不到 pickerTrans。");
+
+                return;
+            }
+
+            var parent = p.parent as RectTransform;
+
+            var corners = new Vector3[4];
+
+            p.GetWorldCorners(corners);
+
+            string inParent = "（没有 RectTransform 父级）";
+
+            if (parent != null)
+            {
+                Vector3 lo = parent.InverseTransformPoint(corners[0]);
+                Vector3 hi = parent.InverseTransformPoint(corners[2]);
+
+                inParent = $"父级 {parent.name} rect={parent.rect}，窗口在父级里占 " +
+                           $"({lo.x:0.#}, {lo.y:0.#})~({hi.x:0.#}, {hi.y:0.#})";
+            }
+
+            // **把整条链子一次打全。** 「开了但看不见」有好几种成因——位置在框外、
+            // 父链上某一层没激活、层级顺序排在别人后面被盖住——而它们在屏幕上长得一模一样。
+            // 上一轮只打了锚定位置，于是只能证明「不是没开」，证明不了是哪一种。
             ProjectEdenPlugin.Log.LogInfo(
                 $"同位提纯：第一次点开选料——候选 {candidates} 种，" +
-                $"物品选择器 {(opened ? "已打开" : "**没打开**（UIRoot 未就绪或窗口已激活）")}，" +
-                $"锚定位置 {(p != null ? p.anchoredPosition.ToString() : "（拿不到 pickerTrans）")}。");
+                $"物品选择器 {(opened ? "已打开" : "**没打开**（UIRoot 未就绪或窗口已激活）")}。\n" +
+                $"  锚定 {p.anchoredPosition}／世界 {p.position}／尺寸 {p.rect.size}／" +
+                $"锚点 {p.anchorMin}~{p.anchorMax}／pivot {p.pivot}／缩放 {p.lossyScale}\n" +
+                $"  {inParent}\n" +
+                $"  这一行在世界坐标 {Rows[0].Track.position}；" +
+                $"选择器 activeInHierarchy={p.gameObject.activeInHierarchy}，" +
+                $"排第 {p.GetSiblingIndex() + 1}/{(parent != null ? parent.childCount : 0)} 个子物体。");
         }
 
         /// <summary>
