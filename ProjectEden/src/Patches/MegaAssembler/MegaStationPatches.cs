@@ -136,6 +136,11 @@ namespace ProjectEden.Patches
 
                     station.storage[slot].count += give;
                     component.produced[i] -= give;
+
+                    // 品质的唯一注入点：提纯配方的产物落进本建筑自己的槽位时按件数加分。
+                    // 非提纯配方在表里查不到，一次字典查找就返回，tick 上不分配。
+                    QualityRefineryPatches.OnProduced(ref station.storage[slot],
+                        component.recipeId, give);
                 }
             }
         }

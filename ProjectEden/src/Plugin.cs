@@ -146,6 +146,10 @@ namespace ProjectEden
             LDBTool.PostAddDataAction += AmmoRegistry.OnPostAddData;
             LDBTool.PreAddDataAction += RedoxRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += RedoxRegistry.OnPostAddData;
+
+            // 提纯注入表要在 LDBTool 敲定配方 ID 之后建——ores.json 里写的那个 ID
+            // 可能被 CustomID.cfg 顶掉，按配置里的数建表会查不到任何东西。
+            LDBTool.PostAddDataAction += Patches.QualityRefineryPatches.Build;
             // 复合材只解析不注册（物品和配方都在 ores.json 里），所以只挂 PostAdd
             LDBTool.PostAddDataAction += CompositeRegistry.OnPostAddData;
             // 活性增产剂：排在复合材之后——投料就是那四级，
