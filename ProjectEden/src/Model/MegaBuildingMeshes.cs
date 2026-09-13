@@ -587,6 +587,85 @@ namespace ProjectEden.Model
         ///
         /// 碰撞体、占地、传送带接口一概不动。
         /// </summary>
+        /// <summary>
+        /// 同位提纯厂：<b>一排电解槽 + 一根竖直的区域熔炼杆，杆腰上一圈发亮的熔区</b>。
+        ///
+        /// 前十座的剪影已经占掉了细高精馏塔（燔石化工厂、综合化学厂）、圆顶罐、对撞环、
+        /// 温室和矮胖燃烧筒，所以这一座的识别点<b>不放在胖瘦上，放在那圈熔区</b>——
+        /// 整套建筑里没有第二个会发光的环。
+        ///
+        /// 电解槽刻意做成<b>方槽而不是圆罐</b>：圆的这套里太多了，方的一眼分得开；
+        /// 槽口那一圈亮面是电解液，也是「湿法」这条线的颜色。
+        ///
+        /// 三台槽的高度是错开的。等高会读成一段栏杆——和燃烧筒那排压机同一个教训。
+        /// </summary>
+        private static void RefineryPlant(MeshKit k)
+        {
+            // ── 底座：两层，上层收窄留出台阶 ──
+            k.AddBox(new Vector3(0f, 0.11f * U, 0f), new Vector3(2.4f * U, 0.22f * U, 2.4f * U),
+                     S.Concrete, S.Grating);
+            k.AddBox(new Vector3(0f, 0.30f * U, 0f), new Vector3(2.0f * U, 0.16f * U, 2.0f * U),
+                     S.PlateDark, S.PlateLight);
+
+            const float deck = 0.38f * U;
+
+            // ── 右后：区域熔炼杆。全场最细最高的一件，它就是这座建筑的记号 ──
+            var rod = new Vector3(0.70f * U, deck, -0.30f * U);
+            const float rodR = 0.13f * U;
+            const float rodH = 1.55f * U;
+
+            // 外壳（石英管）比芯杆粗一圈：熔区要看得出是「套在杆外面走」的
+            k.AddCylinder(rod, rodR * 1.55f, rodH, 14, S.Pipe);
+            k.AddCylinder(rod, rodR, rodH * 0.98f, 12, S.PlateLight, S.PlateRivet);
+
+            // 熔区：杆腰上那一圈。做成扁圆环而不是一段亮筒——
+            // 亮筒会读成「这根杆本身在发光」，环才读得出「有一圈东西正沿着它走」
+            k.AddTorus(new Vector3(rod.x, deck + rodH * 0.46f, rod.z),
+                       rodR * 1.75f, 0.055f * U, 14, 8, S.Glow);
+            // 感应线圈的机壳，压在熔区下面
+            k.AddCylinder(new Vector3(rod.x, deck + rodH * 0.40f, rod.z), rodR * 2.0f, 0.10f * U, 14,
+                          S.Accent, S.PlateDark);
+
+            // 杆顶夹头
+            k.AddBox(new Vector3(rod.x, deck + rodH + 0.07f * U, rod.z),
+                     new Vector3(0.42f * U, 0.14f * U, 0.42f * U), S.PlateRivet, S.PlateLight);
+
+            // ── 前排：三只电解槽。矮方槽，槽口一层电解液 ──
+            for (var i = 0; i < 3; i++)
+            {
+                float x = (-0.86f + 0.56f * i) * U;
+                float h = (0.46f + (i == 1 ? 0.16f : 0f)) * U;   // 中间那只高一截
+                var at = new Vector3(x, deck, 0.52f * U);
+
+                k.AddBox(new Vector3(at.x, at.y + h * 0.5f, at.z),
+                         new Vector3(0.48f * U, h, 0.52f * U), S.PlateRivet, S.PlateDark);
+
+                // 槽口的液面
+                k.AddBox(new Vector3(at.x, at.y + h + 0.015f * U, at.z),
+                         new Vector3(0.40f * U, 0.03f * U, 0.44f * U), S.Glow, S.Glow);
+
+                // 插在液里的极板：露出一截，三片一组
+                for (var j = 0; j < 3; j++)
+                    k.AddBox(new Vector3(at.x - 0.14f * U + 0.14f * U * j,
+                                         at.y + h + 0.12f * U, at.z),
+                             new Vector3(0.04f * U, 0.22f * U, 0.38f * U), S.PlateLight, S.Accent);
+            }
+
+            // ── 左后：液槽与管廊。把两边连起来，免得读成两座不相干的东西 ──
+            k.AddCylinder(new Vector3(-0.66f * U, deck, -0.52f * U), 0.30f * U, 0.70f * U, 16,
+                          S.PlateLight, S.PlateDark);
+            k.AddRibs(new Vector3(-0.66f * U, deck, -0.52f * U), 0.31f * U, 0.70f * U, 3,
+                      0.035f * U, S.Pipe);
+
+            k.AddGreebleRow(new Vector3(-0.36f * U, deck + 0.62f * U, -0.52f * U),
+                            new Vector3(0.42f * U, deck + 0.62f * U, -0.30f * U),
+                            4, new Vector3(0.12f * U, 0.12f * U, 0.12f * U), S.Pipe);
+
+            // 走道：把前排槽和后面连起来
+            k.AddRailing(new Vector3(0f, 0f, 0.10f * U), 1.0f * U, 0.14f * U, deck + 0.02f * U,
+                         0.16f * U, S.Grating);
+        }
+
         internal static bool Apply(ref PrefabDesc desc, int itemId, string debugName)
         {
             var kit = new MeshKit();
@@ -603,6 +682,7 @@ namespace ProjectEden.Model
                 case 6507: CatalyticReactor(kit); break;
                 case 6508: OmniChemPlant(kit); break;
                 case 6509: RedoxBurner(kit); break;
+                case 6659: RefineryPlant(kit); break;
                 default: return false;
             }
 
