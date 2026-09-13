@@ -533,9 +533,14 @@ namespace ProjectEden.Preloader
         {
             Instruction store = code[job.To];
 
-            if (!(store.Operand is FieldReference sf)) return null;
+            // **目标字段只对 stfld 那两种形状有意义。** 第一版把它当成所有形状的前置，
+            // 于是 `ldfld:PAY stloc`（末指令是 stloc）和读-改-写（末指令是 stind.i4）
+            // 一律在这里就返回 null —— 表现是新写的五个发射器全部落成 [opaque]，
+            // 看起来像「这些形状拼不出来」，其实是取字段那一步就错了。
+            FieldDefinition tf = null;
 
-            if (!ctx.Twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out FieldDefinition tf))
+            if (store.Operand is FieldReference sf &&
+                !ctx.Twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out tf))
                 return null;
 
             switch (job.Core)
@@ -543,6 +548,8 @@ namespace ProjectEden.Preloader
                 // X.inc = 常数  →  X.qua = 0
                 case "ldc stfld:PAY":
                 {
+                    if (tf == null) return null;
+
                     var outp = new List<Instruction>();
 
                     for (int k = job.From; k <= job.To - 2; k++)
@@ -561,6 +568,8 @@ namespace ProjectEden.Preloader
                 // X.inc = <栈上的值>  →  X.qua = <那个值的品质版>
                 case "stfld:PAY":
                 {
+                    if (tf == null) return null;
+
                     int[] a = ArgStarts(code, job.To, 2);
 
                     if (a == null) return null;
@@ -587,49 +596,137 @@ namespace ProjectEden.Preloader
                     return outp;
                 }
 
+                // local = X.inc  →  twinLocal = X.qua
+                case "ldfld:PAY stloc":
+                {
+                    VariableDefinition dst = VarOf(ctx.Method, store);
+
+                    if (dst == null || !ctx.Locals.TryGetValue(dst, out VariableDefinition tv)) return null;
+
+                    List<Instruction> val = TwinValue(ctx, code, job.From, job.To - 1);
+
+                    if (val == null) return null;
+
+                    // 分类遍里孪生局部还没建，能走到这一步就说明拼得出来
+                    if (tv == null) return val;
+
+                    val.Add(Instruction.Create(OpCodes.Stloc, tv));
+
+                    return val;
+                }
+
+                // 读-改-写：X.inc += v / -= v
+                //
+                // `ldflda PAY; dup; ldind.i4; <v>; add; stind.i4` 和
+                // `ldfld PAY(数组); <下标>; ldelema; dup; ldind.i4; <v>; add; stind.i4`
+                // **结构上是同一个形状**——都是「取地址 → dup ldind → 值 → 运算 → stind」，
+                // 差别只在地址表达式怎么写，而地址表达式是原样重放的。所以一个发射器全包。
+                case "ldflda:PAY dup ldind.i4 add stind.i4":
+                case "ldflda:PAY dup ldind.i4 sub stind.i4":
+                case "ldfld:PAY ldc dup ldind.i4 add stind.i4":
+                case "ldc ldflda:PAY dup ldind.i4 add stind.i4":
+                    return BuildReadModifyWrite(ctx, code, job);
+
                 default: return null;
             }
         }
 
         /// <summary>
-        /// 装过载荷值的局部变量。种子是 <c>&lt;载荷载入&gt; stloc L</c>，
-        /// 然后沿 <c>ldloc A ; stloc B</c> 传播到不动点——A 装过载荷，B 也就装过。
+        /// 「取地址 → <c>dup ldind.i4</c> → 值 → <c>add</c>/<c>sub</c> → <c>stind.i4</c>」这一族。
+        ///
+        /// 靠 <c>dup</c> 把语句切成两半：它前面是地址表达式（原样重放，其中载荷字段换成孪生），
+        /// 它后面到运算符之间是值（翻成品质版）。这样就不必为每种地址写法各写一个发射器。
+        /// </summary>
+        private static List<Instruction> BuildReadModifyWrite(Ctx ctx, IList<Instruction> code, Job job)
+        {
+            // stind.i4 在 to，运算符在 to-1
+            if (job.To - 1 < job.From) return null;
+
+            Instruction op = code[job.To - 1];
+
+            if (op.OpCode != OpCodes.Add && op.OpCode != OpCodes.Sub) return null;
+
+            // 找 dup（它后面紧跟 ldind.i4）
+            var dupAt = -1;
+
+            for (int k = job.From; k < job.To - 1; k++)
+                if (code[k].OpCode == OpCodes.Dup && code[k + 1].OpCode == OpCodes.Ldind_I4)
+                {
+                    dupAt = k;
+
+                    break;
+                }
+
+            if (dupAt < 0) return null;
+
+            var outp = new List<Instruction>();
+
+            // 地址表达式：原样重放，载荷字段换成孪生
+            for (int k = job.From; k < dupAt; k++)
+            {
+                if (!IsPureLoad(code[k])) return null;
+
+                if (code[k].Operand is FieldReference fr2 &&
+                    ctx.Twin.TryGetValue(fr2.DeclaringType.FullName + "::" + fr2.Name, out FieldDefinition tw))
+                    outp.Add(Instruction.Create(code[k].OpCode, tw));
+                else
+                    outp.Add(Clone(code[k]));
+            }
+
+            outp.Add(Instruction.Create(OpCodes.Dup));
+            outp.Add(Instruction.Create(OpCodes.Ldind_I4));
+
+            List<Instruction> val = TwinValue(ctx, code, dupAt + 2, job.To - 2);
+
+            if (val == null) return null;
+
+            outp.AddRange(val);
+            outp.Add(Instruction.Create(op.OpCode));
+            outp.Add(Instruction.Create(OpCodes.Stind_I4));
+
+            return outp;
+        }
+
+        /// <summary>
+        /// 可用的载荷局部变量：<b>它的每一处赋值都必须是发射得出来的</b>。
+        ///
+        /// <b>这条约束不是保守，是正确性。</b> 第一版还沿 <c>ldloc A ; stloc B</c> 传播过
+        /// （A 装过载荷，B 也就装过），看着很自然，其实是个静默错误：
+        /// <c>B = A</c> 这条语句<b>根本不含载荷字段</b>，所以它永远不会被分类、
+        /// 也就永远不会发射孪生赋值 —— 于是 <c>B</c> 的孪生局部恒为 0，
+        /// 而读它的地方会拿到 0 并当成真值。不报错，只是品质凭空归零。
+        ///
+        /// 所以只认一种种子：<c>&lt;载荷载入&gt; stloc L</c>，也就是形状
+        /// <c>ldfld:PAY stloc</c>——那一种有发射器，孪生赋值一定会被写出来。
+        /// 等以后 <c>ldfld:PAY div stloc</c>（求等级）这类也有了发射器，
+        /// 再把它们加进种子，那时才是安全的。
+        ///
+        /// <b>「一个局部只有在每一处赋值都能发射时才可用」</b>是这套变换的通用规则，
+        /// 违反它的表现一律是静默的零。
         /// </summary>
         private static IEnumerable<VariableDefinition> PayloadCarriers(MethodDefinition m,
             IList<Instruction> code, IDictionary<string, FieldDefinition> twin)
         {
             var set = new HashSet<VariableDefinition>();
-            bool grew = true;
+            var unsafeSet = new HashSet<VariableDefinition>();
 
-            while (grew)
+            for (var i = 1; i < code.Count; i++)
             {
-                grew = false;
+                if (!IsStloc(code[i])) continue;
 
-                for (var i = 1; i < code.Count; i++)
-                {
-                    if (!IsStloc(code[i])) continue;
+                VariableDefinition dst = VarOf(m, code[i]);
 
-                    VariableDefinition dst = VarOf(m, code[i]);
+                if (dst == null) continue;
 
-                    if (dst == null || set.Contains(dst)) continue;
+                // 直接由载荷字段赋值 —— 这一种有发射器
+                if (IsMainline(code[i - 1], twin)) { set.Add(dst); continue; }
 
-                    Instruction src = code[i - 1];
-
-                    bool carries = IsMainline(src, twin);
-
-                    if (!carries)
-                    {
-                        VariableDefinition sv = VarOf(m, src);
-
-                        carries = sv != null && set.Contains(sv);
-                    }
-
-                    if (!carries) continue;
-
-                    set.Add(dst);
-                    grew = true;
-                }
+                // 同一个局部还有别的赋值来源，而那些来源不保证能发射孪生。
+                // **只要有一处不能，这个局部整个不可用**——否则它会在某条路径上读到 0。
+                unsafeSet.Add(dst);
             }
+
+            set.ExceptWith(unsafeSet);
 
             return set;
         }
@@ -888,6 +985,17 @@ namespace ProjectEden.Preloader
             // 再靠**四个来源**把那个值翻译成品质版——其中「载荷参数 → 侧信道寄存器」
             // 就是被推翻的「加参数」那条路的替身。
             "stfld:PAY",
+
+            // local = X.inc  →  twinLocal = X.qua。局部变量孪生的第一个用户。
+            "ldfld:PAY stloc",
+
+            // 读-改-写一族。这四种在 IL 结构上是同一个形状——都是
+            // 「取地址 → dup ldind.i4 → 值 → 运算 → stind.i4」，差别只在地址表达式
+            // 怎么写，而地址表达式是原样重放的，所以一个发射器全包。
+            "ldflda:PAY dup ldind.i4 add stind.i4",
+            "ldflda:PAY dup ldind.i4 sub stind.i4",
+            "ldfld:PAY ldc dup ldind.i4 add stind.i4",
+            "ldc ldflda:PAY dup ldind.i4 add stind.i4",
         }, StringComparer.Ordinal);
 
         /// <summary>
