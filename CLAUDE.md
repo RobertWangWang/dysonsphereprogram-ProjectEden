@@ -94,6 +94,32 @@ The English is a real translation, not a transliteration: match DSP's own vocabu
 
 This is the same failure mode as half-translated content, one level up: a stale English guide is worse than no English guide, because nothing about it announces that it is stale. If a change is too big to translate in the same sitting, it is still cheaper to do it now than to reconstruct later which of 1500 lines moved.
 
+## Content rule: new content updates `README.md` and the Thunderstore description too
+
+**Every change that adds or removes player-visible content must also update `README.md` and the
+`description` in `ProjectEden/manifest.json`, in the same commit.** They are the first and often the
+only thing anyone reads — the Thunderstore page shows the manifest description, and the README is
+what a player opens before installing. A feature that is absent from both effectively does not
+exist, and a stale count in either is worse than no count.
+
+**Keep the manifest description short.** Thunderstore allows 250 characters; this mod's sits near
+120 and should stay there. It is a shelf label, not a feature list — name the shape of the mod and
+the two or three things that distinguish it, and let the README carry the rest. When adding a new
+headline feature, prefer rewriting a clause to appending one.
+
+**Why this is a rule and not a habit: the same fact lives in four hand-maintained copies.**
+`README.md`, `mod特性.md`, `mod_feature.md` and `CHANGELOG.md` all state how many mega buildings
+there are, and `manifest.json` says it again. **Nothing errors when three of the five are updated.**
+The feature-guide pair at least has a structural check (parallel `##`/`###` counts and resolvable
+TOC anchors); README and the manifest have none at all. Both have already gone stale in practice —
+the README said "eight mega buildings" several releases after there were nine, and it kept quoting
+the pre-audit per-volume heat ladder for the four oil cuts after that ladder had been retracted
+everywhere else.
+
+The practical checklist for any content change: `README.md` → `manifest.json` description →
+`mod特性.md` → `mod_feature.md` → `CHANGELOG.md`. Numbers first (how many buildings, veins, recipe
+types), then the new row or section.
+
 ## Local setup (verified)
 
 | | |
