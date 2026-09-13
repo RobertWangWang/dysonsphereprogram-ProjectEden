@@ -4,7 +4,7 @@ using S = ProjectEden.Model.BuildingTexture;
 namespace ProjectEden.Model
 {
     /// <summary>
-    /// 八座巨型建筑各自的程序化几何、贴图，以及把它们换进 <see cref="PrefabDesc"/> 的那一步。
+    /// 九座巨型建筑各自的程序化几何、贴图，以及把它们换进 <see cref="PrefabDesc"/> 的那一步。
     ///
     /// <b>要解决的问题：五座建筑长得一模一样。</b> <c>megabuildings.json</c> 里
     /// <c>copyFromModelId</c> 是<b>一个全局设置</b>（49，物流运输站），五座克隆的是同一个模型，
@@ -21,7 +21,7 @@ namespace ProjectEden.Model
 
         private static bool _shaderReported;
 
-        // ══ 八座建筑的造型 ════════════════════════════════════
+        // ══ 九座建筑的造型 ════════════════════════════════════
 
         // ── 天工装配厂：三层收口台座 + 中央塔柱 ──────────────
         private static void SkyAssembler(MeshKit k)
@@ -202,7 +202,7 @@ namespace ProjectEden.Model
         //   敞开的熔池  = 进料，也是全身唯一把「热」摆在外面的地方
         //   池面上的粒化环 = 冷却速率，三条配方的区别就在这里
         //   四座冷却塔   = 热最后去了哪里
-        // 八座巨型建筑里只有它在外表露出发光面，远处看过去就靠这一点认。
+        // 九座巨型建筑里只有它在外表露出发光面，远处看过去就靠这一点认。
         private static void LavaCooler(MeshKit k)
         {
             k.AddBox(new Vector3(0f, 0.13f * U, 0f), new Vector3(2.1f * U, 0.26f * U, 2.1f * U), S.Concrete, S.Grating);
@@ -251,6 +251,89 @@ namespace ProjectEden.Model
         //
         // 顶上三只旋风分离器是再生器最好认的特征，也是 80px 图标里唯一能把它和
         // 燔石化工厂那几只普通立罐分开的东西——模型和图标在这一点上必须一致。
+        /// <summary>
+        /// 综合化学厂：一个明显更宽的底座，上面架着<b>三只形制各不相同</b>的反应单元，
+        /// 再由一条共用的进出料横管把它们串起来。
+        ///
+        /// <b>母题是「三种不相容的反应被塞进同一个壳子」，不是「更大的化工厂」。</b>
+        /// 燔石化工厂的模型是三只一模一样的立罐（同一种反应做三遍）；这一座的三只
+        /// 必须一眼分得出是三种东西，否则两座在地上就分不开：
+        ///
+        ///   · 带两根电极的方槽 —— 电化学
+        ///   · 细高的精馏塔     —— 化学
+        ///   · 矮胖的圆顶罐     —— 氧化还原
+        ///
+        /// 三只共用一个底座、再被一条横管连起来，「并进一个壳子」才读得出来——
+        /// 分开摆就是三座小厂，而那正好是这台机器想取代的东西。
+        /// 形制与 <c>tools/make_icons.py</c> 的 <c>omni_chem()</c> 一一对应。
+        /// </summary>
+        private static void OmniChemPlant(MeshKit k)
+        {
+            // ── 底座：两层，上层略窄，边缘那圈台阶让它读得出是「壳体」而不是一块板 ──
+            k.AddBox(new Vector3(0f, 0.12f * U, 0f), new Vector3(2.3f * U, 0.24f * U, 2.3f * U),
+                     S.Concrete, S.Grating);
+            k.AddBox(new Vector3(0f, 0.32f * U, 0f), new Vector3(2.0f * U, 0.16f * U, 2.0f * U),
+                     S.PlateDark, S.PlateLight);
+
+            const float deck = 0.40f * U;
+
+            // ── 左：电解槽。方的，插两根不等高的电极 ──
+            var cell = new Vector3(-0.62f * U, deck, 0.10f * U);
+
+            k.AddBox(new Vector3(cell.x, cell.y + 0.30f * U, cell.z),
+                     new Vector3(0.70f * U, 0.60f * U, 0.70f * U), S.PlateRivet, S.PlateLight);
+
+            // 电极不等高：等高就读成栏杆了
+            float[] rods = { 0.46f * U, 0.34f * U };
+
+            for (var i = 0; i < rods.Length; i++)
+            {
+                float x = cell.x + (i == 0 ? -0.20f : 0.20f) * U;
+
+                k.AddCylinder(new Vector3(x, cell.y + 0.60f * U, cell.z), 0.045f * U, rods[i], 8, S.Pipe);
+                k.AddCylinder(new Vector3(x, cell.y + 0.60f * U + rods[i], cell.z),
+                              0.085f * U, 0.05f * U, 10, S.PlateLight, S.Glow);
+            }
+
+            // ── 右：氧化还原罐。矮胖，顶上扣一个圆顶 ──
+            var redox = new Vector3(0.60f * U, deck, -0.14f * U);
+            const float redoxR = 0.46f * U;
+            const float redoxH = 0.56f * U;
+
+            k.AddCylinder(redox, redoxR, redoxH, 20, S.PlateLight, S.PlateDark);
+            k.AddRibs(redox, redoxR + 0.01f * U, redoxH, 10, 0.045f * U, S.PlateDark);
+            // 圆顶用一截收口的锥体：**半径收到七成就够**，收得太少会顶出一朵蘑菇
+            k.AddCone(new Vector3(redox.x, redox.y + redoxH, redox.z),
+                      redoxR, redoxR * 0.34f, 0.22f * U, 20, S.PlateLight, S.Accent);
+
+            // ── 中前：精馏塔。**必须比横管高**，前后关系才立得住 ──
+            var column = new Vector3(0f, deck, 0.52f * U);
+            const float colR = 0.32f * U;
+            const float colH = 1.34f * U;
+
+            k.AddCylinder(column, colR, colH, 18, S.PlateRivet, S.PlateDark);
+            // 塔盘：精馏塔的识别点，隔一段一道箍
+            for (var i = 1; i <= 4; i++)
+                k.AddTorus(new Vector3(column.x, column.y + colH * (0.18f * i + 0.10f), column.z),
+                           colR + 0.015f * U, 0.035f * U, 20, 6, S.Accent);
+
+            k.AddCylinder(new Vector3(column.x, column.y + colH, column.z),
+                          colR * 1.18f, 0.10f * U, 18, S.PlateLight, S.Glow);
+
+            // ── 共用横管：走在电解槽与氧化还原罐之间，从精馏塔背后穿过 ──
+            const float pipeY = 1.02f * U;
+
+            k.AddCylinder(new Vector3(cell.x, cell.y + 0.60f * U, cell.z),
+                          0.07f * U, pipeY - 0.60f * U, 10, S.Pipe);
+            k.AddCylinder(new Vector3(redox.x, redox.y + redoxH, redox.z),
+                          0.07f * U, pipeY - redoxH, 10, S.Pipe);
+            k.AddGreebleRow(new Vector3(cell.x, deck + pipeY, cell.z),
+                            new Vector3(redox.x, deck + pipeY, redox.z),
+                            7, new Vector3(0.16f * U, 0.13f * U, 0.13f * U), S.Pipe);
+
+            k.AddRailing(new Vector3(0f, 0f, 0f), 0.95f * U, 0.95f * U, 0.40f * U, 0.16f * U, S.Grating);
+        }
+
         private static void CatalyticReactor(MeshKit k)
         {
             k.AddBox(new Vector3(0f, 0.13f * U, 0f), new Vector3(2.1f * U, 0.26f * U, 2.1f * U), S.Concrete, S.Grating);
@@ -414,6 +497,7 @@ namespace ProjectEden.Model
                 case 6505: BioGreenhouse(kit); break;
                 case 6506: LavaCooler(kit); break;
                 case 6507: CatalyticReactor(kit); break;
+                case 6508: OmniChemPlant(kit); break;
                 default: return false;
             }
 

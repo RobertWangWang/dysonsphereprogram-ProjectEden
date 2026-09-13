@@ -95,6 +95,7 @@ namespace ProjectEden
             ReportCheats();
             ReportCargoProbe();
             Patches.CargoWidening.Report();
+            // 放在 PatchAll 之后才知道改写了几处，所以这一行挪到下面去打
 
             // 分页要在游戏建立建造栏之前注册，LDBTool 的回调里已经太晚
             MegaBuildingRegistry.RegisterTab();
@@ -102,6 +103,9 @@ namespace ProjectEden
             _harmony = new Harmony(GUID);
             _harmony.PatchAll(typeof(ProjectEdenPlugin).Assembly);
             CompatibilityRegistry.ApplyPatches(_harmony);
+
+            // 要等转译器跑完才数得出改写了几处
+            Patches.RecipeTypeCompatPatches.Report();
 
             LDBTool.PreAddDataAction += MegaBuildingRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MegaBuildingRegistry.OnPostAddData;

@@ -52,6 +52,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXV. Bio Matrix: the seventh matrix, and it is grown](#xxv-bio-matrix-the-seventh-matrix-and-it-is-grown)
 - [XXVI. Magma: putting a water pump on a lava planet](#xxvi-magma-putting-a-water-pump-on-a-lava-planet)
 - [XXVII. Catalytic Reactor: a factory that remembers its own state](#xxvii-catalytic-reactor-a-factory-that-remembers-its-own-state)
+- [XXVIII. The Integrated Chemical Plant: the first machine here that eats several recipe types](#xxviii-the-integrated-chemical-plant-the-first-machine-here-that-eats-several-recipe-types)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -3101,6 +3102,107 @@ capacity, and a debug switch that prints all five stages on one line every 10 se
 **The catalyst slot's capacity is its own setting and does not follow the logistics
 station's** — if it did, the first reactor built would ask the network for ten million
 units of catalyst and starve every later one.
+
+## XXVIII. The Integrated Chemical Plant: the first machine here that eats several recipe types
+
+The ninth mega building, and the first machine in this mod that can run **more than one
+`ERecipeType`**: chemical (2), electrochemical (9) and redox (10), all three, still at 10000×.
+
+### It fills an actual vacuum
+
+This mod's chemistry recipes are spread across three types, and there was exactly one mega
+building for any of them — the Calcining Chemical Plant, type 2. **Types 9 and 10 had no mega
+building at all.** Which means the whole C1 chain, the nitrogen chain, all three phases of organic
+chemistry and most of the refining line were stuck on 1× cloned buildings.
+
+| | |
+|---|---|
+| Build | **Energy Matrix ×1000 + Calcining Chemical Plant ×1000**, 10 s |
+| Speed | 10000×, same as the other eight |
+| Power | **360 MW** working / 60 MW idle. For comparison: Calcining Chemical Plant 22.5 MW, Miniature Particle Collider 45 MW, Catalytic Reactor 43.2 MW — it draws an order of magnitude more than the next hungriest building in the mod |
+| Location | Slot 10 of this mod's own build-menu page |
+
+> **This number is a balance knob, not a derivation.** "It does the work of three Calcining Chemical
+> Plants" gives 72 MW, and that was the earlier value; what ships is **five times** that, for reasons of
+> balance rather than physics: it is the **only** 10000× path for three classes of chemistry recipe, and
+> the build cost (1000 Calcining Chemical Plants) is paid once — the lasting brake can only be the
+> power bill. This repo’s rule is that a knob gets called a knob instead of being dressed in a derivation.
+
+### It does not turn the Calcining Chemical Plant into dead content — because it eats them
+
+A 10000× machine that runs every chemistry recipe **would** make the Calcining Chemical Plant dead
+content by this repo's own dominance test: same speed, and that one only runs a single type.
+
+**The build recipe is the answer: an Integrated Chemical Plant consumes 1000 of them.** That makes
+the older building its prerequisite rather than its competitor — the same move as the silicon
+carbide energy exchanger, which still serves the very same lithium accumulators instead of
+replacing them.
+
+The Electrochemical Plant and Redox Chemical Plant are 1× clones, early-game versions, and are not
+in the same league to begin with.
+
+### Vanilla says "one machine, one type", and it means it
+
+This is the limitation recorded in section X all along:
+
+> `UIRecipePicker.RefreshIcons` filters with `filter != recipe.Type → skip`, and `filter` is the
+> machine's `prefabDesc.assemblerRecipeType`. **One machine, one type** — vanilla cannot express
+> "this machine runs A and B".
+
+Breaking it needs code. **But the real cost is far below the earlier estimate: of the 15 reads of
+`assemblerRecipeType` in the whole assembly, only 8 are actual gates — and all 8 are the same shape.**
+
+| Gate | Sites | What breaks without it |
+|---|---|---|
+| `UIRecipePicker.RefreshIcons` | 1 | The recipe picker shows nothing at all |
+| `BuildingParameters.CanPasteToFactoryObject` | 2 | Copy-paste refused |
+| `BuildingParameters.PasteToFactoryObject` | 3 | Blueprint paste drops the recipe |
+| `BuildingParameters.ApplyPrebuildParametersToEntity` | 1 | Blueprint-built machines come out empty |
+| `CopyFromFactoryObject` / `CopyFromBuildPreview` | 2 | The recipe is cleared at copy time |
+
+The other 7 are false alarms: `PrefabDesc.ReadPrefab` writes rather than gates,
+`FactorySystem.Import` compares against `== 4` only to pick an animation length, and
+`ItemProto.typeString` and `UIInserterBuildTip` are pure display.
+
+**All eight become one table lookup** (`RecipeTypeCompatPatches`), and the `acceptsRecipeTypes`
+field in the config is that table. When no building declares it, the patch is not applied at all
+and vanilla IL is untouched.
+
+### Three things come free, and they are why this approach works
+
+1. **`AssemblerComponent.SetRecipe` does not validate the type at all.** Its IL holds a single
+   `recipeType = recipe.Type` store and no check — so the production logic needed no change.
+2. **`AssemblerComponent.recipeType` holds the *recipe's* type, not the machine's.** The six reads
+   in `InternalUpdate` pick sound and animation by 1/2/3/4/5, so a chemical recipe running in this
+   machine **automatically keeps the chemical plant's sound and animation**.
+3. **That field is serialised, but not one of the 18 read/write sites in the assembly ever compares
+   it against the prefab.** So there is no "load the save, find a type mismatch, clear the recipe".
+
+> All three were counted by reading the IL one site at a time. Had any single place compared the
+> saved type against the prefab, the whole feature would need a different design — and that failure
+> mode is a save quietly losing recipes on load, the hardest kind to diagnose.
+
+### "Made in" has to append, not replace
+
+A chemical recipe's `madeFromString` says "Made in Chemical Plant" forever and **never mentions the
+Integrated Chemical Plant** — so nothing on the recipe tells the player that machine can make it,
+and that machine is the only 10000× option there is. So the line appends instead:
+
+```
+Made in   Chemical Plant / Integrated Chemical Plant
+```
+
+**A gate opened that nobody knows about is a gate not opened**; this half matters as much as the
+transpiler.
+
+### One stale predicate fixed on the way past
+
+`MachineRegistry`'s test for "is this one of our own recipe types" hardcoded `9 <= t <= 14`.
+`ERecipeType` **never had a ceiling** (the derivation is in CLAUDE.md), and the Integrated Chemical
+Plant took 16 — which that range silently excluded, so both the item tooltip's type row and the
+recipe's "made in" line fell back to vanilla's placeholder. The test is now `t >= 9 && t != 15`:
+**vanilla owns 1–8 and 15, everything else is ours.**
+
 
 ## Config Quick Reference
 

@@ -2382,6 +2382,59 @@ def vgo():
     return d
 
 
+def omni_chem():
+    """综合化学厂：一个宽壳体，三只**形制各不相同**的塔从顶上探出来。
+
+    <b>母题是「三种不相容的反应被塞进同一个壳子」，不是「更大的化工厂」。</b>
+    燔石化工厂那张画的是三只一模一样的立罐——同一种反应做三遍；这一张的三只必须
+    一眼看出是三种东西，否则它和前一代在建造栏里分不开：
+
+      · 带两根电极的方槽  —— 电化学
+      · 细高的精馏塔      —— 化学（沿用燔石化工厂的母题，表示「它也干那个」）
+      · 矮胖的圆顶罐      —— 氧化还原
+
+    <b>三只坐在同一个明显更宽的底座上</b>，分开画就成了三座小厂，「并进一个壳子」
+    这层意思全丢了——而那正是这台机器存在的理由。
+
+    两处返工记在这里：圆顶第一版用了和罐身同宽的椭圆、还抬高了 4 个单位，读出来是
+    顶着一朵蘑菇；横管第一版从左塔穿过中塔顶再到右塔，正好横在最前面那只塔脸上，
+    成了一根搁着的棍子。现在圆顶收到罐身的七成，横管改走**所有塔顶之上**、并且在
+    最前面那只塔之前画完（燔石化工厂那张的老经验：管子两端要落在罐口上，不能悬空）。
+    """
+    d = canvas()
+
+    p = _pal("#cd52ba")          # 品红：八座里没有的色相，和观微对撞机的紫（259°）分得开
+    dark = _pal("#7a2d6e")
+    steel = _pal("#8e94a3")
+
+    # 宽底座：比三只塔的跨度还要宽出一截，它们才读得出是「被装进去的」
+    _prism(d, 0, 32, 44, 9, dark)
+    _prism(d, 0, 24, 39, 8, p, gloss=0.18)
+
+    # 右后：矮胖圆顶罐 —— 氧化还原
+    _cyl(d, 20, 4, 12, 18, p, cap_gloss=0.3)
+    d.append(dw.Ellipse(20, 1.5, 8.4, 8.4 * ISO * 1.25, fill=p[0], stroke=dark[3], stroke_width=1.2))
+
+    # 左：带电极的方槽 —— 电化学。两根电极不等高，读得出是「插进去的」而不是栏杆
+    _prism(d, -21, 8, 13, 17, p, gloss=0.22)
+    for ex, eh in ((-26, 19), (-16, 14)):
+        d.append(dw.Line(ex, 6, ex, 6 - eh, stroke=steel[2], stroke_width=3.2, stroke_linecap="round"))
+        d.append(dw.Circle(ex, 6 - eh, 2.6, fill=steel[0], stroke=dark[3], stroke_width=1.0))
+
+    # 共用的进出料横管：走在所有塔顶之上，两端落进左右两座的罐口
+    for w, col in ((4.6, dark[2]), (1.7, p[0])):
+        d.append(dw.Path(stroke=col, stroke_width=w, fill="none",
+                         stroke_linecap="round", stroke_linejoin="round")
+                 .M(-21, 8).L(-21, -4).L(20, -8).L(20, 4))
+
+    # 中前：细高精馏塔 —— 化学。<b>要比横管高</b>：最后画、又穿过横管，
+    # 前后关系才立得住；横管第二版架得太高，中间圈出一大片空白，读成了一副龙门架
+    _cyl(d, 0, -13, 9, 42, p, cap_gloss=0.3)
+    d.append(dw.Ellipse(0, -13, 10.4, 10.4 * ISO, fill="#e87fd6", stroke=dark[3], stroke_width=1.2))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -2431,6 +2484,7 @@ if __name__ == "__main__":
     render(particle_collider(), "particle-collider")
     render(bio_greenhouse(), "bio-greenhouse")
     render(lava_cooler(), "lava-cooler")
+    render(omni_chem(), "omni-chem")
     render(tab_mega(), "tab-mega")
 
     # 生物温室的产物与配方图标

@@ -41,6 +41,13 @@ namespace ProjectEden.Patches
             // 过一次 Translate：这个值是 machines.json 里的中文，已经注册成本地化键了，
             // 切英文时要变成英文机器名，否则「制造于」会是一行孤立的中文
             if (name != null) __result = name.Translate();
+
+            // 多类型机器要**追加**而不是替换：一条化学配方仍然是化工厂做的，
+            // 只是综合化学厂也做得了。不提这一句的话，那台机器的能力在配方上完全看不出来
+            string also = RecipeTypeCompatPatches.AlsoMadeIn((int)__instance.Type);
+
+            if (also != null)
+                __result = string.IsNullOrEmpty(__result) ? also.Translate() : __result + " / " + also.Translate();
         }
 
         /// <summary>

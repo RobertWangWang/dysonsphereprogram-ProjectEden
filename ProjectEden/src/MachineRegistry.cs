@@ -122,6 +122,12 @@ namespace ProjectEden
         /// 字段默认就是 0；若不排除，任何 <c>Type == None</c> 的配方（手搓专用配方就是这样）
         /// 都会被认成「制造于 综合物流枢纽」。
         /// </remarks>
+        /// <summary>
+        /// 是不是本 mod 自己的配方类型。<b>原版占 1~8 和 15</b>（15 是 Research），
+        /// 其余全是我们的——包括 16 以上，那一段和 14 一样能用。
+        /// </summary>
+        internal static bool IsCustomType(int recipeType) => recipeType >= 9 && recipeType != 15;
+
         internal static string RecipeTypeMachineName(int recipeType)
         {
             if (recipeType <= 0) return null;
@@ -140,11 +146,15 @@ namespace ProjectEden
         /// （1 熔炉 / 2 化工 / 4 组装 / 5 粒子），若在这里一并返回，
         /// 所有原版配方的「制造于」都会从「制造台」变成「天工装配厂」——
         /// 那是把原版文案改掉，不是补一句缺失的文案。
-        /// 原版占 1~8 和 15，自定义区间是 9~14。
+        ///
+        /// <b>判据是「不是原版类型」，不是「落在 9~14 里」。</b> 原版占 1~8 和 15，
+        /// 剩下的全是本 mod 的。这里原先写死 <c>9 &lt;= t &lt;= 14</c>，
+        /// 而 14 从来不是上限（<c>ERecipeType</c> 没有任何上限，推导在 CLAUDE.md）——
+        /// 综合化学厂拿了 16，那个区间就把它漏在外面了。
         /// </summary>
         private static string MegaBuildingRecipeTypeName(int recipeType)
         {
-            if (recipeType < 9 || recipeType > 14) return null;
+            if (!IsCustomType(recipeType)) return null;
 
             MegaBuildingEntry[] buildings = MegaBuildingRegistry.Config?.buildings;
 
@@ -172,7 +182,7 @@ namespace ProjectEden
 
             for (var i = 0; i < buildings.Length; i++)
                 if (buildings[i] != null && buildings[i].itemId == itemId
-                                         && buildings[i].recipeType >= 9 && buildings[i].recipeType <= 14)
+                                         && IsCustomType(buildings[i].recipeType))
                     return string.IsNullOrEmpty(buildings[i].machineTypeName)
                         ? buildings[i].displayName
                         : buildings[i].machineTypeName;

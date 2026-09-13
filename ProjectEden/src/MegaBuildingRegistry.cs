@@ -360,9 +360,15 @@ namespace ProjectEden
                 Type = ERecipeType.Assemble,
                 Handcraft = true,
                 Explicit = true,
-                TimeSpend = Config.recipeTimeSpend,
-                Items = Config.recipeItems,
-                ItemCounts = Config.recipeItemCounts,
+                TimeSpend = entry.recipeTimeSpend > 0 ? entry.recipeTimeSpend : Config.recipeTimeSpend,
+                // 单座覆盖优先。**拿的是配置对象自己的数组**，不是全局那份的副本——
+                // RecipeProto.Items 按引用挂上去，共用一份的话就地改一座会改掉全部
+                Items = entry.recipeItems != null && entry.recipeItems.Length > 0
+                    ? entry.recipeItems
+                    : Config.recipeItems,
+                ItemCounts = entry.recipeItemCounts != null && entry.recipeItemCounts.Length > 0
+                    ? entry.recipeItemCounts
+                    : Config.recipeItemCounts,
                 Results = new[] { entry.itemId },
                 ResultCounts = new[] { 1 },
                 GridIndex = GridIndexOf(entry),

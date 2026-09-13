@@ -199,5 +199,34 @@ namespace ProjectEden.Utils
         public float tintR;
         public float tintG;
         public float tintB;
+
+        /// <summary>
+        /// 这台机器<b>额外</b>接受的配方类型。留空 = 只跑 <see cref="recipeType"/> 那一种（原版行为）。
+        ///
+        /// <b>原版是「一台机器一种类型」，而且这句话是硬的</b>——配方选择器按
+        /// <c>filter != recipe.Type</c> 过滤，蓝图与复制粘贴那一族处处比
+        /// <c>BuildingParameters.recipeType == prefabDesc.assemblerRecipeType</c>。
+        /// 填了这个字段就会由 <see cref="Patches.RecipeTypeCompatPatches"/> 把那八处闸门
+        /// 换成一次查表，代价与理由都写在那个文件里。
+        ///
+        /// <b>方向是单向的</b>：综合化学厂（16）接受化学（2），但化工厂不会因此接受 16。
+        /// </summary>
+        public int[] acceptsRecipeTypes;
+
+        /// <summary>
+        /// 单座建筑的建造配方，覆盖顶层那份全局的。留空则沿用全局值。
+        ///
+        /// <b>为什么要有</b>：顶层 <c>recipeItems</c> 是八座共用的一份（铁块 ×1 + 铜块 ×1），
+        /// 而有些建筑就该贵——比如把前一代整台吃进去的那种。
+        ///
+        /// <b>这里必须是自己的数组</b>，不能改动全局那份：<c>RecipeProto.Items</c> 是按引用挂上去的，
+        /// 就地改会同时改掉其余几座（数组是我们的、数组里的内容不是，同一族的坑见 CLAUDE.md）。
+        /// </summary>
+        public int[] recipeItems;
+
+        public int[] recipeItemCounts;
+
+        /// <summary>单座建筑的建造耗时（帧）。0 = 沿用全局</summary>
+        public int recipeTimeSpend;
     }
 }
