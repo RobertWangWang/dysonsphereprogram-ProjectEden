@@ -50,13 +50,20 @@ Copy-Item $target $copy -Force
 $asm = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($copy, $rp)
 $mod = $asm.MainModule
 
-# 1a then 1b, so 1c sees the state it will actually see at runtime
+# CargoIncWidener FIRST, then 1a, then 1b - the exact order Patcher.Patch uses.
+#
+# The widener is not optional scenery here: it rewrites Cargo.inc from Byte to Int16 and
+# drags a whole call chain along with it, so the very IL 1c has to match changes shape
+# (ldind.u1 -> ldind.i4, stind.i1 -> stind.i4, conv.u1 -> conv.i2). Taking the shape
+# census on an un-widened assembly means writing emitters for shapes that will not exist
+# at runtime, and missing the ones that will - while every check reports success.
+$w = Invoke1 "CargoIncWidener"      "Apply" $mod
 $a = Invoke1 "QualityFieldAdder"    "Apply" $mod
 $b = Invoke1 "QualityChannelBuilder" "Apply" $mod
-foreach ($x in @($a, $b)) {
+foreach ($x in @($w, $a, $b)) {
     foreach ($bl in (Field $x "Blockers")) { Write-Host "  prereq BLOCKER: $bl" -ForegroundColor Red }
 }
-Write-Host "prereqs: 1a fields + 1b channel applied to the copy" -ForegroundColor DarkGray
+Write-Host "prereqs: cargo widening + 1a fields + 1b channel applied to the copy" -ForegroundColor DarkGray
 Write-Host ""
 
 $r = Invoke1 "QualityTransform" "Apply" $mod
@@ -126,6 +133,7 @@ Write-Host "=== exercising the emitters that exist (offline only) ===" -Foregrou
 $out = Join-Path $work "ac-1c-emitted.dll"
 $asmE = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($copy, $rp)
 $modE = $asmE.MainModule
+[void](Invoke1 "CargoIncWidener"       "Apply" $modE)
 [void](Invoke1 "QualityFieldAdder"     "Apply" $modE)
 [void](Invoke1 "QualityChannelBuilder" "Apply" $modE)
 

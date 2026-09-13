@@ -479,9 +479,14 @@ namespace ProjectEden.Preloader
 
                 r.Unhandled[core] = r.Unhandled.TryGetValue(core, out int n) ? n + 1 : 1;
 
-                if (!r.UnhandledExample.ContainsKey(core))
-                    r.UnhandledExample[core] =
-                        $"{m.DeclaringType.Name}::{m.Name} @IL_{code[from].Offset:X4}";
+                // **一个出处不够。** 同一个形状出现在语义完全不同的方法里是常事
+                // （`stfld:PAY [merge]` 里既有「按比例保留」也有「凭空生成」），
+                // 只看第一个出处会按那一个的语义去写发射器，然后在别处悄悄做错事。
+                string site = $"{m.DeclaringType.Name}::{m.Name} @IL_{code[from].Offset:X4}";
+
+                r.UnhandledExample[core] = r.UnhandledExample.TryGetValue(core, out string had)
+                    ? (had.Split(' ').Length > 12 ? had : had + "; " + site)
+                    : site;
             }
 
             if (touched) r.Methods++;
