@@ -73,7 +73,12 @@ namespace ProjectEden.Patches
             }
 
             label.enabled = true;
-            label.text = "品质 " + (qua / count);
+
+            // **走翻译表，不能拼中文。** 键本身就是中文客户端要看到的那句话
+            // （`I18N.ApplyLanguage` 给中文的是键的原文，只有别的语言才查表），
+            // 所以键要写成带占位符的完整句子，而不是「品质标签」这种描述性名字——
+            // 后者在中文客户端上会原样显示成「品质标签」。
+            label.text = string.Format("品质 {0}".Translate(), qua / count);
         }
 
         private static Text Label(UIStationStorage ui)

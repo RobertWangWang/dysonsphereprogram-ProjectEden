@@ -430,6 +430,9 @@
     "渣油和氢一起压进催化剂床，硫被打成硫化氢逸出，再在下一段烧成单质硫落下来。剩下的油轻了、干净了，但这一步的目的从来不是造油——是把那些会毒死一切的东西先摘掉。": "Residue and hydrogen are forced together through a catalyst bed; the sulfur is knocked off as hydrogen sulfide and burned down to the element in the stage that follows. The oil that remains is lighter and cleaner, but making oil was never the point of this step \u2014 the point is taking out the things that poison everything downstream.",
     "硫酸 · 接触法": "Sulfuric Acid - Contact Process",
     "硫先烧成二氧化硫，再在五氧化二钒上接触氧化成三氧化硫，最后被水吸住。世界上绝大部分硫酸是这么来的，而它要的硫，绝大部分又是从石油里摘出来的。": "Sulfur is first burned to sulfur dioxide, then oxidised on contact with vanadium pentoxide to the trioxide, and finally absorbed into water. Most of the world's sulfuric acid is made this way \u2014 and most of the sulfur it needs was taken out of petroleum.",
+    "//-- 物品品质 --": "",
+    "品质 {0}": "Quality {0}",
+
     "//-- 催化剂床面板 --": "",
     "催化剂床　装填与活性": "Catalyst Bed - charge and activity",
     "床内装填": "In the bed",
