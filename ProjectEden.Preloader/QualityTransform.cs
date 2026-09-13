@@ -399,9 +399,30 @@ namespace ProjectEden.Preloader
 
                     if (dv == null || !cand.Contains(dv)) continue;
 
-                    if (!Emitted.Contains(st.Core)
-                        || Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To, TrueFrom = st.TrueFrom }) == null)
+                    // **判定一条赋值能不能发射时，目的地必须在场。**
+                    // 上一轮把它剔掉之后，这一轮它自己的赋值语句会因为「目的地不是载荷局部」
+                    // 直接失败，于是永远回不来——而它上一轮失败的原因（某个来源还在）
+                    // 早就消失了。这一条差点让 `X.inc -= 件数 × 每件品质分` 那一族永久缺口。
+                    bool had = ctx.Locals.ContainsKey(dv);
+
+                    if (!had) ctx.Locals[dv] = null;
+
+                    bool fail = !Emitted.Contains(st.Core)
+                                || Build(ctx, code, new Job
+                                {
+                                    Core = st.Core, From = st.From, To = st.To, TrueFrom = st.TrueFrom,
+                                }) == null;
+
+                    if (!had) ctx.Locals.Remove(dv);
+
+                    if (fail)
+                    {
                         fresh.Add(dv);
+
+                        if (Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG") == m.Name)
+                            Console.Error.WriteLine($"[fail] {m.Name} 第{round}轮 V_{dv.Index} "
+                                                    + $"IL_{code[st.From].Offset:X4}-{code[st.To].Offset:X4} {st.Core}");
+                    }
                 }
 
                 if (fresh.SetEquals(dead)) break;
@@ -806,13 +827,19 @@ namespace ProjectEden.Preloader
                     if (taken.Contains(i) || !IsStloc(code[i])) continue;
 
                     VariableDefinition adst = VarOf(m, code[i]);
-                    ParameterDefinition ap = IsLdarg(code[i - 1]) ? ParamOf(m, code[i - 1]) : null;
+
+                    // 载荷参数是 `ref int` 时中间多一条解引用：`ldarg ; ldind ; stloc`
+                    int af = i - 1;
+
+                    if (af - 1 >= 0 && IsLdind(code[af])) af--;
+
+                    ParameterDefinition ap = IsLdarg(code[af]) ? ParamOf(m, code[af]) : null;
 
                     if (adst == null || ap == null || !ctx.ParamSlot.ContainsKey(ap)) continue;
 
                     taken.Add(i);
 
-                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldarg:PAY stloc", Synth = true });
+                    extra.Add(new Stmt { From = af, To = i, Core = "ldarg:PAY stloc", Synth = true });
 
                     if (cand.Add(adst)) grew = true;
                 }
@@ -836,16 +863,10 @@ namespace ProjectEden.Preloader
 
                     if (va == null || !PureRange(code, va[0], i - 1)) continue;
 
-                    var uses = false;
-
-                    for (int k = va[0]; k < i; k++)
-                    {
-                        VariableDefinition u = IsLdloc(code[k]) ? VarOf(m, code[k]) : null;
-
-                        if (u != null && cand.Contains(u)) { uses = true; break; }
-                    }
-
-                    if (!uses) continue;
+                    // 品质来源不止「另一个载荷局部」——载荷字段和载荷参数同样算。
+                    // 只认局部的话，`V_1 = *inc / *count` 这种（两个操作数都是参数解引用）
+                    // 就被漏掉，而它是整条链的第一环。
+                    if (!CarriesQuality(m, code, va[0], i - 1, cand, ctx)) continue;
 
                     taken.Add(i);
 
@@ -1830,6 +1851,7 @@ namespace ProjectEden.Preloader
             case "ldarg:PAY stloc":
             {
                 ParameterDefinition qp = ParamOf(ctx.Method, code[job.From]);
+
                 VariableDefinition qdst = VarOf(ctx.Method, store);
 
                 if (qp == null || qdst == null) return null;
@@ -2167,6 +2189,16 @@ namespace ProjectEden.Preloader
                 inner.Add(Clone(code[to]));
 
                 return inner;
+            }
+
+            // (0.2) `*incParam`：载荷参数是 `ref int` 时，读它的值写作 `ldarg ; ldind`。
+            // 品质那一侧在侧信道寄存器里，不需要（也没有）解引用这一步。
+            if (to == from + 1 && IsLdind(code[to]) && IsLdarg(code[from]))
+            {
+                ParameterDefinition rp = ParamOf(ctx.Method, code[from]);
+
+                if (rp != null && ctx.ParamSlot.TryGetValue(rp, out int rslot) && rslot < ctx.Regs.Count)
+                    return new List<Instruction> { Instruction.Create(OpCodes.Ldsfld, ctx.Regs[rslot]) };
             }
 
             // (0) split_inc(ref n, ref m, p) 这个**表达式**的品质版。
