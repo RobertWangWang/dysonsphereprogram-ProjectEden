@@ -105,10 +105,48 @@ namespace ProjectEden.Preloader
                 return;
             }
 
+            Log.LogInfo($"物品品质：侧信道已就位（{c.Registers} 个线程静态寄存器）。");
+
+            RewriteQualityFlow(assembly);
+        }
+
+        /// <summary>
+        /// 阶段 1c：把主干道上每一处载荷访问都配一条<b>孪生语句</b>，品质从此真的会流动。
+        ///
+        /// <b>它要么全做要么不做。</b> 变换先只分析一遍，只要还有一种语句形状没有发射器,
+        /// 它就什么都不改并把缺口报出来——半改一半的 Assembly-CSharp 是救不回来的,
+        /// 而「品质在某几条路径上悄悄变成 0」比「品质恒为 0」难查得多。
+        ///
+        /// 所以这里**不因为失败而中止启动**：前面三步（加宽、孪生字段、侧信道）都已完成,
+        /// 品质只是不流动，游戏行为和 1b 那一版一致。
+        /// </summary>
+        private static void RewriteQualityFlow(AssemblyDefinition assembly)
+        {
+            QualityTransform.Report q = QualityTransform.Apply(assembly.MainModule);
+
+            foreach (string n in q.Notes) Log.LogInfo(n);
+
+            if (q.Blockers.Count > 0 || q.Unhandled.Count > 0 || q.Pending.Count > 0)
+            {
+                Log.LogError(
+                    $"物品品质：**品质流动未启用**——阻塞 {q.Blockers.Count} 条、" +
+                    $"未识别形状 {q.Unhandled.Count} 种、认得但没发射 {q.Pending.Count} 种。" +
+                    "字段和侧信道仍在，品质恒为 0，游戏行为与不加时一致。");
+
+                foreach (string b in q.Blockers) Log.LogError("  " + b);
+
+                foreach (string k in q.Unhandled.Keys) Log.LogError($"  未识别形状：{k}");
+
+                foreach (string k in q.Pending.Keys) Log.LogError($"  没有发射器：{k}");
+
+                return;
+            }
+
             Log.LogWarning(
-                $"物品品质：侧信道已就位（{c.Registers} 个线程静态寄存器）。" +
-                "字段和通道都有了，但还没有任何代码去写它们——品质恒为 0，" +
-                "游戏行为与不加时一致。让品质真的流动是 1c。");
+                $"物品品质：品质流动已启用——{q.Twinned} 条孪生语句、{q.TwinLocals} 个孪生局部、" +
+                $"{q.ChannelUses} 处走侧信道，涉及 {q.Methods} 个方法体。" +
+                $"品质**还没进存档**（{q.SaveSkipped} 处），读档归零；" +
+                $"另有 {q.Dropped} 处明确丢弃。");
         }
     }
 }

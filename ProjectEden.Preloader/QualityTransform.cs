@@ -1811,6 +1811,38 @@ namespace ProjectEden.Preloader
             //
             // **宽度不用跟着原版走。** 原版这里是 stind.i2（Cargo.inc 被加宽成 Int16 之后的样子），
             // 而孪生槽位是静态 Int32 字段，写它用 stsfld，没有解引用这回事。
+            // 一条语句里写了**两个**出参：`*outStack = cargo.stack; *outInc = cargo.inc; return true;`
+            // ——`return true` 的那个 `ldc.i4.1` 先压栈，栈深一路不归零，于是整段被切成一条语句。
+            // 只有带载荷的那一次 stind 要孪生，另一次和末尾的 stloc 都不用动。
+            case "stind.i2 ldfld:PAY stind.i2 stloc":
+            {
+                for (int k = job.From; k <= job.To; k++)
+                {
+                    if (!IsStind(code[k])) continue;
+
+                    int[] sa2 = ArgStarts(code, k, 2);
+
+                    if (sa2 == null || sa2[0] < job.From) continue;
+                    if (!HasMainline(code, sa2[1], k - 1, ctx.Twin)) continue;
+                    if (sa2[1] - sa2[0] != 1) continue;
+
+                    ParameterDefinition tp = ParamOf(ctx.Method, code[sa2[0]]);
+
+                    if (tp == null || !ctx.ParamSlot.TryGetValue(tp, out int tslot)
+                                   || tslot >= ctx.Regs.Count) continue;
+
+                    List<Instruction> tv2 = TwinValue(ctx, code, sa2[1], k - 1);
+
+                    if (tv2 == null) return null;
+
+                    tv2.Add(Instruction.Create(OpCodes.Stsfld, ctx.Regs[tslot]));
+
+                    return tv2;
+                }
+
+                return null;
+            }
+
             case "ldfld:PAY stind.i2":
             case "ldfld:PAY stind.i4":
             case "ldflda:PAY ldind.i4 call:split_inc stind.i4":
@@ -2760,6 +2792,7 @@ namespace ProjectEden.Preloader
             "call:split_inc stfld:PAY",
 
             // 出参赋值一族（累加那一族的兄弟），以及站点「保留 N 份」的凭空生成
+            "stind.i2 ldfld:PAY stind.i2 stloc",
             "ldfld:PAY stind.i2",
             "ldfld:PAY stind.i4",
             "ldflda:PAY ldind.i4 call:split_inc stind.i4",
@@ -2831,6 +2864,7 @@ namespace ProjectEden.Preloader
             "ldfld:PAY ldc ldc ldc call:TryAddItemToPackage stloc",
             "ldfld:PAY call:AddItemStacked bge.s",
             "ldfld:PAY call:AddItemStacked stloc",
+            "stind.i2 ldfld:PAY stind.i2 stloc",                    // 一条语句写两个出参
             "ldfld:PAY stind.i2",                                   // *out = X.inc
             "ldfld:PAY stind.i4",
             "ldflda:PAY ldind.i4 call:split_inc stind.i4",          // *out = split_inc(...)

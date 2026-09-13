@@ -54,6 +54,12 @@ function Field($o, $n) {
   return $f.GetValue($o)
 }
 
+function Invoke1($typeName, $method, $arg) {
+  $t = $pre.GetType("ProjectEden.Preloader.$typeName")
+  $m = $t.GetMethod($method, [Reflection.BindingFlags]"NonPublic,Static")
+  return $m.Invoke($null, @($arg))
+}
+
 $notes    = Field $r "Notes"
 $blockers = Field $r "Blockers"
 $suspects = Field $r "Suspects"
@@ -306,10 +312,66 @@ Check ($sigDiff2.Count -eq 0) "still no signature differs from vanilla after 1b"
 $origAsm2.Dispose()
 $asm5.Dispose()
 
+# ---------------------------------------------------------------------------
+# Stage 1c, end to end: the SAME chain Patcher.Patch runs, written out and read
+# back. Everything above checks one stage against a copy prepared by hand; this
+# checks the end state of the real pipeline. A stage that passes in isolation and
+# breaks in sequence is exactly the failure this repo keeps paying for.
+# ---------------------------------------------------------------------------
+$copy6 = Join-Path $work "ac-1c-full.dll"
+Copy-Item $target $copy6 -Force
+$asm6 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($copy6, $rp2)
+$mod6 = $asm6.MainModule
+
+[void](Invoke1 "CargoIncWidener"       "Apply" $mod6)
+[void](Invoke1 "QualityFieldAdder"     "Apply" $mod6)
+[void](Invoke1 "QualityChannelBuilder" "Apply" $mod6)
+$qr = Invoke1 "QualityTransform" "Apply" $mod6
+
+Check ((Field $qr "Blockers").Count -eq 0) "1c reports no blockers in the real chain"
+Check ((Field $qr "Unhandled").Count -eq 0) "1c has no unrecognised statement shape left"
+Check ((Field $qr "Pending").Count -eq 0) "1c has an emitter for every shape it recognises"
+Check ((Field $qr "Twinned") -gt 200) "1c emitted twin statements ($(Field $qr 'Twinned'))"
+
+# The side channel must actually be used. Zero here means quality never crosses a
+# method boundary - and that failure is silent: quality stays 0 while every count
+# still reports success.
+Check ((Field $qr "ChannelUses") -gt 0) "1c uses the side channel ($(Field $qr 'ChannelUses') sites)"
+
+$out6 = Join-Path $work "ac-1c-full-out.dll"
+$wrote = $true
+try { $asm6.Write($out6) } catch { $wrote = $false; Write-Host "        $($_.Exception.Message)" -ForegroundColor Red }
+Check $wrote "the fully transformed assembly still writes"
+$asm6.Dispose()
+
+if ($wrote) {
+    $asm7 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out6, $rp2)
+    $bad7 = 0
+    foreach ($t in $asm7.MainModule.Types) {
+        foreach ($m in $t.Methods) {
+            if (-not $m.HasBody) { continue }
+            foreach ($i in $m.Body.Instructions) {
+                $op = $i.Operand
+                if ($op -is [Mono.Cecil.Cil.Instruction]) { if ($op.Offset -lt 0) { $bad7++ } }
+                elseif ($op -is [Mono.Cecil.Cil.Instruction[]]) { foreach ($x in $op) { if ($x.Offset -lt 0) { $bad7++ } } }
+            }
+        }
+    }
+    Check ($bad7 -eq 0) "all branch targets resolve after the full chain writes and re-reads"
+
+    # Still no signature may differ - that is what keeps other mods loading.
+    $origAsm3 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($target, $rp2)
+    $sigDiff3 = SignatureDiff $origAsm3.MainModule $asm7.MainModule
+    foreach ($d in ($sigDiff3 | Select-Object -First 5)) { Write-Host ("        signature changed: $d") -ForegroundColor Red }
+    Check ($sigDiff3.Count -eq 0) "no signature differs from vanilla after the full chain"
+    $origAsm3.Dispose()
+    $asm7.Dispose()
+}
+
 Write-Host ""
 if ($fail -gt 0) {
     Write-Host "$fail assertion(s) FAILED" -ForegroundColor Red
     exit 1
 }
-Write-Host "stages 1a + 1b OK - fields, side channel, signatures untouched" -ForegroundColor Green
+Write-Host "stages 1a + 1b + 1c OK - fields, side channel, quality flows, signatures untouched" -ForegroundColor Green
 exit 0
