@@ -272,6 +272,27 @@ foreach ($b in (Field $vr2 "Blockers")) { Check $false $b }
 Check ((Field $vr2 "Blockers").Count -eq 0) `
     ("side channel has $(Field $vr2 'Registers') thread-static Int32 registers after write/re-read")
 
+# The synthesized Split is quality's version of StorageComponent.split_inc - the
+# proportional split every extensive quantity needs. Assert it survived the round trip
+# with a real body: a method that exists but is empty would fail only at run time.
+$chanType = $mod5.GetType("ProjectEdenQualityChannel")
+$split = $null
+if ($chanType -ne $null) {
+    foreach ($sm in $chanType.Methods) { if ($sm.Name -eq "Split") { $split = $sm } }
+}
+Check ($split -ne $null) "synthesized ProjectEdenQualityChannel.Split exists"
+if ($split -ne $null) {
+    Check ($split.IsStatic -and $split.Parameters.Count -eq 3 -and $split.Parameters[1].ParameterType.IsByReference) `
+        "Split signature is static int Split(int, ref int, int)"
+    Check ($split.HasBody -and $split.Body.Instructions.Count -ge 20) `
+        "Split has a real body ($($split.Body.Instructions.Count) instructions)"
+    $badTarget = 0
+    foreach ($ins in $split.Body.Instructions) {
+        if ($ins.Operand -is [Mono.Cecil.Cil.Instruction]) { if ($ins.Operand.Offset -lt 0) { $badTarget++ } }
+    }
+    Check ($badTarget -eq 0) "Split's own branch targets resolve after write/re-read"
+}
+
 # 1a's fields must survive 1b
 $vr3 = $verify.Invoke($null, @($mod5))
 Check ((Field $vr3 "Blockers").Count -eq 0) "1a twin fields still intact after 1b"

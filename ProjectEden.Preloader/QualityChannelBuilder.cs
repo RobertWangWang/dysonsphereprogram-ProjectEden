@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace ProjectEden.Preloader
 {
@@ -123,6 +124,8 @@ namespace ProjectEden.Preloader
                     type.Fields.Add(f);
                 }
 
+                type.Methods.Add(BuildSplit(module));
+
                 module.Types.Add(type);
             }
 
@@ -135,6 +138,133 @@ namespace ProjectEden.Preloader
                 "签名一个都没动，其它 mod 不受影响。");
 
             return r;
+        }
+
+        /// <summary>合成的按比例拆分函数名。</summary>
+        internal const string SplitName = "Split";
+
+        /// <summary>
+        /// 合成 <c>static int Split(int countAfter, ref int qua, int p)</c>：
+        /// <b>品质点数版的 <c>StorageComponent.split_inc</c></b>。
+        ///
+        /// <b>它是照抄的，不是新发明的。</b> 原版那一支的数学（IL 000F–003E）是：
+        /// <code>
+        ///   split_inc(ref int n, ref int m, int p)     // n 件数、m 总点数、p 取走几件
+        ///       level = m / n ;  rem = m - level * n
+        ///       n -= p
+        ///       rem -= n
+        ///       ret = rem &gt; 0 ? level * p + rem : level * p
+        ///       m -= ret ;  return ret
+        /// </code>
+        /// 这正是可加量的标准按比例拆分 —— 也就是品质这套设计从头要的那条规则，
+        /// 所以品质的孪生就是同一套数学作用在 <c>(件数, 品质点数)</c> 上。
+        ///
+        /// <b>为什么不能直接再调一次原版的 <c>split_inc</c>。</b>
+        /// 它会顺手把件数减掉（<c>n -= p</c>）。同一个调用点调两次，件数会被扣两次，
+        /// 而那会<b>凭空销毁物品</b>。所以这里的签名收下的是「<b>已经减过的</b>件数」，
+        /// 内部把它加回去还原 <c>n</c>：孪生语句发射在原调用之后，那时件数正好是减过的。
+        ///
+        /// 除此之外每一步都和原版逐条对应，包括 <c>n &lt;= 0</c> 时把点数清零并返回 0
+        /// 这个分支 —— 少一条都会让两边在边界上分叉，而分叉是静默的。
+        /// </summary>
+        private static MethodDefinition BuildSplit(ModuleDefinition module)
+        {
+            TypeReference i32 = module.TypeSystem.Int32;
+
+            var m = new MethodDefinition(
+                SplitName,
+                MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+                i32);
+
+            m.Parameters.Add(new ParameterDefinition("countAfter", ParameterAttributes.None, i32));
+            m.Parameters.Add(new ParameterDefinition("qua", ParameterAttributes.None, new ByReferenceType(i32)));
+            m.Parameters.Add(new ParameterDefinition("p", ParameterAttributes.None, i32));
+
+            var n = new VariableDefinition(i32);
+            var level = new VariableDefinition(i32);
+            var rem = new VariableDefinition(i32);
+            var ret = new VariableDefinition(i32);
+
+            m.Body.Variables.Add(n);
+            m.Body.Variables.Add(level);
+            m.Body.Variables.Add(rem);
+            m.Body.Variables.Add(ret);
+            m.Body.InitLocals = true;
+
+            ILProcessor il = m.Body.GetILProcessor();
+
+            // 两个跳转目标先建出来，后面再插进去
+            Instruction live = il.Create(OpCodes.Ldarg_1);   // n > 0 的主路
+            Instruction skip = il.Create(OpCodes.Ldarg_1);   // rem <= 0 时跳过 ret += rem
+
+            // n = countAfter + p
+            il.Append(il.Create(OpCodes.Ldarg_0));
+            il.Append(il.Create(OpCodes.Ldarg_2));
+            il.Append(il.Create(OpCodes.Add));
+            il.Append(il.Create(OpCodes.Stloc, n));
+
+            // if (n > 0) goto live
+            il.Append(il.Create(OpCodes.Ldloc, n));
+            il.Append(il.Create(OpCodes.Ldc_I4_0));
+            il.Append(il.Create(OpCodes.Bgt, live));
+
+            // *qua = 0 ; return 0
+            il.Append(il.Create(OpCodes.Ldarg_1));
+            il.Append(il.Create(OpCodes.Ldc_I4_0));
+            il.Append(il.Create(OpCodes.Stind_I4));
+            il.Append(il.Create(OpCodes.Ldc_I4_0));
+            il.Append(il.Create(OpCodes.Ret));
+
+            // live: level = *qua / n
+            il.Append(live);                                  // ldarg.1
+            il.Append(il.Create(OpCodes.Ldind_I4));
+            il.Append(il.Create(OpCodes.Ldloc, n));
+            il.Append(il.Create(OpCodes.Div));
+            il.Append(il.Create(OpCodes.Stloc, level));
+
+            // rem = *qua - level * n
+            il.Append(il.Create(OpCodes.Ldarg_1));
+            il.Append(il.Create(OpCodes.Ldind_I4));
+            il.Append(il.Create(OpCodes.Ldloc, level));
+            il.Append(il.Create(OpCodes.Ldloc, n));
+            il.Append(il.Create(OpCodes.Mul));
+            il.Append(il.Create(OpCodes.Sub));
+            il.Append(il.Create(OpCodes.Stloc, rem));
+
+            // rem -= countAfter   （原版这里减的是已经扣过 p 的 n）
+            il.Append(il.Create(OpCodes.Ldloc, rem));
+            il.Append(il.Create(OpCodes.Ldarg_0));
+            il.Append(il.Create(OpCodes.Sub));
+            il.Append(il.Create(OpCodes.Stloc, rem));
+
+            // ret = level * p
+            il.Append(il.Create(OpCodes.Ldloc, level));
+            il.Append(il.Create(OpCodes.Ldarg_2));
+            il.Append(il.Create(OpCodes.Mul));
+            il.Append(il.Create(OpCodes.Stloc, ret));
+
+            // if (rem <= 0) goto skip
+            il.Append(il.Create(OpCodes.Ldloc, rem));
+            il.Append(il.Create(OpCodes.Ldc_I4_0));
+            il.Append(il.Create(OpCodes.Ble, skip));
+
+            // ret += rem
+            il.Append(il.Create(OpCodes.Ldloc, ret));
+            il.Append(il.Create(OpCodes.Ldloc, rem));
+            il.Append(il.Create(OpCodes.Add));
+            il.Append(il.Create(OpCodes.Stloc, ret));
+
+            // skip: *qua -= ret ; return ret
+            il.Append(skip);                                  // ldarg.1
+            il.Append(il.Create(OpCodes.Dup));
+            il.Append(il.Create(OpCodes.Ldind_I4));
+            il.Append(il.Create(OpCodes.Ldloc, ret));
+            il.Append(il.Create(OpCodes.Sub));
+            il.Append(il.Create(OpCodes.Stind_I4));
+            il.Append(il.Create(OpCodes.Ldloc, ret));
+            il.Append(il.Create(OpCodes.Ret));
+
+            return m;
         }
 
         /// <summary>
@@ -185,6 +315,18 @@ namespace ProjectEden.Preloader
 
                 return r;
             }
+
+            MethodDefinition split = t.Methods.FirstOrDefault(x => x.Name == SplitName);
+
+            if (split == null)
+                r.Blockers.Add($"{TypeName}::{SplitName} 写盘之后不见了");
+            else if (!split.IsStatic || split.Parameters.Count != 3 ||
+                     !split.Parameters[1].ParameterType.IsByReference ||
+                     split.ReturnType.MetadataType != MetadataType.Int32)
+                r.Blockers.Add(
+                    $"{TypeName}::{SplitName} 的签名不对：应为 static int {SplitName}(int, ref int, int)");
+            else if (!split.HasBody || split.Body.Instructions.Count < 20)
+                r.Blockers.Add($"{TypeName}::{SplitName} 的方法体太短，像是没写完");
 
             foreach (FieldDefinition f in t.Fields)
             {
