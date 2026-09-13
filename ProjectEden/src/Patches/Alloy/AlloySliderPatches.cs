@@ -665,55 +665,50 @@ namespace ProjectEden.Patches
 
             ItemPickerSearchPatches.Restrict(ids, "只能选可提纯的金属");
 
+            // **位置交给 Popup 自己，不再挪。**
+            //
+            // 第一版挪过，结果是「点了没反应、没出现列表」——它其实开了，只是被挪到了屏幕外。
+            // 原因是 `GetWorldCorners` 返回的是<b>世界坐标</b>，而这个 UI canvas 是
+            // Screen Space - Camera（本仓库早就记着 `UIRoot.ScreenPointIntoRect` 走的是
+            // `overlayCanvas.worldCamera`，那说明 worldCamera 非空），所以那几个数是 ±8 量级的世界单位，
+            // 拿去和 `Screen.width`（1920）比，一次修正就把窗口推出一千多个世界单位。
+            //
+            // 这正是本仓库记过的坑：**屏幕坐标和世界坐标长得一样，都是两个 float。**
+            // 传 (0, 0) 让它落在父级的锚点原点——那是原版自己的默认位置，确定、可见、不会算错。
             UIItemPicker.Popup(Vector2.zero, OnRefinePicked);
 
             // **没开起来就当场把白名单撤掉。** `Popup` 在 UIRoot 还没就绪或窗口已激活时
             // 直接 return（IL 000B / 002E），那时 `_OnClose` 永远不会来，
             // 名单就会一直挂在那儿，下一个打开物品选择器的人看到的是一张残留的短清单。
-            if (!UIItemPicker.isOpened)
-            {
-                ItemPickerSearchPatches.Restrict(null, null);
+            bool opened = UIItemPicker.isOpened;
 
-                return;
-            }
+            if (!opened) ItemPickerSearchPatches.Restrict(null, null);
 
-            PlacePickerNearRow();
+            ReportPickerOnce(opened, pool.Count);
         }
 
+        private static bool _pickerReported;
+
         /// <summary>
-        /// <c>Popup</c> 只是把 <c>pickerTrans.anchoredPosition</c> 设成传进去的值（IL 0050~0057），
-        /// 而那是<b>它自己父级里的锚定坐标</b>，和这块面板的父级未必是同一个。
-        /// 所以传 0 让它先开，再用<b>世界坐标</b>把它挪到这一行旁边——世界坐标与锚点、pivot
-        /// 无关，是本仓库在多产物面板上已经验证过的写法。
+        /// 第一次点这一行时，把整条链子报一遍：命中了、名单多长、窗口到底开没开、开在哪。
+        ///
+        /// <b>这一行不是装饰。</b> 上一版「点了没反应」在日志里是<b>完全静默</b>的——
+        /// 分不出「没点中这一行」「Popup 提前 return 了」和「开了但被挪出屏幕」，
+        /// 而这三种的处理方式完全不同。本仓库已经为这个形状付过五次往返。
         /// </summary>
-        private static void PlacePickerNearRow()
+        private static void ReportPickerOnce(bool opened, int candidates)
         {
+            if (_pickerReported) return;
+
+            _pickerReported = true;
+
             UIItemPicker picker = UIRoot.instance?.uiGame?.itemPicker;
+            RectTransform p = picker != null ? picker.pickerTrans : null;
 
-            if (picker?.pickerTrans == null || Rows[0]?.Track == null) return;
-
-            RectTransform row = Rows[0].Track;
-            RectTransform p = picker.pickerTrans;
-
-            // 挪到这一行的正上方一点：面板本身贴在装配器窗口下沿，往上开不会出屏。
-            Vector3 at = row.position;
-
-            p.position = at;
-
-            // 再把整块拉回屏幕内。选择器是个模态小窗，飘出屏幕就等于点不到。
-            var corners = new Vector3[4];
-
-            p.GetWorldCorners(corners);
-
-            float dx = 0f, dy = 0f;
-
-            if (corners[0].x < 0f) dx = -corners[0].x;
-            else if (corners[2].x > Screen.width) dx = Screen.width - corners[2].x;
-
-            if (corners[0].y < 0f) dy = -corners[0].y;
-            else if (corners[1].y > Screen.height) dy = Screen.height - corners[1].y;
-
-            if (dx != 0f || dy != 0f) p.position += new Vector3(dx, dy, 0f);
+            ProjectEdenPlugin.Log.LogInfo(
+                $"同位提纯：第一次点开选料——候选 {candidates} 种，" +
+                $"物品选择器 {(opened ? "已打开" : "**没打开**（UIRoot 未就绪或窗口已激活）")}，" +
+                $"锚定位置 {(p != null ? p.anchoredPosition.ToString() : "（拿不到 pickerTrans）")}。");
         }
 
         /// <summary>

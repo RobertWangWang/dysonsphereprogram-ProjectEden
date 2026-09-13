@@ -36,7 +36,13 @@ namespace ProjectEden.Patches
         /// <summary>原版三条采集分支写死的缓存上限。</summary>
         private const int VanillaCapacity = 50;
 
-        private static readonly Dictionary<int, int> ProductMap = new Dictionary<int, int>();
+        /// <summary>
+        /// 矿石 → 直接产出的成品。<b>提纯线也读它</b>（<c>QualityRefineryRegistry</c>）：
+        /// 「这种矿有没有唯一明显的下游」这个问题已经在这里回答过一次，
+        /// 连带判据和理由都写在 <c>advancedminer.json</c> 里，再推一遍只会推出第二个答案。
+        /// 载入后只读，所以普通字典即可（CLAUDE.md 第 4 号坑的例外那一类）。
+        /// </summary>
+        internal static readonly Dictionary<int, int> ProductMap = new Dictionary<int, int>();
 
         private static float _fullScale = -1f;
         private static float _fullCostRate = -1f;

@@ -67,6 +67,13 @@ namespace ProjectEden.Patches
 
             /// <summary>它是从哪种矿来的，只用来写日志——推导过程的凭据。</summary>
             internal string FromOre;
+
+            /// <summary>
+            /// 是靠哪一级规则定下来的。<b>必须打进日志</b>：原版配方表在 resources.assets 里、
+            /// 离线枚举不到，所以「这一格为什么是它」只有运行时能回答，
+            /// 而「氢」和「增产剂 Mk.I」两次混进来都是在这里现形的。
+            /// </summary>
+            internal string How;
         }
 
         /// <summary>一级提纯。三级各一条配方，共用同一张候选表。</summary>
@@ -255,7 +262,7 @@ namespace ProjectEden.Patches
                     continue;
                 }
 
-                int product = DeriveProduct(v.MiningItem);
+                int product = DeriveProduct(v.MiningItem, out string how);
 
                 if (product <= 0 || product == v.MiningItem)
                 {
@@ -277,35 +284,80 @@ namespace ProjectEden.Patches
                 // 只进一次表，不然选料行里会出现两个一模一样的名字
                 if (!seenProduct.Add(product)) continue;
 
-                Feeds.Add(new Feed { ItemId = product, Name = made.name, FromOre = ore.name });
+                Feeds.Add(new Feed
+                {
+                    ItemId = product, Name = made.name, FromOre = ore.name, How = how
+                });
             }
 
             Feeds.Sort((a, b) => a.ItemId.CompareTo(b.ItemId));
         }
 
         /// <summary>
-        /// 这种矿炼出什么。
+        /// 这种矿炼出什么。<b>三级优先，前两级是本仓库已经维护着的表，第三级才是现场推导。</b>
         ///
-        /// 先找<b>只吃这一种矿</b>的原版配方；同时有几条就按「每炉吃得最少」再按
-        /// 「产物 ID 最小」定下来（理由见类注释）。一条都没有再退到本 mod 自己声明的锭。
+        /// <list type="number">
+        /// <item><b><c>advancedminer.json</c> 的 <c>productMap</c></b>：大型采矿机直接出产物用的就是它，
+        ///       条目本身带着「这种矿有没有唯一明显的下游」这条判据和它的理由。
+        ///       同一个问题已经有一张经过推敲的答案表，再推一遍只会推出第二个答案。</item>
+        /// <item><b><see cref="OreRegistry"/> 声明的锭</b>：本 mod 的矿，矿种自己就写了它炼出什么。</item>
+        /// <item>都没有才去扫原版配方，而且<b>只认熔炉（<c>ERecipeType.Smelt</c>）</b>。</item>
+        /// </list>
         ///
-        /// <b>取的是第一个<i>固体</i>产物，不是 <c>Results[0]</c>。</b> 这一条是被实测逼出来的：
-        /// 可燃冰那条配方的第一个产物是<b>氢</b>，于是选料表里冒出来一格「氢 ×100 → 氢 ×80」——
-        /// 提纯一种气体，既讲不通，也没有锭可言。原版把副产物排在前面是常事，
-        /// 所以「第一个」不等于「主产物」，而「是不是流体」才是这里真正要问的问题。
+        /// <b>第三级的熔炉判据是被实测逼出来的，两次。</b>
+        /// 第一版取「只吃这一种矿」的配方的 <c>Results[0]</c>，选料表里冒出来<b>氢</b>——
+        /// 可燃冰那条配方的第一个产物就是氢，原版把副产物排在前面是常事。
+        /// 改成「第一个固体产物」之后又冒出来<b>增产剂 Mk.I</b>：它是煤矿 ×1 出 1 个，
+        /// 比高能石墨的煤矿 ×2 出 1 个「更直接」，于是赢了那条按投料量取小的比较。
+        ///
+        /// 两次都是同一个错误——<b>把「结构上像」当成了「语义上是」</b>。
+        /// 「只吃一种矿的配方」在原版里根本不止冶炼：还有喷涂剂、磁铁、玻璃。
+        /// 真正在问的问题是「这是不是一道冶炼」，而那正是 <c>ERecipeType.Smelt</c> 本身。
+        ///
+        /// <b>原版配方表在 <c>resources.assets</c> 里，离线读不到</b>（CLAUDE.md 记着），
+        /// 所以这一级只能靠启动日志验收——推导表每条都会打出是哪条配方定的。
         /// </summary>
-        private static int DeriveProduct(int oreId)
+        private static int DeriveProduct(int oreId, out string how)
         {
+            how = null;
+
+            // 一、大型采矿机的产物映射
+            if (AdvancedMinerPatches.ProductMap != null
+                && AdvancedMinerPatches.ProductMap.TryGetValue(oreId, out int mapped)
+                && mapped > 0)
+            {
+                how = "采矿机产物映射";
+
+                return mapped;
+            }
+
+            // 二、本 mod 的矿种自己声明的锭
+            for (var i = 0; i < OreRegistry.Ores.Count; i++)
+            {
+                OreRegistry.Ore owner = OreRegistry.Ores[i];
+
+                if (owner.OreItemId != oreId || !owner.HasIngot || owner.IngotItemId <= 0) continue;
+
+                how = "矿种声明的锭";
+
+                return owner.IngotItemId;
+            }
+
+            // 三、只吃这一种矿的**熔炉**配方
             RecipeProto[] all = LDB.recipes?.dataArray;
 
             if (all == null) return 0;
 
             var product = 0;
             var orePer = 0;
+            string from = null;
 
             foreach (RecipeProto r in all)
             {
                 if (r?.Items == null || r.Results == null || r.ItemCounts == null) continue;
+
+                // **只认冶炼。** 喷涂剂（组装）、以及任何非冶炼的一味配方都在这一句之外。
+                if (r.Type != ERecipeType.Smelt) continue;
 
                 if (r.Items.Length != 1 || r.Items[0] != oreId) continue;
                 if (r.ItemCounts.Length < 1 || r.ItemCounts[0] <= 0) continue;
@@ -318,29 +370,28 @@ namespace ProjectEden.Patches
 
                 if (solid <= 0) continue;
 
+                // **先比产物 ID，再比投料量。** 顺序反过来写过一版，正是它让增产剂 Mk.I
+                // 赢了高能石墨——煤矿 ×1 出 1 个比煤矿 ×2 出 1 个「更直接」，
+                // 于是「最直接」这条判据把一瓶喷涂剂选成了煤的冶炼产物。
+                //
+                // 原版物品 ID 是按进度排的，**基础锭永远排在它的衍生品前面**：
+                // 铁块 1101 < 磁铁 1102、石材 1108 < 玻璃 1110、高能石墨 1109 < 增产剂 Mk.I 1141。
+                // 已知的三组歧义它全部答对，而且不依赖「熔炉」判据是否恰好把杂项挡住——
+                // 两道判据都对才算稳，只靠一道是在赌。
                 var better = product == 0
-                             || r.ItemCounts[0] < orePer
-                             || (r.ItemCounts[0] == orePer && solid < product);
+                             || solid < product
+                             || (solid == product && r.ItemCounts[0] < orePer);
 
                 if (!better) continue;
 
                 product = solid;
                 orePer = r.ItemCounts[0];
+                from = r.name;
             }
 
-            if (product > 0) return product;
+            if (product > 0) how = "熔炉配方「" + from + "」";
 
-            // 本 mod 自己的矿：它们的锭要配还原剂，一条配方吃两样，上面那条推导够不着，
-            // 所以直接拿矿种声明的锭
-            for (var i = 0; i < OreRegistry.Ores.Count; i++)
-            {
-                OreRegistry.Ore owner = OreRegistry.Ores[i];
-
-                if (owner.OreItemId == oreId && owner.HasIngot && owner.IngotItemId > 0)
-                    return owner.IngotItemId;
-            }
-
-            return 0;
+            return product;
         }
 
         /// <summary>这一串产物里第一个不是流体、也不是矿石本身的。都不合格就返回 0。</summary>
@@ -390,6 +441,14 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // 推导的第一级读的是采矿机那张表，而它在 MegaBuildingRegistry.OnPostAddData 里建，
+            // 靠的是注册顺序（那一个挂在 119 行，这一个挂在 152 行）。顺序一旦被挪动，
+            // 表会是空的、推导会整体回落到第三级，而那不会报错——所以在这里核一次。
+            if (AdvancedMinerPatches.ProductMap == null || AdvancedMinerPatches.ProductMap.Count == 0)
+                ProjectEdenPlugin.Log.LogWarning(
+                    "物品品质：大型采矿机的产物映射是空的，提纯候选表只能靠扫熔炉配方推。" +
+                    "如果它本该有内容，检查 PostAddDataAction 的注册顺序。");
+
             var sb = new StringBuilder();
 
             sb.Append("物品品质：提纯线万用模板已建——").Append(Tiers.Count).Append(" 级 × ")
@@ -397,7 +456,8 @@ namespace ProjectEden.Patches
               .Append("\n  可提纯的金属（由哪种矿推出来的）：");
 
             foreach (Feed f in Feeds)
-                sb.Append("\n    ").Append(f.Name).Append("（←").Append(f.FromOre).Append("）");
+                sb.Append("\n    ").Append(f.Name).Append("　←　").Append(f.FromOre)
+                  .Append("　［").Append(f.How ?? "?").Append("］");
 
             foreach (Tier t in Tiers)
                 sb.Append("\n  ").Append(t.Name).Append("：每炉 ").Append(t.InputUnits)
