@@ -370,26 +370,26 @@ namespace ProjectEden.Preloader
             //
             // 解法是**从乐观集合出发跑不动点**：每轮拿当前集合分类，把定义语句拼不出来的
             // 局部剔掉再来一轮。集合只减不增，所以一定收敛，最多跑 |集合| 轮。
-            var carriers = new HashSet<VariableDefinition>(SafeCarriers(m, code, stmts));
+            var cand = new HashSet<VariableDefinition>(SafeCarriers(m, code, stmts));
+            var carriers = new HashSet<VariableDefinition>(cand);
+            var dead = new HashSet<VariableDefinition>();
 
-            while (true)
+            // **每一轮都从候选全集重算作废集合，不是往里累加。**
+            //
+            // 「哪个局部不能用」不是单调的：`V_4 = V_3 × 每件品质分` 在 V_3 还算载荷时
+            // 拼不出来（两侧都带品质 = 不是缩放，含义不明），而 V_3 一被剔掉它就拼得出来了。
+            // 只往里加的写法会把 V_4 永久判死，表现是下游那四处 `X.inc -= V_4` 一直是缺口,
+            // 而原因在两条语句之前、上一轮就已经解决了。
+            //
+            // 收敛不保证，所以设了轮数上限；到顶还没稳就用最后一轮的结果，那只会更保守。
+            for (var round = 0; round < 8; round++)
             {
                 ctx.Locals.Clear();
 
                 foreach (VariableDefinition v in carriers)
                     ctx.Locals[v] = null; // 占位：分类只关心「是不是载荷局部」
 
-                // **每一轮开头都剪一次，不能只在剔掉东西之后剪。** 合成语句服务的局部
-                // 也可能一开始就不在可用集合里（它另有一处赋值），那时第一轮 doomed 是空的、
-                // 直接 break，剪枝从来没跑过——留下的合成语句会以「拼不出来」挡住整个变换，
-                // 而它描述的那件事其实不需要做。
-                // **只按目的地剪。** 也按来源剪过一版，那是错的：
-                // `V_4 = V_3 × 每件品质分` 里 V_3 只是个件数，原样重放当系数就行，
-                // 它不是载荷局部也不需要是——按来源剪会把这条语句连同下游整族一起砍掉。
-                // 来源真的不行时，Build 会失败、目的地进 doomed，下一轮照样剪得掉。
-                stmts.RemoveAll(st => st.Synth && Orphan(m, code, st.To, carriers));
-
-                var doomed = new HashSet<VariableDefinition>();
+                var fresh = new HashSet<VariableDefinition>();
 
                 foreach (Stmt st in stmts)
                 {
@@ -397,16 +397,45 @@ namespace ProjectEden.Preloader
 
                     VariableDefinition dv = VarOf(m, code[st.To]);
 
-                    if (dv == null || !carriers.Contains(dv)) continue;
+                    if (dv == null || !cand.Contains(dv)) continue;
 
                     if (!Emitted.Contains(st.Core)
                         || Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To, TrueFrom = st.TrueFrom }) == null)
-                        doomed.Add(dv);
+                        fresh.Add(dv);
                 }
 
-                if (doomed.Count == 0) break;
+                if (fresh.SetEquals(dead)) break;
 
-                carriers.ExceptWith(doomed);
+                dead = fresh;
+                carriers = new HashSet<VariableDefinition>(cand);
+                carriers.ExceptWith(dead);
+            }
+
+            ctx.Locals.Clear();
+
+            foreach (VariableDefinition v in carriers)
+                ctx.Locals[v] = null;
+
+            // 合成语句随它服务的局部一起消失——留着只会以「拼不出来」的身份挡住变换,
+            // 而它描述的那件事其实已经不需要做了。**只按目的地剪**：
+            // `V_4 = V_3 × 每件品质分` 里 V_3 只是个件数，原样重放当系数就行。
+            stmts.RemoveAll(st => st.Synth && Orphan(m, code, st.To, carriers));
+
+            // 诊断：EDEN_QUALITY_DEBUG=<方法名> 时，把这个方法体的分类结果原样打出来。
+            // 缺口报告只说「这个形状拼不出来」，而原因几乎总在别的语句上——
+            // 没有这一段，每查一处都要重写一遍切分逻辑。
+            string dbg = Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG");
+
+            if (!string.IsNullOrEmpty(dbg) && m.Name == dbg)
+            {
+                r.Notes.Add($"[dbg] {m.DeclaringType.Name}::{m.Name} 候选 "
+                            + string.Join(",", cand.Select(v => "V_" + v.Index).ToArray())
+                            + " / 可用 " + string.Join(",", carriers.Select(v => "V_" + v.Index).ToArray())
+                            + " / 作废 " + string.Join(",", dead.Select(v => "V_" + v.Index).ToArray()));
+
+                foreach (Stmt st in stmts)
+                    r.Notes.Add($"[dbg]   IL_{code[st.From].Offset:X4}-{code[st.To].Offset:X4} "
+                                + $"{(st.Synth ? "合成 " : "")}{st.Core}");
             }
 
             // 2) 逐语句匹配
@@ -685,6 +714,7 @@ namespace ProjectEden.Preloader
             "ldfld:PAY div stloc",  // local = X.inc / count（求等级）
             "ldc stloc",            // local = 0（零初始化，孪生值也是 0）
             "recalc stloc",         // local = 与品质无关的重算（夹取／下标／封顶，品质不动）
+            "calc stloc",           // local = 纯算术（件数 × 每件品质分）
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
             "call:get_Value ldfld:PAY stloc",
@@ -722,7 +752,12 @@ namespace ProjectEden.Preloader
             // 自己就是种子，不需要先有一条含载荷字段的语句——而
             // StationComponent::DispatchSupplyShip 恰好是这样：它的局部全部来自参数和
             // split_inc，一条载荷字段语句都没有，于是提前返回把整个方法的品质流断在了开头。
+            // **先把真语句占掉的位置记下来。** 不记的话，同一条 `V_2 = X.inc - 等级 × 件数`
+            // 会既作为真语句（含载荷字段，切分切得出来）又作为合成的 `calc stloc` 各来一遍,
+            // 于是孪生语句发射两次——品质凭空翻倍，而两遍各自都是对的，没有任何一处会报错。
             var taken = new HashSet<int>();
+
+            foreach (Stmt st in stmts) taken.Add(st.To);
 
             // (1) 复制传播与 split_inc，一起跑到不动点——它们互相喂：
             //     `V_44 = V_3`（复制）→ `V_45 = split_inc(ref n, ref V_44, p)`（分走）
@@ -870,10 +905,24 @@ namespace ProjectEden.Preloader
                 int[] va = ArgStarts(code, i, 1);
 
                 if (va == null || !PureRange(code, va[0], i - 1)) continue;
-                if (CarriesQuality(m, code, va[0], i - 1, cand, ctx)) continue;
+
+                // **自增一步**：`lv = lv + 1`。它唯一的「品质来源」是自己，而它在做的事是
+                // 沿增产表往上走一格下标——StorageComponent::TakeTailItemsByIncTable 里
+                // 同一个局部既当下标又当「每件点数」，是局部变量层面的「同一个值两种含义」。
+                // 品质那边只认后一种：每件品质分不会因为下标走了一格就变。
+                //
+                // 认得很窄：右边必须正好是「自己 + 常量」（后面可以跟一个 dup），
+                // 换成别的表达式就不是走下标，而可能是真的在累加点数。
+                if (!IsSelfStep(m, code, va[0], i - 1, VarOf(m, code[i]))
+                    && CarriesQuality(m, code, va[0], i - 1, cand, ctx)) continue;
 
                 extra.Add(new Stmt { From = va[0], To = i, Core = "recalc stloc", Synth = true });
             }
+
+            if (Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG") == m.Name)
+                foreach (Stmt x in extra)
+                    Console.Error.WriteLine($"[sweep] {m.Name} IL_{code[x.From].Offset:X4}-"
+                                            + $"{code[x.To].Offset:X4} {x.Core}");
 
             return extra;
         }
@@ -1311,6 +1360,46 @@ namespace ProjectEden.Preloader
             return v != null && !carriers.Contains(v);
         }
 
+        /// <summary>这一段里有没有 <c>BinaryReader</c> 的读调用——即「值来自存档」。</summary>
+        private static bool ReadsSave(IList<Instruction> code, int from, int to)
+        {
+            for (int k = Math.Max(0, from); k <= to; k++)
+                if (code[k].Operand is MethodReference mr
+                    && mr.DeclaringType.FullName == "System.IO.BinaryReader")
+                    return true;
+
+            return false;
+        }
+
+        /// <summary>目的地对象（从汇合之前取）+ 0 + 写进孪生字段。</summary>
+        private static List<Instruction> ZeroInto(Ctx ctx, IList<Instruction> code, Job job,
+            FieldDefinition tf)
+        {
+            List<Instruction> obj = MergeObject(ctx, code, job.TrueFrom, job.To);
+
+            if (obj == null) return null;
+
+            obj.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+            obj.Add(Instruction.Create(OpCodes.Stfld, tf));
+
+            return obj;
+        }
+
+        /// <summary>右边是不是正好「自己 ± 常量」（后面允许一个 dup）。</summary>
+        private static bool IsSelfStep(MethodDefinition m, IList<Instruction> code, int from, int to,
+            VariableDefinition dst)
+        {
+            if (dst == null) return false;
+
+            if (to > from && code[to].OpCode == OpCodes.Dup) to--;
+
+            if (to - from != 2) return false;
+            if (code[to].OpCode != OpCodes.Add && code[to].OpCode != OpCodes.Sub) return false;
+            if (!IsLdloc(code[from]) || !ReferenceEquals(VarOf(m, code[from]), dst)) return false;
+
+            return code[from + 1].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal);
+        }
+
         /// <summary>
         /// 这段表达式里有没有<b>品质来源</b>：主干道载荷字段、载荷参数，或另一个载荷局部。
         ///
@@ -1447,7 +1536,15 @@ namespace ProjectEden.Preloader
 
                     int[] a = ArgStarts(code, job.To, 2);
 
-                    if (a == null) return null;
+                    // 从存档读进来、而且两个版本分支各读一种宽度：值那一侧是个 phi，
+                    // 往回数实参会撞上分支目标。这一族的品质本来就是 0（写侧还没进存档），
+                    // 所以只要把目的地对象重放出来就够——对象在汇合**之前**压栈，
+                    // 从 TrueFrom 往后找。判据是这条语句里真的有 BinaryReader 调用，
+                    // 不是「拼不出来就当 0」。
+                    if (a == null)
+                        return ReadsSave(code, job.TrueFrom, job.To)
+                            ? ZeroInto(ctx, code, job, tf)
+                            : null;
 
                     int objFrom = a[0], valFrom = a[1];
 
