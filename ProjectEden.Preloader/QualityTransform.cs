@@ -390,7 +390,7 @@ namespace ProjectEden.Preloader
                     if (dv == null || !carriers.Contains(dv)) continue;
 
                     if (!Emitted.Contains(st.Core)
-                        || Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To }) == null)
+                        || Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To, TrueFrom = st.TrueFrom }) == null)
                         doomed.Add(dv);
                 }
 
@@ -423,7 +423,7 @@ namespace ProjectEden.Preloader
                         // **分类直接问发射器能不能拼**，而不是先假定能、发射时再发现不能。
                         // 这样「认得」就字面等于「拼得出来」，两者之间不再有缝——
                         // 而那条缝正是这一期开头修掉的那种自欺的来源。
-                        var job = new Job { Core = core, From = from, To = to };
+                        var job = new Job { Core = core, From = from, To = to, TrueFrom = st.TrueFrom };
 
                         if (Build(ctx, code, job) == null)
                         {
@@ -502,6 +502,9 @@ namespace ProjectEden.Preloader
             internal string Core;
             internal int From;
             internal int To;
+
+            /// <summary>见 <see cref="Stmt.TrueFrom"/>。</summary>
+            internal int TrueFrom;
         }
 
         /// <summary>
@@ -589,6 +592,15 @@ namespace ProjectEden.Preloader
             /// 挡住整个变换，而它描述的那件事其实已经不需要做了。
             /// </summary>
             internal bool Synth;
+
+            /// <summary>
+            /// 控制流汇合之前、栈上一次真正归零的位置。
+            ///
+            /// <c>[merge]</c> 语句的 <c>From</c> 是汇合点，而**目的地对象是在汇合之前压栈的**
+            /// （`storage[k].inc = 条件 ? a : b` 里那个 `storage[k]`）——从 From 往回走会
+            /// 撞上分支目标而认不出来。要重放那个对象表达式，就得从这里开始往前找。
+            /// </summary>
+            internal int TrueFrom;
         }
 
         /// <summary>
@@ -613,6 +625,7 @@ namespace ProjectEden.Preloader
             var outp = new List<Stmt>();
             var depth = 0;
             var start = 0;
+            var hard = 0;   // 汇合点不重置它——这才是栈意义上的语句开头
             var merge = false;
 
             for (var i = 0; i < code.Count; i++)
@@ -627,9 +640,11 @@ namespace ProjectEden.Preloader
 
                 int from = start;
                 int to = i;
+                int trueFrom = hard;
                 bool isMerge = merge;
 
                 start = i + 1;
+                hard = i + 1;
                 merge = false;
 
                 if (!HasMainline(code, from, to, twin)) continue;
@@ -638,7 +653,7 @@ namespace ProjectEden.Preloader
 
                 if (isMerge || Merges(code, targets, from, to)) core += " [merge]";
 
-                outp.Add(new Stmt { From = from, To = to, Core = core });
+                outp.Add(new Stmt { From = from, To = to, TrueFrom = trueFrom, Core = core });
             }
 
             return outp;
@@ -985,6 +1000,35 @@ namespace ProjectEden.Preloader
             return outp;
         }
 
+        /// <summary>
+        /// 汇合语句的<b>目的地对象表达式</b>：从栈意义上的语句开头往后走，
+        /// 走到栈深第一次到 1 为止。中间必须全是纯取值，不然重放会把副作用做第二遍。
+        /// </summary>
+        private static List<Instruction> MergeObject(Ctx ctx, IList<Instruction> code, int from, int to)
+        {
+            var outp = new List<Instruction>();
+            var depth = 0;
+
+            for (int k = from; k < to; k++)
+            {
+                if (!IsStructural(code[k], false)) return null;
+
+                depth += Push(code[k]) - Pop(code[k]);
+
+                outp.Add(CloneSwap(ctx, code[k]));
+
+                if (depth == 1) return outp;
+            }
+
+            return null;
+        }
+
+        private static bool IsLdind(Instruction i) =>
+            i.OpCode.Name.StartsWith("ldind.", StringComparison.Ordinal);
+
+        private static bool IsStind(Instruction i) =>
+            i.OpCode.Name.StartsWith("stind.", StringComparison.Ordinal);
+
         /// <summary>这条指令引用了一个<b>已经作废</b>的载荷局部吗？</summary>
         private static bool Orphan(MethodDefinition m, IList<Instruction> code, int at,
             ICollection<VariableDefinition> carriers)
@@ -1124,7 +1168,56 @@ namespace ProjectEden.Preloader
                     return outp;
                 }
 
-                // 从存档读进来的那一族：X.inc = reader.ReadXxx()  →  X.qua = 0
+                // *outInc = <值>  →  Q<槽位> = <值的品质版>
+            //
+            // 和 `*outInc += ...` 同一族，只是赋值不是累加。目的地是 `ref` 出参，
+            // 品质那边写进侧信道寄存器——出参那条路本来就是被推翻的「加参数」方案的替身。
+            //
+            // **宽度不用跟着原版走。** 原版这里是 stind.i2（Cargo.inc 被加宽成 Int16 之后的样子），
+            // 而孪生槽位是静态 Int32 字段，写它用 stsfld，没有解引用这回事。
+            case "ldfld:PAY stind.i2":
+            case "ldfld:PAY stind.i4":
+            case "ldflda:PAY ldind.i4 call:split_inc stind.i4":
+            {
+                if (!IsStind(store)) return null;
+
+                ParameterDefinition sp2 = ParamOf(ctx.Method, code[job.From]);
+
+                if (sp2 == null || !ctx.ParamSlot.TryGetValue(sp2, out int sslot)
+                                || sslot >= ctx.Regs.Count) return null;
+
+                List<Instruction> sv = TwinValue(ctx, code, job.From + 1, job.To - 1);
+
+                if (sv == null) return null;
+
+                sv.Add(Instruction.Create(OpCodes.Stsfld, ctx.Regs[sslot]));
+
+                return sv;
+            }
+
+            // X.inc = 条件 ? a : b  →  X.qua = 0
+            //
+            // 五处全在 StationComponent::UpdateKeepMode——站点「保留 N 份」那个设置，
+            // 它是**凭空生成**物品（按 keepIncRatio 顺带生成增产点数），不是搬运。
+            // 生成出来的东西没有品质来源，所以品质是 0，而不是「拼不出来」。
+            //
+            // 值那一侧是 phi，后向栈回溯拼不出来也不需要拼；要拼的只有目的地对象，
+            // 而它在汇合**之前**压栈，所以从 TrueFrom 往后找而不是从 From 往回找。
+            case "stfld:PAY [merge]":
+            {
+                if (tf == null) return null;
+
+                List<Instruction> obj = MergeObject(ctx, code, job.TrueFrom, job.From);
+
+                if (obj == null) return null;
+
+                obj.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+                obj.Add(Instruction.Create(OpCodes.Stfld, tf));
+
+                return obj;
+            }
+
+            // 从存档读进来的那一族：X.inc = reader.ReadXxx()  →  X.qua = 0
             //
             // **必须真的写个 0，不能什么都不做。** Import 可能读进一个复用的结构体，
             // 那时字段里留着的是上一个实体的品质——不报错，只是品质串了。
@@ -1364,6 +1457,7 @@ namespace ProjectEden.Preloader
                 // 差别只在地址表达式怎么写，而地址表达式是原样重放的。所以一个发射器全包。
                 case "ldflda:PAY dup ldind.i4 add stind.i4":
                 case "ldflda:PAY dup ldind.i4 sub stind.i4":
+                case "ldflda:PAY dup ldind.i2 add stind.i2":
                 case "ldfld:PAY ldc dup ldind.i4 add stind.i4":
                 case "ldc ldflda:PAY dup ldind.i4 add stind.i4":
 
@@ -1397,7 +1491,7 @@ namespace ProjectEden.Preloader
             var dupAt = -1;
 
             for (int k = job.From; k < job.To - 1; k++)
-                if (code[k].OpCode == OpCodes.Dup && code[k + 1].OpCode == OpCodes.Ldind_I4)
+                if (code[k].OpCode == OpCodes.Dup && IsLdind(code[k + 1]))
                 {
                     dupAt = k;
 
@@ -1787,6 +1881,13 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",
 
+            // 出参赋值一族（累加那一族的兄弟），以及站点「保留 N 份」的凭空生成
+            "ldfld:PAY stind.i2",
+            "ldfld:PAY stind.i4",
+            "ldflda:PAY ldind.i4 call:split_inc stind.i4",
+            "stfld:PAY [merge]",
+            "ldflda:PAY dup ldind.i2 add stind.i2",
+
             // 存档读侧：读进来的品质一律 0（写侧见 SaveWriteShapes，还没进存档）
             "call:ReadInt32 stfld:PAY",
             "call:ReadByte stfld:PAY",
@@ -1826,6 +1927,11 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY call:split_inc add stind.i4",      // *out += split_inc(..., ref X.inc, ...)
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",                             // X.inc = split_inc(...)
+            "ldfld:PAY stind.i2",                                   // *out = X.inc
+            "ldfld:PAY stind.i4",
+            "ldflda:PAY ldind.i4 call:split_inc stind.i4",          // *out = split_inc(...)
+            "stfld:PAY [merge]",                                    // X.inc = 条件 ? a : b（保留模式凭空生成）
+            "ldflda:PAY dup ldind.i2 add stind.i2",                 // 加宽之后的字节读-改-写
             "call:ReadInt32 stfld:PAY",                             // 从存档读：品质置零
             "call:ReadByte stfld:PAY",
             "ldfld:PAY call:ReadInt32 stelem",
