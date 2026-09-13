@@ -850,6 +850,36 @@ namespace ProjectEden
                 if (@ref == other.Key + ".ingot" && other.HasIngot) return other.IngotItemId;
             }
 
+            return VanillaIdByName(@ref);
+        }
+
+        /// <summary>
+        /// <c>vanilla:名字</c> —— 按<b>原版物品的中文名</b>解析 ID。
+        ///
+        /// <b>为什么要有这个。</b> 原版 proto 全在 resources.assets 里，离线枚举不了
+        /// （CLAUDE.md 已记过一次），所以配置里写原版物品只能靠人记号码。常用的那几个
+        /// （水 1000、煤矿 1006、精炼油 1114）记得住，碳纳米管、石墨烯这种记不住——
+        /// 而写错一个号**不会报错**，只会安静地产出别的东西。大型采矿机那边早就不敢写号了，
+        /// 是按矿脉类型在运行时推的；这条给配置一个同等的出路。
+        ///
+        /// 比的是 <c>Proto.Name</c>（原始键）不是 <c>proto.name</c>（翻译后），
+        /// 英文客户端下才不会全部解析失败——这是本仓库已经栽过一次的那条。
+        ///
+        /// 只查原版：本 mod 自己的物品在 PreAddDataAction 阶段还没进 LDB，
+        /// 而且它们本来就该用 key 引用。
+        /// </summary>
+        private static int VanillaIdByName(string @ref)
+        {
+            const string prefix = "vanilla:";
+
+            if (@ref == null || !@ref.StartsWith(prefix, StringComparison.Ordinal)) return 0;
+
+            string name = @ref.Substring(prefix.Length);
+
+            foreach (ItemProto proto in LDB.items.dataArray)
+                if (proto != null && proto.Name == name)
+                    return proto.ID;
+
             return 0;
         }
 
@@ -899,9 +929,20 @@ namespace ProjectEden
                 if (item.@ref == other.Key + ".ingot" && other.HasIngot) return other.IngotItemId;
             }
 
+            int vanilla = VanillaIdByName(item.@ref);
+
+            if (vanilla > 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"配方「{recipeName}」的{label}按名字解析到原版物品：{item.@ref.Substring(8)} = {vanilla}");
+
+                return vanilla;
+            }
+
             ProjectEdenPlugin.Log.LogError(
                 $"配方「{recipeName}」的{label}里，引用名「{item.@ref}」解析不出物品——" +
-                "它得是 ore / ingot、ores.json 里 items 段某条的 key，或者别的矿种的 key 加 .ore / .ingot 后缀。整条配方跳过");
+                "它得是 ore / ingot、ores.json 里 items 段某条的 key、别的矿种的 key 加 .ore / .ingot 后缀，" +
+                "或者 vanilla: 加原版物品的中文名。整条配方跳过");
 
             return 0;
         }

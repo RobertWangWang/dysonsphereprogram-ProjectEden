@@ -1291,6 +1291,370 @@ Carbon monoxide, methanol, formaldehyde and ethylene, plus carbon dioxide, oxyge
 
 ---
 
+### Organic chemistry, phase one: a real destination for formaldehyde and carbon dioxide
+
+Once the C1 chain was laid out, two points on it were **blocked**:
+
+- **Formaldehyde had exactly one downstream** (Cobalt Ingot · Formaldehyde Reduction), which made it nothing
+  but a mid-strength reductant here — while in reality formaldehyde is where resins, curing agents and cage
+  amines start
+- **Carbon dioxide had exactly one sink** (Methanol · CO₂ Hydrogenation), carrying the exhaust of the entire
+  carbothermic reduction family on its own
+
+These three recipes are aimed at those two points.
+
+| Recipe | Machine | Contents | Time |
+|---|---|---|---|
+| **Urea · Ammonia and CO₂ Synthesis** (2 NH₃ + CO₂ → CO(NH₂)₂ + H₂O) | **Chemical Plant** | Ammonia ×2 + Carbon Dioxide ×1 → **Urea ×1 + Water ×1** | 2 s |
+| **Hexamine · Formaldehyde and Ammonia Condensation** (6 HCHO + 4 NH₃ → C₆H₁₂N₄ + 6 H₂O) | **Chemical Plant** | Formaldehyde ×6 + Ammonia ×4 → **Hexamine ×1 + Water ×6** | 3 s |
+| **Plastic · Urea-Formaldehyde Resin** | **Chemical Plant** | Urea ×2 + Formaldehyde ×3 → **Plastic ×2 + Water ×2** | 2.5 s |
+
+The first two balance exactly. All three are **condensation-dehydration**: neither carbon nor nitrogen changes
+oxidation state anywhere, so by reaction class they all go to the vanilla Chemical Plant (type 2) — the same
+reasoning that keeps MTO there.
+
+**The result: formaldehyde goes from one downstream to three, ammonia from two to three, and carbon dioxide
+from one sink to two.**
+
+### Hexamine: the one you can burn
+
+It is the white solid fuel tablet camping stoves burn (sold as hexamethylenetetramine fuel tablets) —
+smokeless, ashless, non-hygroscopic.
+
+| Item | Combustion | Molar enthalpy | In-game heat value |
+|---|---|---|---|
+| Hexamine | C₆H₁₂N₄ + 9 O₂ → 6 CO₂ + 6 H₂O + 2 N₂ | 4200 kJ/mol | **28.8 MJ** |
+
+> **28.8 MJ looks outrageous next to coal's 2.7 MJ, but that is molecular weight talking, not energy density.**
+> By mass hexamine is about 30 kJ/g against carbon's 33 kJ/g — essentially the same. This mod's heat-value
+> anchor has always been **per mole** (ethylene 9.7 and propylene 14.1 come from exactly that), and switching
+> to per-mass would overturn the whole existing family, so the anchor stays put.
+>
+> It is also **not economical to burn**: one hexamine costs six formaldehyde and four ammonia, which means the
+> whole C1 chain and the nitrogen chain have to be running first. Its point is that formaldehyde finally has a
+> terminal outlet — burn it and it is gone.
+
+**Neither of the other two gets a heat value**: urea is a fertiliser and a feedstock, and nobody burns urea for
+warmth; plastic is a vanilla item and its properties are not ours to set.
+
+### Why the urea-formaldehyde resin produces vanilla Plastic directly
+
+Because **the expensive part of a new item is not drawing its icon — it is finding it a downstream.**
+
+This mod already has a cautionary example: **nitric acid**. The nitrogen chain builds all the way up to it and
+stops; not one recipe in the whole repo consumes it. Adding a "urea-formaldehyde resin" item here that likewise
+had no downstream would simply be a second nitric acid.
+
+Urea-formaldehyde resin *is* a plastic in reality (an amino plastic, among the first thermosets — a century of
+plywood glue and electrical fittings), so it lands straight on **vanilla Plastic**, on the same precedent as
+mapping polyethylene onto vanilla Plastic. Plastic is a heavy vanilla consumable, so this line will never back up.
+
+> **It is not cheaper than vanilla's own recipe** (Refined Oil ×2 + Coal ×1 → Plastic ×1). Two urea cost four
+> ammonia and two carbon dioxide; three formaldehyde cost three methanol plus oxygen — it works out far more
+> expensive. What it buys is not cost, it is **a plastic route that never touches a drop of crude oil**: coal and
+> water in, plastic out.
+
+> **It is the only one of the three that does not balance.** Urea-formaldehyde resin is a crosslinked network
+> with no fixed formula (the same property as Vanadium Ingot · Residue Extraction). The ratio is anchored on the
+> real **molar F/U = 1.5** (industry uses 1.2–2.0, and 1.5 is the classic value), which is where urea ×2 +
+> formaldehyde ×3 comes from.
+
+
+### Organic chemistry, phase two: propylene + ammonia → a third route to carbon nanotubes
+
+Phase one gave formaldehyde and carbon dioxide somewhere to go. Phase two builds **a second trunk
+line**: it brings the olefin chain and the nitrogen chain together, and ends on vanilla's own
+carbon nanotube.
+
+| Recipe | Machine | Contents | Time |
+|---|---|---|---|
+| **Acrylonitrile · Propylene Ammoxidation** (2 C₃H₆ + 2 NH₃ + 3 O₂ → 2 C₃H₃N + 6 H₂O) | Redox Chemical Plant | Propylene ×2 + Ammonia ×2 + Oxygen ×3 → **Acrylonitrile ×2 + Water ×6** | 3 s |
+| **Polyacrylonitrile · Addition Polymerisation** | **Chemical Plant** | Acrylonitrile ×2 → **Polyacrylonitrile ×2** | 4 s |
+| **Carbon Nanotube · PAN Carbonisation** (2 C₃H₃N → 6 C + N₂ + 3 H₂) | **Smelter** | Polyacrylonitrile ×2 → **Carbon Nanotube ×1 + Nitrogen ×1 + Hydrogen ×3** | 5 s |
+
+The first and third balance atom for atom. The second is addition polymerisation, which **has no
+byproduct and conserves mass by construction**, so both sides carry the same count — that is not
+laziness, it is what an addition-polymerisation recipe looks like (compare the urea-formaldehyde
+resin: condensation polymerisation, two monomers in and water out).
+
+> **Why the entry point must be propylene and ethylene will not do.** Ammoxidation starts by
+> abstracting an α-hydrogen from the olefin, and all four of ethylene's hydrogens sit on the
+> double-bonded carbons — there is no α position. Only propylene's extra methyl group has one.
+> That gives propylene a second irreplaceable role here (the first being the more concentrated
+> rung of the hydrocarbothermic reduction family).
+
+### Nitrogen is only a carrier on this line — you get all of it back
+
+Two ammonia cost one nitrogen and three hydrogen, and the carbonisation step gives back exactly
+one nitrogen and three hydrogen.
+
+```
+Nitrogen ──Haber──> Ammonia ──ammoxidation──> Acrylonitrile ──polymerise──> PAN ──carbonise──> Carbon Nanotube
+   ↑                                                                                   │
+   └───────────────────── nitrogen + hydrogen returned in full ────────────────────────┘
+```
+
+**This was not arranged for elegance — it is simply what happens**: nitrogen's job is to carry the
+nitrile group in and make the chain cyclise into a ladder under heat. Once carbonisation is done
+its job is over and it is driven off. So the **net consumption of this line is propylene and oxygen
+only** — the nitrogen taken from a gas giant circulates.
+
+### Carbon fibre was deliberately not made a new item
+
+In reality this route ends at carbon fibre. But **vanilla already has the carbon nanotube** as its
+"late-game pure-carbon structural material", and this mod additionally remaps the spiniform
+stalagmite crystal's mining output onto it. Adding a second item in the same position would run
+straight into this repo's own test: **no better on the four axes and no cheaper = dead content.**
+
+So carbonisation produces **vanilla Carbon Nanotube** directly, with no new item. It is the same
+move as phase one's urea-formaldehyde resin landing on vanilla Plastic, and it buys the same two
+things: a terminal that cannot back up, and a carbon-nanotube route that **does not depend on the
+spiniform stalagmite vein** — much as Fischer-Tropsch freed refined oil from crude deposits.
+
+> **One approximation to state plainly**: carbonising PAN in reality yields carbon fibre or carbon
+> nanofibre, which is **the same family but a different form** from a nanotube (tubes are grown by
+> vapour deposition). Landing it on vanilla's nanotube follows the "polyethylene → vanilla Plastic"
+> mapping convention; it is not a claim that the two are the same thing.
+
+> **The output count of 1 is a balance knob**, not a stoichiometric result — vanilla's nanotube has
+> no defined carbon content, so how many tubes six carbons make is our decision. It is anchored on
+> the real mass yield: PAN to carbon fibre runs about 50% (68% theoretical, the rest leaving as HCN
+> and CO), so two in and one out.
+
+
+### Organic chemistry, phase three: the aromatic trunk, cut down to the cumene process alone
+
+Aromatics are the largest family on the whole tree — benzene, toluene, xylenes, ethylbenzene,
+styrene, cyclohexane, terephthalic acid, PET… Building all of them would burst the item grid
+(vanilla's page 1 is already 111/112 full, so new items land past column 14, and the loot filter
+and signal pickers cannot draw anything out there). So this phase is **cut down to one line**:
+benzene → cumene → phenol + acetone, four new items net.
+
+| Recipe | Machine | Contents | Time |
+|---|---|---|---|
+| **Benzene · Steam Cracking** | Redox Chemical Plant | Refined Oil ×6 → **Ethylene ×6 + Propylene ×2 + Benzene ×1 + Hydrogen ×3** | 4 s |
+| **Benzene · Methanol to Aromatics** | **Catalytic Reactor** | Methanol ×6 → **Benzene ×1 + Water ×6 + Hydrogen ×3** | 5 s |
+| **Cumene · Benzene Alkylation** | Chemical Plant | Benzene ×1 + Propylene ×1 → **Cumene ×1** | 2.5 s |
+| **Phenol · Cumene Oxidation and Cleavage** | Redox Chemical Plant | Cumene ×2 + Oxygen ×2 → **Phenol ×2 + Acetone ×2** | 3 s |
+| **Plastic · Phenolic Resin** | Chemical Plant | Phenol ×3 + Formaldehyde ×4 → **Plastic ×4 + Water ×4** | 3 s |
+
+The first four balance exactly.
+
+### Benzene has two entrances: one needs no oil, the other no gas giant
+
+```
+Refined Oil ──steam cracking──┐
+                               ├──> Benzene ──+propylene──> Cumene ──+oxygen──> Phenol + Acetone
+Methanol ──methanol to aromatics──┘
+```
+
+**Steam cracking** does not dominate the existing Propylene · Catalytic Cracking, nor the reverse:
+the same six refined oil either crack all the way to olefins (propylene ×4 + ethylene ×6) or trade
+two propylene for one benzene and three hydrogen. Different product sets — take whichever covers
+what you are short of.
+
+**Methanol to aromatics sits on the Catalytic Reactor for a reason.** MTA runs on ZSM-5 just as MTO
+does, and **aromatisation cokes harder than olefin production**: an aromatic ring is the step before
+coke, and the same acid sites that close a ring will let it keep growing. Running it continuously
+means changing catalyst continuously, which is precisely what that building exists for. What it buys
+is **aromatics without petroleum** — methanol needs nothing upstream but coal and water.
+
+### The cumene process: one in, two out, with the ratio fixed by chemistry
+
+This is the famous two-birds-one-stone of industrial chemistry. Oxygen takes the lone hydrogen off
+the tertiary carbon and hangs a peroxide chain there; add acid and the skeleton rearranges and
+splits along it, the ring half leaving with a hydroxyl as phenol and the remaining three carbons as
+acetone. Nearly all the world's phenol comes this way.
+
+> **Phenol and acetone come out 1:1, and that is a stoichiometric result, not a balance knob.**
+> So "too much acetone" is this line's built-in trade-off rather than a tuning miss — acetone has a
+> heat value (12.3 MJ), and burning the surplus is a legitimate outlet.
+
+> **Why it has to be an isopropyl group.** Ethyl or methyl will not do: the oxidative cleavage needs
+> a **tertiary carbon with exactly one hydrogen on it**, and only the branch point of an isopropyl
+> group provides one. This is propylene's third irreplaceable role in this mod (the first two being
+> the more concentrated rung of hydrocarbothermic reduction, and the ammoxidation to acrylonitrile).
+
+### Why two routes to vanilla Plastic are allowed to coexist
+
+The urea-formaldehyde resin (phase one) and the phenolic resin (this phase) both produce vanilla
+Plastic. That **looks** redundant and is not:
+
+| | Urea-formaldehyde | Phenolic |
+|---|---|---|
+| Eats | Urea + formaldehyde | Phenol + formaldehyde |
+| Needs upstream | **Ammonia → nitrogen → a gas giant and orbital collectors** | **Benzene → refined oil or methanol → coal and water** |
+| Resin charged per plastic | 105 g | 101 g |
+
+**One needs no oil, the other no gas giant, and neither is more efficient** — the charged mass per
+plastic is deliberately aligned. It is the same design as "three different routes all reach
+ethylene": take the one that fits what you have, rather than the later one simply being better.
+
+### Two counter-intuitive phases
+
+- **Benzene melts at only 5.5 °C** and will freeze in the pipes in cold weather — a real nuisance in
+  a real chemical plant. It is still handled as a fluid in game; the detail lives in the description
+  rather than in `isFluid`.
+- **Phenol is a solid at room temperature** (melting at 40.9 °C) — in a laboratory it comes as lumps
+  of white crystal, not a liquid. So it travels by belt and storage box and **does not go into a
+  tank**.
+
+### Still not connected: nitric acid has no downstream
+
+Nitric acid's real outlet is **nitration** (benzene → nitrobenzene → aniline), and benzene now
+exists, so it could in principle be built. It was not, because **aniline has no downstream of its
+own**: its destinations are MDI and polyurethane, which is another two or three items, and the chain
+would still end on something nothing wants. Rather than add two items and one more dead end, nitric
+acid is left hanging until its downstream has been thought through properly.
+
+
+### Linking up with petroleum chemistry: three refinery units
+
+With organic synthesis built out to phase three, three things were still missing between it and
+the oil side. Filling them in turns **refined oil from an ingredient into a real hub**, and finally
+gives the barrel-bottom residue three places to go.
+
+#### 1. Vanadium extraction now eats the residue — it used to be a dead connection
+
+The `Vanadium Residue Oil` item's own comment has always said "**Vanadium Ingot · Residue
+Extraction is extracting from this**", while that recipe actually consumed **Refined Oil ×40** and
+had nothing to do with the residue at all. The link the comment described did not exist in the data.
+
+It is now **Vanadium Residue Oil ×12 + Sulfuric Acid ×4 → Vanadium Ingot ×1 + Carbon Dioxide ×8**.
+The basis is solid: vacuum residue carries 100–1000 ppm vanadium and light distillate carries almost
+none — **the vanadium was concentrated into the bottom of the column all along**.
+
+> **This is not a back door for vanadium.** Twelve residue costs 48 crude (vacuum distillation is
+> four crude in, one residue out), the same order as the roughly 53 crude that 40 refined oil worked
+> back to. The difference is that those 40 distillate were destroyed before; now only the bottom
+> fraction is spent and the distillate is kept.
+
+#### 2. Real catalytic reforming (the trunk source of aromatics, and of hydrogen)
+
+**Benzene · Catalytic Reforming: Refined Oil ×3 → Benzene ×2 + Hydrogen ×6** (exactly balanced),
+on the Catalytic Reactor.
+
+Before this, benzene could only come from steam cracking (where it is one of four byproducts) or
+from methanol to aromatics (which never touches oil). In reality the trunk source of aromatics has
+always been reforming — a refinery runs it for octane, a chemical plant wants the rings it throws
+off. **The same unit, two entirely different reasons for owning it**, which is precisely where
+petroleum chemistry and organic synthesis meet.
+
+It is also the refinery's **hydrogen source**: most industrial hydrotreating hydrogen is reformer
+byproduct, and it lines up exactly with the desulfurisation recipe below.
+
+> **Putting it on the Catalytic Reactor is not a borrowed excuse.** Platinum-rhenium catalyst cokes,
+> and the industrial unit is literally called **CCR — continuous catalyst regeneration**, with
+> catalyst circulating between reactor and regenerator. That is the same thing this building is.
+
+> One rename came with it: the old `Hydrogen · Catalytic Reforming` actually performs **steam
+> reforming** (hydrocarbon + water → syngas), while "catalytic reforming" means something else
+> entirely in a refinery. It is now **`Hydrogen · Steam Reforming`**. The recipe ID did not move;
+> saves reference IDs, not names.
+
+#### 3. The sulfur line is connected
+
+```
+Residue Oil ──hydrodesulfurisation──> Sulfur + Refined Oil
+                          Sulfur ──contact process──> Sulfuric Acid
+```
+
+| Recipe | Machine | Contents | Time |
+|---|---|---|---|
+| **Sulfur · Residue Hydrodesulfurisation** | Redox Chemical Plant | Residue Oil ×4 + Hydrogen ×2 → **Sulfur ×1 + Refined Oil ×3** | 4 s |
+| **Sulfuric Acid · Contact Process** (2 S + 3 O₂ + 2 H₂O → 2 H₂SO₄) | Redox Chemical Plant | Sulfur ×2 + Oxygen ×3 + Water ×2 → **Sulfuric Acid ×2** | 2.5 s |
+
+**Almost all the world's sulfur really is made this way** — not mined, but taken out of oil and gas
+as a byproduct. Nor is it taken out in order to sell it: sulfur corrodes equipment and poisons
+downstream catalysts, so removing it is mandatory and selling it is incidental.
+
+Three things this buys:
+
+- **Sulfuric acid gains a second route.** It had only the gypsum process (which needs a gypsum vein
+  and yields glass as well); now there is an oil route (which needs crude and hydrogen). Neither
+  dominates: take the oil route if you have no vein, the vein route if you have no oil.
+- **The residue now has three destinations**: vanadium, sulfur, or low-temperature fuel. What to do
+  with a given barrel-bottom ought to be a choice.
+- The hydrodesulfurisation recipe **does not balance, and the reason was already on file** — vacuum
+  residue is a fraction rather than a compound, with no fixed formula, and its sulfur runs 2–5 wt%
+  depending on the crude. Exactly how the residue oil itself and Vanadium Ingot · Residue Extraction
+  are already handled.
+
+> **A real coincidence worth noting**: the contact process's catalyst is **vanadium pentoxide** — and
+> V₂O₅ is also precisely why residue oil cannot be burned hot (it melts below hot gas path
+> temperatures and attacks turbine blades). The same substance is a poison in one place and the
+> catalyst in another. That is not invented.
+
+#### 4. One barrel of crude, cut four ways — each downstream eats its own
+
+With the first three in place, one question remained: **every one of these recipes was eating the same
+"refined oil", while in reality they do not eat the same oil at all.**
+
+```
+Atmospheric and Vacuum Distillation
+    Crude Oil ×10 → Naphtha ×2 + Refined Oil ×3 + Vacuum Gas Oil ×3 + Residue Oil ×2
+```
+
+The 2 : 3 : 3 : 2 yield is anchored on the real cut fractions of a medium crude (naphtha ~22%, middle
+distillate ~30%, vacuum gas oil ~27%, vacuum residue ~21%). **Both columns are one recipe**: a
+Chinese refinery calls the atmospheric and vacuum columns a single unit, not two machines. Four
+products is exactly this mod's proven ceiling.
+
+| Cut | Carbon / boiling range | What it really is | Who eats it |
+|---|---|---|---|
+| **Naphtha** | C5–C10 / 30–200 °C | Light distillate | **Steam cracking, catalytic reforming, steam reforming** |
+| Refined Oil | C10–C20 / 200–350 °C | Kerosene and diesel | Vanilla graphene / plastic / organic crystal, and power |
+| **Vacuum Gas Oil** | C20–C40 / 350–550 °C | VGO | **Catalytic cracking, hydrocracking** |
+| Residue Oil | C40+ | Vacuum residue | Vanadium, sulfur, low-temperature fuel |
+
+**Four existing recipes therefore changed feedstock**, each for a hard reason:
+
+- **Benzene · Steam Cracking ← naphtha**: an ethylene plant's formal name is a *naphtha cracker*
+- **Benzene · Catalytic Reforming ← naphtha**: a refinery calls this cut *reformer naphtha*
+- **Hydrogen · Steam Reforming ← naphtha**: light ends reform, heavy ends just coke
+- **Propylene · Catalytic Cracking ← vacuum gas oil**: an FCC exists to turn heavy into light; cracking
+  something already as light as diesel is pointless
+
+> **The line between gas oil and residue at an FCC is exactly this building's mechanic.** Vanadium and
+> nickel from the residue deposit on the molecular sieve and kill the catalyst **permanently**; gas oil
+> carries far less metal. Residue catalytic cracking (RFCC) does exist in reality, at the price of several
+> times the catalyst consumption — and "the catalyst dies" is precisely what the Catalytic Reactor is about.
+
+#### Hydrocracking: turning the heavy into the wanted
+
+```
+Naphtha · Hydrocracking    Vacuum Gas Oil ×4 + Hydrogen ×3 → Naphtha ×3 + Refined Oil ×2
+```
+
+The core conversion unit of a refinery, and its purpose fits in one line: **turn what is heavy and
+plentiful into what is light and wanted**. ⚠️ It does not balance (a fraction has no formula), but
+**four oil in and five oil out is the right direction** — hydrocracking's liquid yield exceeds 100%
+(the industry calls it volume swell), and the extra volume is the hydrogen that went in.
+
+> **It pairs with catalytic reforming.** Reforming makes hydrogen, hydrocracking consumes it, and the
+> naphtha hydrocracking produces goes back to feed the reformer — a real refinery's hydrogen balance
+> is those two units offsetting one another. That loop is now closed here.
+
+#### One abstraction, stated out loud: one oil item = 4 CH₂ units
+
+Every oil item in this mod is accounted for in those units, which makes the four cuts
+**interchangeable stoichiometrically**. That is what let the three already-balanced equations (steam
+cracking, catalytic reforming, steam reforming) change feedstock **without a single edit**.
+
+The justification is that a real refinery accounts in barrels, and a barrel of naphtha and a barrel of
+gas oil genuinely carry the same order of carbon. What separates the four cuts is **not their carbon
+content but which reaction each can feed** — which is what this whole section is about.
+
+#### What was not built: desulfurised refined oil
+
+"Oil with the sulfur taken out should burn hotter" is physically correct — that temperature table is
+sorted by sulfur in the first place. But expressing it would require **a new item**, and that item
+would **strictly dominate vanilla refined oil** as a fuel while every recipe that eats refined oil
+would have to decide whether it accepts it too. That is exactly the dead-content and dominance
+problem the previous three phases kept dodging, so desulfurisation returns vanilla refined oil and
+adds no new item.
+
+
 ## XII. The standard for new items: follow real chemistry and physics
 
 **This is a hard rule, not flavour text.** Every property of every new item in this mod is **derived**, not picked;
@@ -2064,19 +2428,37 @@ it takes to hold that output. So switching liquids is invisible on the power gri
 |---|---|---|---|---|---|
 | 250 °C | Algal Oil | 4.2 MJ | 30% | 1.26 MJ | 170.8 /s |
 | 500 °C | **Vanadium Residue Oil** | 12.0 MJ | 43% | 5.16 MJ | 41.9 /s |
+| 600 °C | **Vacuum Gas Oil** | 8.0 MJ | 46% | 3.69 MJ | 58.6 /s |
+| 700 °C | **Benzene** | 22.4 MJ | 49% | 10.88 MJ | 19.9 /s |
 | 750 °C | Refined Oil | 4.5 MJ | 50% | 2.23 MJ | 96.8 /s |
+| 800 °C | **Cumene** | 35.8 MJ | 51% | 18.10 MJ | 11.9 /s |
+| 900 °C | **Naphtha** | 3.0 MJ | 52% | 1.57 MJ | 137.9 /s |
+| 950 °C | **Propylene** | 14.1 MJ | 53% | 7.46 MJ | 28.9 /s |
 | 1000 °C | Ethylene | 9.7 MJ | 54% | 5.20 MJ | 41.5 /s |
+| 1300 °C | **Acetone** | 12.3 MJ | 57% | 6.98 MJ | 31.0 /s |
 | 1500 °C | Methanol | 5.0 MJ | 58% | 2.91 MJ | 74.2 /s |
 | 2000 °C | Ammonia | 2.6 MJ | 61% | 1.58 MJ | 136.6 /s |
 
-**Only Vanadium Residue Oil is a new item**; the other five already had production chains. It comes from
-one new recipe, **Vacuum Distillation** (Refinery: crude oil ×4 → refined oil ×3 + residue oil ×1), which is
-**deliberately worse than Plasma Refining**: vanilla gets one refined oil per crude, this gets 0.75. It is not
-a better oil route — it is the route you run when you specifically want the residue.
+> **The four added later — benzene, cumene, propylene and acetone — are all ash-free, sulfur-free and metal-free**, so their places on the ladder are decided by sooting alone. Benzene is the skeleton coke grows on (every turn of the HACA mechanism adds carbon to an aromatic ring, and benzene is the starting point rather than the product), so despite carrying five times the energy of refined oil it sits below it; oxygenated acetone is the cleanest of the four, second only to methanol.
+>
+> **The benzene row is the cleanest example of "the energy-dense one cannot burn hot"**: 22.4 MJ at 700 °C.
+>
+> **And the four cuts of a single barrel of crude demonstrate the whole rule by themselves**, with no need to reach for algal oil and ammonia:
+>
+> | Residue 12.0 MJ / 500 °C | Gas oil 8.0 / 600 | Refined oil 4.5 / 750 | Naphtha 3.0 / 900 |
+> |---|---|---|---|
+>
+> The further down the column, the heavier and the denser in energy — and also the more sulfur and metal, and the less heat the hot gas path will tolerate. **The two ladders run strictly opposite**, and they are four things separated out of one barrel.
 
-Apart from the residue oil, all five liquids **still burn in the vanilla Thermal Power Plant**: the combustible
-liquid fuel bit is OR-ed on, so nothing was taken away from them. The residue oil is the one liquid only this
-plant will accept.
+Of the twelve liquids, **naphtha, vacuum gas oil and vanadium residue oil** all come from one recipe —
+**Atmospheric and Vacuum Distillation** (Refinery: crude oil ×10 → naphtha ×2 + refined oil ×3 + gas oil ×3 +
+residue oil ×2), covered in section XI. It **does not dominate vanilla Plasma Refining**: if all you want is
+refined oil, that route is strictly better (1.0 per barrel against 0.3, and it yields hydrogen too). This is
+simply the only way to get the other three cuts.
+
+**Gas oil and residue oil are the two this plant alone will accept** (heavy cuts need dedicated heating and
+atomisation, which an ordinary boiler cannot provide). The other ten **still burn in the vanilla Thermal
+Power Plant**: the combustible liquid fuel bit is OR-ed on, so nothing was taken away from them.
 
 ### Working temperature is not flame temperature
 

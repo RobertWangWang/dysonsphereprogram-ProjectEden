@@ -2075,6 +2075,313 @@ def catalytic_reactor():
     return d
 
 
+# ── 有机物第一期：尿素与乌洛托品 ─────────────────────────
+# 两张图刻意用两种语言：尿素画结构式（它是本文件里分子图标那一族的一员），
+# 乌洛托品画实物（笼形分子在 80px 下画不出来，理由写在函数里）。
+
+def urea():
+    """尿素 O=C(NH₂)₂：红球在上、灰碳居中、两个蓝氮分开挂在下面，是个 Y。
+
+    <b>氢被刻意省掉了，这是这张图唯一违反本族惯例的地方。</b>
+    甲醇、甲醛、乙烯都把氢画全了，尿素画全就是九个原子——自动缩放按包围盒算，
+    九个原子把 span 顶到 150 上下，缩完每根键只剩三四个像素的可见段。
+    丙烯那轮已经量过这条线：键的可见长度（键长减两端半径）掉到 23 个单位以下就糊。
+    所以这里只留重原子骨架，四个 N—H 省掉——O=C(N)(N) 的 Y 形加上红/灰/蓝三色，
+    在 80px 下反而比九个挤成一团的球更认得出。
+
+    C=O 拉到 60：减掉两端半径（16 + 15）还剩 29 个可见单位，双键那两条线才分得开。
+    """
+    return _molecule(
+        [(0, 0, 0, -60, 2), (0, 0, -46, 30), (0, 0, 46, 30)],
+        [("O", 0, -60), ("N", -46, 30), ("N", 46, 30), ("C", 0, 0)])
+
+
+def hexamine():
+    """乌洛托品：模压成型的六角燃料片。
+
+    <b>为什么不画结构式。</b> 六亚甲基四胺是个笼子——四个氮在四面体顶点、六个碳
+    架在棱上，十个重原子。要让相邻的球不重叠，N—N 得拉到 90 上下，整个笼子的
+    包围盒就到 180，自动缩放之后每个原子只剩六个像素。80px 下它是一团灰蓝色的糊。
+    所以按本仓库「分子画结构式，其余照实物画」那条的后半句走。
+
+    <b>照的是它真实的样子：野外炉具里那种白色燃料片。</b> 市面上就是压成六角的小块，
+    无烟无灰，带一道可掰的刻痕。
+
+    <b>第一版画成了一只白纸箱</b>，两个原因：拉得太厚（侧面高度快赶上顶面短轴，
+    六棱柱就读成盒子），以及顶面是一整片平色——压片和箱子的区别全在那圈模具倒角上。
+    现在厚度压到短轴的七成，顶面套一圈内缩的倒角面，它才读得出是「压出来的」。
+    """
+    d = canvas()
+
+    top, bevel = "#e9e3d4", "#f7f3e8"
+    front, left, right = "#cbc3b0", "#dbd3c2", "#b5ac99"
+    edge = "#5f5a4d"
+
+    rx, ry, cy, h = 42.0, 22.0, -2.0, 15.0
+
+    def ring(k_rx, k_ry, dy=0.0):
+        pts = []
+        for k in range(6):
+            a = math.radians(60 * k)
+            pts.append((k_rx * math.cos(a), cy + dy + k_ry * math.sin(a)))
+
+        return pts
+
+    v = ring(rx, ry)
+
+    # 三个前侧面。最暗给右前——光从左上来，和本文件所有等距图标一致。
+    for (a, b), fill in zip(((3, 2), (2, 1), (1, 0)), (left, front, right)):
+        d.append(dw.Lines(v[a][0], v[a][1], v[b][0], v[b][1],
+                          v[b][0], v[b][1] + h, v[a][0], v[a][1] + h,
+                          close=True, fill=fill, stroke=edge,
+                          stroke_width=1.5, stroke_linejoin="round"))
+
+    # 顶面压住三个侧面的上沿，再套一圈内缩的倒角面
+    d.append(dw.Lines(*[c for xy in v for c in xy],
+                      close=True, fill=top, stroke=edge,
+                      stroke_width=1.5, stroke_linejoin="round"))
+
+    inner = ring(rx * 0.74, ry * 0.74)
+    d.append(dw.Lines(*[c for xy in inner for c in xy],
+                      close=True, fill=bevel, stroke=edge,
+                      stroke_width=1.1, stroke_opacity=0.45, stroke_linejoin="round"))
+
+    # 刻痕：一道凹槽要两条线才立体——暗的是槽底，亮的是被照到的槽壁
+    d.append(dw.Line(-17, cy + 3.2, 17, cy + 3.2,
+                     stroke="#9a9384", stroke_width=1.7, stroke_linecap="butt"))
+    d.append(dw.Line(-17, cy + 5.0, 17, cy + 5.0,
+                     stroke="#ffffff", stroke_width=1.1,
+                     stroke_opacity=0.6, stroke_linecap="butt"))
+
+    # 倒角面左上一小片高光，和锭子那套是同一个手法。压在刻痕上方，
+    # 两者一叠就糊成一团「白色的什么东西」，读不出是槽。
+    d.append(dw.Lines(-19, cy - 6, -7, cy - 11, -1, cy - 8, -13, cy - 3,
+                      close=True, fill="#ffffff", fill_opacity=0.45))
+
+    return d
+
+
+# ── 有机物第二期：丙烯腈与聚丙烯腈 ───────────────────────
+
+def acrylonitrile():
+    """丙烯腈 CH₂=CH—C≡N：一头双键、一头三键，中间一根单键把它们隔开。
+
+    <b>排成 L 形而不是一条直线。</b> 四个重原子连成链，拉直了包围盒是 182×64，
+    自动缩放按长边算，缩完每个原子只剩六七个像素。折成 L 之后是 138×116，
+    尺度立刻回到和尿素同一档。氢照例省掉（理由见 urea()）。
+
+    三键那段要留够长：偏移是 spread×1.6，两端半径吃掉 32，
+    60 的键长减完还剩 28 个可见单位，三条线才分得开。
+    """
+    return _molecule(
+        [(-46, 44, -46, -16, 2), (-46, -16, 0, -40), (0, -40, 60, -40, 3)],
+        [("C", -46, 44), ("C", -46, -16), ("C", 0, -40), ("N", 60, -40)])
+
+
+def pan():
+    """聚丙烯腈：纺好的白色纤维束，中间一道扎带。
+
+    <b>不画结构式，画纤维束。</b> 聚合物没有一个「分子」可画——重复单元画出来
+    和丙烯腈几乎一样，两张图会分不开。而它在产线上真实的样子就是一束丝，
+    这也正好预示了下一步：这束丝进炉子出来就是碳。
+
+    <b>第一版把每根丝画成了各走各的斜线</b>，互相交叉，读出来是一堆缎带不是一束丝。
+    束的定义是「方向一致、挨得很近」：现在六根**同向同斜率**，只在弓度上差一点点，
+    中间两根最亮、外侧压暗，横截面的圆感就出来了。扎带也从一块大方块缩成一道窄环——
+    它只需要是「这是一束」的证据，不需要是画面主体。
+    """
+    d = canvas()
+
+    dark, mid, light = "#aaa495", "#d6d0c0", "#f7f3e9"
+
+    # (起点 y、弓度、颜色、线宽)。终点一律 +16，同斜率才成束
+    tow = [
+        (-27, -5, dark, 5.6), (25, 5, dark, 5.6),
+        (-17, -3, mid, 5.8), (15, 3, mid, 5.8),
+        (-7, -1, light, 6.2), (5, 1, light, 6.2),
+    ]
+
+    for y0, bow, color, w in tow:
+        d.append(dw.Path(stroke=color, stroke_width=w, fill="none", stroke_linecap="round")
+                 .M(-42, y0).Q(0, y0 + 8 + bow, 42, y0 + 16))
+
+    # 扎带：窄环，压在束中间
+    d.append(dw.Lines(-6, -34, 6, -34, 6, 42, -6, 42,
+                      close=True, fill="#6f6858", stroke="#46412f", stroke_width=1.4,
+                      stroke_linejoin="round"))
+    d.append(dw.Line(-3.4, -32, -3.4, 40, stroke="#ffffff", stroke_width=1.8, stroke_opacity=0.28))
+
+    return d
+
+
+# ── 有机物第三期：芳烃 ───────────────────────────────────
+# 这一族引入一套**新的画法**，理由和乌洛托品那次同类：球棍模型在 80px 下撑不住。
+# 苯环有六个碳，画成六个球之后环的直径就吃掉整张图，再挂个取代基，
+# 自动缩放一压每个球只剩五六个像素。而「六边形加一个圈」本来就是全世界通用的
+# 苯环写法，辨识度比六个灰球高得多——所以环画成符号，取代基仍然画球。
+
+def _arene(items, ring, atoms, bonds=(), margin=5.0):
+    """苯环符号（六边形 + 内圈）＋ 挂在它上面的球棍取代基，整体自动缩放。
+
+    ring 是 (cx, cy, r)；六边形取尖顶朝上，所以正上方永远有一个可取代的顶点。
+    自动缩放沿用 _molecule 的办法：按实际包围盒算，挪一个原子不用重调 transform。
+    """
+    import math as _m
+
+    cx, cy, r = ring
+    verts = [(cx + r * _m.cos(_m.radians(90 - 60 * k)),
+              cy - r * _m.sin(_m.radians(90 - 60 * k))) for k in range(6)]
+
+    xs = [x + s * ATOM[k][2] for k, x, _ in atoms for s in (-1, 1)] + [v[0] for v in verts]
+    ys = [y + s * ATOM[k][2] for k, _, y in atoms for s in (-1, 1)] + [v[1] for v in verts]
+
+    span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
+    scale = min(1.0, (CANVAS - 2 * margin) / span)
+    tx, ty = -(min(xs) + max(xs)) / 2, -(min(ys) + max(ys)) / 2
+
+    d = canvas()
+    g = dw.Group(transform=f"scale({scale:.4f}) translate({tx:.2f}, {ty:.2f})")
+
+    for i in range(6):
+        a, b = verts[i], verts[(i + 1) % 6]
+        g.append(dw.Line(a[0], a[1], b[0], b[1], stroke=BOND,
+                         stroke_width=5.6, stroke_linecap="round"))
+
+    # 内圈是「芳香」的那半个意思，半径压到 0.58——再大就贴边、再小就读成一个点
+    g.append(dw.Circle(cx, cy, r * 0.58, fill="none", stroke=BOND, stroke_width=4.4))
+
+    for b in bonds:
+        _bond(g, *b[:4], order=b[4] if len(b) > 4 else 1)
+
+    for kind, ax, ay in atoms:
+        _atom(g, kind, ax, ay)
+
+    d.append(g)
+
+    return d
+
+
+def benzene():
+    """苯 C₆H₆：只有那个环，什么都不挂。
+
+    本 mod 里最干净的一张图，也是最认得出来的一张——六边形加一个圈是通用符号。
+    """
+    return _arene(None, (0, 0, 44), [])
+
+
+def cumene():
+    """异丙苯 C₉H₁₂：环顶上一个「人」字形的异丙基。
+
+    三个球摆成 Y 是这张图的识别点：异丙基的分叉正是下一步氧化要撬的那个弱点，
+    图上那个居中的碳就是只剩一个氢的叔碳。
+    """
+    return _arene(
+        None, (0, 34, 38),
+        [("C", 0, -56), ("C", -46, -82), ("C", 46, -82)],
+        [(0, -4, 0, -56), (0, -56, -46, -82), (0, -56, 46, -82)])
+
+
+def phenol():
+    """苯酚 C₆H₅OH：环顶上一个羟基。
+
+    红球直接坐在环的顶点上——羟基长在环上而不是链上，正是它酸得不像醇的原因。
+    """
+    return _arene(
+        None, (0, 20, 40),
+        [("O", 0, -70), ("H", 40, -92)],
+        [(0, -20, 0, -70), (0, -70, 40, -92)])
+
+
+def acetone():
+    """丙酮 (CH₃)₂C=O：两个甲基左右平摊，羰基朝上，整体是个 T。
+
+    <b>刻意摆成 T 而不是 Y。</b> 尿素也是「一个红球在上、两个球在下」的构型，
+    两张图摆在一起只靠蓝氮和灰碳的颜色区分太险；把甲基压成水平就分得开了。
+    """
+    return _molecule(
+        [(0, 10, 0, -50, 2), (0, 10, -58, 10), (0, 10, 58, 10)],
+        [("O", 0, -50), ("C", -58, 10), ("C", 58, 10), ("C", 0, 10)])
+
+
+# ── 原油的四个馏分 ───────────────────────────────────────
+# 石脑油 / 精炼油(原版) / 蜡油 / 钒渣油 是同一桶油的四段，图标要能排成一列看。
+# 区分它们的不是颜色而是<b>稠度</b>——轮廓越往下越坠、越往下越暗：
+#   石脑油  瘦长的泪滴 + 挥发出来的小珠      淡麦秆色
+#   蜡油    圆胖、底部微沉的一滴             琥珀棕
+#   钒渣油  坠着、底部摊开的稠块 + 挂丝      近黑（见 vanadium_residue_oil）
+# 颜色只是辅助；形体本身就要读得出「越来越稠」。
+
+def naphtha():
+    """石脑油：瘦长的一滴，淡得近乎无色，头顶几颗挥发出来的小珠。
+
+    <b>它是四段里唯一要画「挥发」的。</b> 石脑油常温下就往外跑（汽油的味道就是它），
+    而剩下三段都不会——那几颗越往上越小的珠子是这张图和另外三张唯一的结构差别，
+    也是一眼能认出「这是最轻的那一段」的地方。
+    """
+    d = canvas()
+
+    body = "#d8d1a6"
+    body_hi = "#efe9c6"
+    rim = "#f7f2d4"
+
+    # 瘦长：半宽只有 20，和蜡油的 27、渣油的 30 排成一列就是稠度序列
+    d.append(dw.Path(fill=body, stroke=rim, stroke_width=2.4, stroke_linejoin="round")
+             .M(0, -42).C(7, -22, 20, -6, 20, 9)
+             .C(20, 25, 11, 33, 0, 33)
+             .C(-11, 33, -20, 25, -20, 9)
+             .C(-20, -6, -7, -22, 0, -42).Z())
+
+    # 左缘弧光，光源和本文件其余液体一致（左上）
+    d.append(dw.Path(fill=body_hi, fill_opacity=0.85)
+             .M(0, -40).C(-7, -21, -16, -7, -17, 6)
+             .C(-11, 4, -6, -4, -2, -16)
+             .C(-1, -25, 0, -34, 0, -40).Z())
+
+    # 挥发出去的小珠：越往上越小、越淡
+    for cx, cy, r, op in ((14, -40, 3.4, 0.85), (23, -30, 2.4, 0.6), (28, -44, 1.7, 0.42)):
+        d.append(dw.Circle(cx, cy, r, fill=rim, fill_opacity=op))
+
+    d.append(dw.Ellipse(-7, -8, 4.0, 6.8, fill="#ffffff", fill_opacity=0.5))
+
+    return d
+
+
+def vgo():
+    """蜡油：圆胖的一滴，琥珀棕，表面一道蜡质的白霜。
+
+    <b>稠度排在石脑油和渣油之间</b>，所以轮廓也排在中间：比石脑油宽一截、
+    底部微微下沉，但还没到渣油那种摊开挂丝的程度。
+
+    那道横过去的浅色带是「蜡」——这一段常温下会析出蜡晶，行话叫蜡油正是因为这个。
+    它同时也是这张图和琥珀色树脂之类东西的区别：树脂是透的，它是浑的。
+    """
+    d = canvas()
+
+    body = "#8e6027"
+    body_hi = "#b8853c"
+    rim = "#dda54a"
+
+    d.append(dw.Path(fill=body, stroke=rim, stroke_width=2.5, stroke_linejoin="round")
+             .M(0, -38).C(10, -18, 27, -3, 27, 12)
+             .C(27, 28, 15, 36, 0, 36)
+             .C(-15, 36, -27, 28, -27, 12)
+             .C(-27, -3, -10, -18, 0, -38).Z())
+
+    d.append(dw.Path(fill=body_hi, fill_opacity=0.8)
+             .M(0, -36).C(-9, -18, -21, -4, -23, 8)
+             .C(-15, 6, -8, -3, -3, -15)
+             .C(-1, -23, 0, -31, 0, -36).Z())
+
+    # 蜡霜：一道横过腹部的浅带，两端收窄——是析出的蜡晶，不是高光
+    d.append(dw.Path(fill="#e8d4a8", fill_opacity=0.5)
+             .M(-24, 16).C(-12, 11, 12, 11, 24, 16)
+             .C(12, 20, -12, 20, -24, 16).Z())
+
+    d.append(dw.Ellipse(-10, -10, 4.2, 7.0, fill="#ffffff", fill_opacity=0.4))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -2162,3 +2469,21 @@ if __name__ == "__main__":
     render(zeolite_catalyst(), "zeolite-catalyst")
     render(spent_catalyst(), "spent-catalyst")
     render(catalytic_reactor(), "catalytic-reactor")
+
+    # 有机物第一期：给甲醛和二氧化碳各找一个真正的下游
+    render(urea(), "urea")
+    render(hexamine(), "hexamine")
+
+    # 有机物第二期：丙烯腈 → 聚丙烯腈 → 碳化（终点是原版碳纳米管，不新开物品）
+    render(acrylonitrile(), "acrylonitrile")
+    render(pan(), "pan")
+
+    # 有机物第三期：芳烃。环画成符号、取代基画球，理由见 _arene()
+    render(benzene(), "benzene")
+    render(cumene(), "cumene")
+    render(phenol(), "phenol")
+    render(acetone(), "acetone")
+
+    # 原油的四个馏分：形体按稠度排成一列，理由见 naphtha()
+    render(naphtha(), "naphtha")
+    render(vgo(), "vgo")
