@@ -318,59 +318,24 @@ namespace ProjectEden.Preloader
                 for (var s = 0; s < slots.Count && s < regs.Count; s++)
                     ctx.ParamSlot[m.Parameters[slots[s]]] = s;
 
-            foreach (VariableDefinition v in PayloadCarriers(m, code, twin))
+            // 先把语句切出来并算好形状，再据此判定载荷局部——**顺序不能反**。
+            // 「一个局部只有在它的每一处赋值都能发射时才可用」这条规则要知道每条语句的形状，
+            // 而形状的计算不依赖载荷局部，所以两阶段能拆开、不循环。
+            List<Stmt> stmts = Split(m, code, twin);
+
+            foreach (VariableDefinition v in SafeCarriers(m, code, stmts))
                 ctx.Locals[v] = null; // 占位：分类只关心「是不是载荷局部」
 
-            HashSet<int> carriers = PayloadLocals(m, code, twin);
-
             // 2) 逐语句匹配
-            var targets = new HashSet<int>();
-
-            foreach (Instruction i in code)
-            {
-                if (i.Operand is Instruction one) targets.Add(one.Offset);
-                else if (i.Operand is Instruction[] many)
-                    foreach (Instruction x in many) targets.Add(x.Offset);
-            }
-
-            var depth = 0;
-            var start = 0;
             var touched = false;
-            var merge = false;
 
-            for (var i = 0; i < code.Count; i++)
+            foreach (Stmt st in stmts)
             {
-                // 在分支目标处栈还没归零 = 有值从别的路径流过来，这是控制流汇合。
-                // 重置切分点的同时**把这件事记住**——被切出来的那条语句是个 phi 汇合，
-                // 它的值不是一条线性表达式，后向栈回溯拼不出来。
-                if (targets.Contains(code[i].Offset) && depth != 0) { depth = 0; start = i; merge = true; }
-
-                depth += Push(code[i]) - Pop(code[i]);
-
-                if (depth < 0) depth = 0;
-
-                if (depth != 0) continue;
-
-                int from = start;
-                int to = i;
-                bool isMerge = merge;
-
-                start = i + 1;
-                merge = false;
-
-                if (!HasMainline(code, from, to, twin)) continue;
+                int from = st.From;
+                int to = st.To;
+                string core = st.Core;
 
                 touched = true;
-
-                string core = CoreShape(code, from, to, twin);
-
-                // **控制流汇合（phi）单独成一类。** 典型是三元：
-                //   inc = 条件 ? <长表达式> : 0
-                // 两条值路径汇进同一条 stfld，后向栈回溯拼不出它，也不该拼——
-                // 那需要一个孪生局部加上两条路径各存一次，是另一种形状。
-                // **在分类阶段就分出去**，而不是等发射时变成 Blocker：
-                // 形状表反映的应该是真实情况，不是「先当成简单形状、到时候再说」。
-                if (isMerge || Merges(code, targets, from, to)) core += " [merge]";
 
                 // **只有写好发射代码的形状才算认得。** 光在 TwinShapes 里不算——
                 // 那会让变换报成功却什么都不做，品质恒为 0 而日志说一切正常。
@@ -434,8 +399,8 @@ namespace ProjectEden.Preloader
 
             if (touched) r.Methods++;
 
-            r.TwinLocals += carriers.Count;
-
+            // 孪生局部的计数在 Emit 里做——那里才是真正建出来的地方。
+            // 在这里按 ctx.Locals 数会把分析遍也算进去，导致数字翻倍。
             if (mutate && work.Count > 0) Emit(m, ctx, work, r);
         }
 
@@ -516,6 +481,121 @@ namespace ProjectEden.Preloader
             }
 
             m.Body.OptimizeMacros();
+        }
+
+        /// <summary>一条含载荷访问的语句：区间和它的核心形状。</summary>
+        private sealed class Stmt
+        {
+            internal int From;
+            internal int To;
+            internal string Core;
+        }
+
+        /// <summary>
+        /// 把方法体按<b>栈深归零</b>切成语句，只留含载荷访问的那些，并算好核心形状。
+        ///
+        /// 在分支目标处栈还没归零 = 有值从别的路径流过来，那是控制流汇合（phi）：
+        /// 切分点重置的同时把这件事记下来，被切出来的那条语句标成 <c>[merge]</c>——
+        /// 它的值不是一条线性表达式，后向栈回溯拼不出来，也不该拼。
+        /// </summary>
+        private static List<Stmt> Split(MethodDefinition m, IList<Instruction> code,
+            IDictionary<string, FieldDefinition> twin)
+        {
+            var targets = new HashSet<int>();
+
+            foreach (Instruction i in code)
+            {
+                if (i.Operand is Instruction one) targets.Add(one.Offset);
+                else if (i.Operand is Instruction[] many)
+                    foreach (Instruction x in many) targets.Add(x.Offset);
+            }
+
+            var outp = new List<Stmt>();
+            var depth = 0;
+            var start = 0;
+            var merge = false;
+
+            for (var i = 0; i < code.Count; i++)
+            {
+                if (targets.Contains(code[i].Offset) && depth != 0) { depth = 0; start = i; merge = true; }
+
+                depth += Push(code[i]) - Pop(code[i]);
+
+                if (depth < 0) depth = 0;
+
+                if (depth != 0) continue;
+
+                int from = start;
+                int to = i;
+                bool isMerge = merge;
+
+                start = i + 1;
+                merge = false;
+
+                if (!HasMainline(code, from, to, twin)) continue;
+
+                string core = CoreShape(code, from, to, twin);
+
+                if (isMerge || Merges(code, targets, from, to)) core += " [merge]";
+
+                outp.Add(new Stmt { From = from, To = to, Core = core });
+            }
+
+            return outp;
+        }
+
+        /// <summary>
+        /// 定义一个<b>可用载荷局部</b>的形状：这些语句的孪生赋值一定会被发射，
+        /// 所以由它们赋值的局部，它的孪生局部一定有真值。
+        /// </summary>
+        private static readonly HashSet<string> DefinesCarrier = new HashSet<string>(new[]
+        {
+            "ldfld:PAY stloc",      // local = X.inc
+            "ldfld:PAY div stloc",  // local = X.inc / count（求等级）
+        }, StringComparer.Ordinal);
+
+        /// <summary>
+        /// 可用的载荷局部：<b>它的每一处赋值都必须来自会被发射的形状</b>。
+        ///
+        /// <b>这条约束不是保守，是正确性。</b> 只要有一处赋值不会发射孪生，
+        /// 那个孪生局部在那条路径上就是 0，而读它的地方会把 0 当成真值 ——
+        /// 不报错，只是品质凭空归零。所以只要有一处不合格，整个局部作废。
+        ///
+        /// 这也解释了依赖链：<c>X.inc -= 等级</c> 那 11 处一直拼不出来，
+        /// 是因为「等级」那个局部由 <c>ldfld:PAY div stloc</c> 赋值，
+        /// 而那个形状在有发射器之前不算数。**先解上游，下游自己就通了。**
+        /// </summary>
+        private static IEnumerable<VariableDefinition> SafeCarriers(MethodDefinition m,
+            IList<Instruction> code, List<Stmt> stmts)
+        {
+            var good = new HashSet<VariableDefinition>();
+            var bad = new HashSet<VariableDefinition>();
+
+            // 先把「由合格形状赋值」的局部收进来
+            foreach (Stmt st in stmts)
+            {
+                if (!DefinesCarrier.Contains(st.Core) || !Emitted.Contains(st.Core)) continue;
+
+                VariableDefinition v = VarOf(m, code[st.To]);
+
+                if (v != null) good.Add(v);
+            }
+
+            // 再把「还有别的赋值来源」的局部整个剔掉
+            var byStmt = new HashSet<int>(stmts.Where(s => DefinesCarrier.Contains(s.Core)).Select(s => s.To));
+
+            for (var i = 0; i < code.Count; i++)
+            {
+                if (!IsStloc(code[i]) || byStmt.Contains(i)) continue;
+
+                VariableDefinition v = VarOf(m, code[i]);
+
+                if (v != null) bad.Add(v);
+            }
+
+            good.ExceptWith(bad);
+
+            return good;
         }
 
         /// <summary>语句内部（第一条之后）有没有分支目标——有就是控制流汇合。</summary>
@@ -613,6 +693,47 @@ namespace ProjectEden.Preloader
                     val.Add(Instruction.Create(OpCodes.Stloc, tv));
 
                     return val;
+                }
+
+                // local = X.inc / count  →  twinLocal = X.qua / count
+                //
+                // 原版是拿它求「单件增产等级」；品质那边同样的算式给出「单件品质分」。
+                // **这一条是依赖链的上游**：`X.inc -= 等级` 那一族要用到它定义的局部，
+                // 在它有发射器之前，那个局部不算可用载荷，于是下游整族都拼不出来。
+                case "ldfld:PAY div stloc":
+                {
+                    VariableDefinition dst = VarOf(ctx.Method, store);
+
+                    if (dst == null || !ctx.Locals.TryGetValue(dst, out VariableDefinition dv)) return null;
+
+                    // div 在 to-1；被除数表达式到 divIdx 之前，除数在中间
+                    if (job.To - 1 < job.From || code[job.To - 1].OpCode != OpCodes.Div) return null;
+
+                    int[] a = ArgStarts(code, job.To - 1, 2);
+
+                    if (a == null) return null;
+
+                    List<Instruction> num = TwinValue(ctx, code, a[0], a[1] - 1);
+
+                    if (num == null) return null;
+
+                    var outp = new List<Instruction>(num);
+
+                    // 除数（件数）原样重放
+                    for (int k = a[1]; k < job.To - 1; k++)
+                    {
+                        if (!IsPureLoad(code[k])) return null;
+
+                        outp.Add(Clone(code[k]));
+                    }
+
+                    outp.Add(Instruction.Create(OpCodes.Div));
+
+                    if (dv == null) return outp;
+
+                    outp.Add(Instruction.Create(OpCodes.Stloc, dv));
+
+                    return outp;
                 }
 
                 // 读-改-写：X.inc += v / -= v
@@ -988,6 +1109,10 @@ namespace ProjectEden.Preloader
 
             // local = X.inc  →  twinLocal = X.qua。局部变量孪生的第一个用户。
             "ldfld:PAY stloc",
+
+            // local = X.inc / count（求单件等级）。**依赖链的上游**：
+            // `X.inc -= 等级` 那一族要用它定义的局部，它一通，下游整族跟着通。
+            "ldfld:PAY div stloc",
 
             // 读-改-写一族。这四种在 IL 结构上是同一个形状——都是
             // 「取地址 → dup ldind.i4 → 值 → 运算 → stind.i4」，差别只在地址表达式
