@@ -57,7 +57,7 @@ namespace ProjectEden
         /// <summary>合金的逐建筑配比（alloys.json）</summary>
         internal static Patches.AlloysConfig AlloysConfig;
 
-        /// <summary>作弊类开关（cheats.json）。默认全关，开启时每条都会在日志里留一行</summary>
+        /// <summary>作弊类开关（cheats.json）。**默认全开**，开着的每条都会在日志里留一行</summary>
         internal static Patches.CheatsConfig CheatsConfig;
 
         private Harmony _harmony;
@@ -245,7 +245,7 @@ namespace ProjectEden
 
             if (!cheats.enabled)
             {
-                Log.LogInfo($"作弊开关：总开关 enabled=false，五项全部无效。改这里：{where}");
+                Log.LogInfo($"作弊开关：总开关 enabled=false，六项全部无效。改这里：{where}");
 
                 return;
             }
@@ -262,7 +262,8 @@ namespace ProjectEden
 
             if (on.Count == 0)
             {
-                Log.LogInfo($"作弊开关：五项全部关闭。要开哪一项改这里：{where}（不存在就新建，改完重开游戏，不用重新编译）");
+                Log.LogInfo($"作弊开关：六项全部关闭。本 mod 的默认是**全开**，所以走到这一行说明它们是被显式关掉的"
+                                + $"（多半是 {where} 这份覆盖文件）。改完重开游戏，不用重新编译。");
 
                 return;
             }

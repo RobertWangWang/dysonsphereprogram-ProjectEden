@@ -1,27 +1,27 @@
 {
-  "//": "作弊类开关，全部默认关闭。和本 mod 其余部分性质不同——其它模块是内容改动，这几条是直接绕过游戏规则，所以单独一个文件、单独一个总开关，并且每条开启时都会往日志里写一行，免得以后排查别的问题时把作弊当成 bug。思路参考 soarqin/DSP_Mods 的 CheatEnabler（MIT），实现没有照抄。",
+  "//": "作弊类开关，**全部默认开启**。和本 mod 其余部分性质不同——其它模块是内容改动，这几条是直接绕过游戏规则，所以单独一个文件、单独一个总开关，并且每条开启时都会往日志里写一行，免得以后排查别的问题时把作弊当成 bug。思路参考 soarqin/DSP_Mods 的 CheatEnabler（MIT），实现没有照抄。",
 
   "//enabled": "总开关。false 则下面每一条都不生效。",
   "enabled": true,
 
   "//instantBuild": "建造秒完成：预建物一放下就建好，不等建设机器人飞过去。**材料照扣**，从机甲背包里拿，拿不出料的原样留着交回给原版的机器人——这条只省时间，不省料。实现走的是原版沙盒模式自己那条路（ConstructionSystem.FastBuild 的躯体：batchBuild + BeginFlattenTerrain/EndFlattenTerrain + 收尾通知），只是把「无视材料」改成了先扣料。",
-  "instantBuild": false,
+  "instantBuild": true,
 
   "//instantBuildPerTick": "每次结算最多秒建几个，留 0 用默认值 100。原版沙盒的同一条路也有这个上限（GamePrefsData.fastBuildBatchSize）——一整张大蓝图一口气建完会卡一帧，分几帧建完既看不出来也不卡。",
   "instantBuildPerTick": 100,
 
   "//noConditionBuild": "无条件建造：建造预览的**所有**拒绝条件一律放行，覆盖/重建标记（coverObjId）也一并清掉——那是 condition 之外的第二道、而且是静默的闸门，条件明明是 Ok 点下去却什么都不发生。**采矿机除外**：它的建造判定同时在确认范围内到底有没有矿，强行放行会造出一台矿脉数组为空的采矿机，建得出来永远不产东西；采矿机的重叠放置和采原油请用 advancedminer.json。注意这不等于免费建造：原版放下的是预建物，材料是事后取的。",
-  "noConditionBuild": false,
+  "noConditionBuild": true,
 
   "//noCollision": "无碰撞建造：建筑可以互相重叠。做法是放行建造判定里的 Collide 结论，连同和它同一段循环写出来的「覆盖/重建」标记（coverObjId）一起清——后者是 condition 之外的第二道、而且是静默的闸门，只清前者的表现是「不报错了，但点下去还是没反应」。**这一项不碰碰撞体，传送带连接、机甲碰撞都正常。**",
-  "noCollision": false,
+  "noCollision": true,
 
-  "//noCollisionPhysics": "额外再把行星碰撞体对象池整个关掉，让机甲也能穿过建筑。**默认关，除非你就是想要穿墙，否则别开。**重叠建造不需要它（上面那项就够了）。代价是它会连带废掉建造工具的取点：BuildTool_Path.UpdateRaycast 里有五处 Physics.Raycast，传送带工具靠它认出光标下面是什么，池子一关就**再也接不到已有传送带上**。建筑的点选和拆除不受影响（那条走 PlanetPhysics.raycastLogic，不用 Unity 物理）。",
-  "noCollisionPhysics": false,
+  "//noCollisionPhysics": "额外再把行星碰撞体对象池整个关掉，让机甲也能穿过建筑。**六条里只有这一条带实打实的副作用，而它现在也默认开着——铺传送带不顺手就先关它。**重叠建造不需要它（上面那项就够了）。代价是它会连带废掉建造工具的取点：BuildTool_Path.UpdateRaycast 里有五处 Physics.Raycast，传送带工具靠它认出光标下面是什么，池子一关就**再也接不到已有传送带上**。建筑的点选和拆除不受影响（那条走 PlanetPhysics.raycastLogic，不用 Unity 物理）。",
+  "noCollisionPhysics": true,
 
   "//powerNoSpacing": "发电建筑无间距限制。原版的间距规则是三档（距离都是平方值，从 IL 读出）：12.25 → 3.5 米，**任意两台发电建筑**之间，太阳能板、火力发电厂都吃这条；110.25 → 10.5 米，风力涡轮机；144 → 12 米，地热发电站。三条是同一段循环算出来的，分不开，所以一个开关三条一起放行。**不要去改那几个常量**：110.25 在蓝图粘贴的判定里还被炮塔间距用着，一律替换会把炮塔的规则一起废掉（CLAUDE.md 第 2 号坑）。本 mod 按 BuildPreview.condition 擦除，天然分得开。",
-  "powerNoSpacing": false,
+  "powerNoSpacing": true,
 
   "//waterPumpAnywhere": "平地抽水：放行 NeedWater，抽水站可以建在陆地上。**星球得有水**——抽水站的产物取自 PlanetData.waterItemId，无水星球上照样抽不出东西，这条只解除「必须建在水面上」的位置限制。地热发电站的 NeedGeothermalResource 是另一条，不在这个开关里。",
-  "waterPumpAnywhere": false
+  "waterPumpAnywhere": true
 }

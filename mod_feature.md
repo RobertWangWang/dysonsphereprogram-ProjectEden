@@ -4,7 +4,7 @@ A mod that scales the late game of Dyson Sphere Program up across the board. Eve
 `ProjectEden/data/*.json` and can be edited; rebuild after changing one, or **drop a file of the same name into
 `BepInEx\config\ProjectEden\` in your profile to override it without rebuilding at all** (see section XIV).
 
-It also ships six cheat switches, all off by default (instant build / build without condition / no build collision /
+It also ships six cheat switches, **all on by default** (instant build / build without condition / no build collision /
 collider pool off /
 no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one product, different raw materials" technique is section XV.
 
@@ -30,7 +30,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XI. The C1 Chemistry Chain (syngas → methanol → downstream)](#xi-the-c1-chemistry-chain-syngas--methanol--downstream)
 - [XII. The standard for new items: follow real chemistry and physics](#xii-the-standard-for-new-items-follow-real-chemistry-and-physics)
 - [XIII. Interface Changes](#xiii-interface-changes)
-- [XIV. Cheat Switches (all off by default)](#xiv-cheat-switches-all-off-by-default)
+- [XIV. Cheat Switches (all on by default)](#xiv-cheat-switches-all-on-by-default)
 - [XV. Alloy Ammo: one product, different raw materials](#xv-alloy-ammo-one-product-different-raw-materials)
 - [XVI. English Localization](#xvi-english-localization)
 - [XVII. Known Trade-offs](#xvii-known-trade-offs)
@@ -1819,9 +1819,12 @@ It now switches to the right tab and column page before selecting.
 
 ---
 
-## XIV. Cheat Switches (all off by default)
+## XIV. Cheat Switches (all on by default)
 
-Five switches in `cheats.json`, **all off by default**, behind a master `enabled` switch.
+Six switches in `cheats.json`, **all on by default**, behind a master `enabled` switch (set that to false and all six are disabled at once).
+
+> **This default was flipped after 1.5.0.** All six used to be off, on the reasoning that something which bypasses the rules should not be on unasked. Turning them on by default was the owner’s call: this mod exists to take the late game off its leash, nearly everyone who installs it switches them on anyway, and the old default was one more step to nowhere.
+> **To get the old behaviour back, override `cheats.json` and set them to false — no rebuild needed.**
 
 > **Editing this file needs no rebuild.** Create or edit
 > `BepInEx\config\ProjectEden\cheats.json` in your profile and it takes effect on the next launch — it overrides the
@@ -1859,7 +1862,7 @@ overlap, that's a bug" look identical.
 - **What makes buildings overlap is letting the build check through**, in two places: the "collides with another
   object" verdict *together with* the cover/rebuild flags written by the same piece of code — the latter is a silent
   second gate, and clearing only the former gives you "no error message, but clicking still does nothing".
-- **There is also `noCollisionPhysics`, off by default, and you probably don't want it.** It additionally switches
+- **`noCollisionPhysics` is the one switch of the six with a real side effect, and it is now on by default too.** It additionally switches
   off the planetary collider pool, letting the mecha walk through buildings — at the cost of blinding the build
   tools' cursor picking: they use Unity physics raycasts to identify what is under the cursor (the belt tool alone
   has five), and with the pool off those hit nothing. Overlapping does not need it. (Selecting and dismantling
@@ -3105,7 +3108,7 @@ units of catalyst and starve every later one.
 | `machines.json` | The seven new buildings: which vanilla building to clone from, parameters for the five `kind`s (assembler / station / accumulator / exchanger / generator), tint, build recipe |
 | `metals.json` | The four-axis property table (hardness / toughness / corrosion / conductivity) |
 | `alloys.json` | Per-building alloy ratios: adjustable slots, total parts, property weights, yield and time multiplier bands |
-| `cheats.json` | **Cheat switches**, all off by default: instant build / build without condition / no build collision / collider pool off / no power spacing / pump anywhere |
+| `cheats.json` | **Cheat switches**, all on by default: instant build / build without condition / no build collision / collider pool off / no power spacing / pump anywhere |
 | `i18n.json` | The English localization table, Chinese → English. Forgetting the English for a new item raises a WARNING at startup |
 | `composite.json` | Living Composite: the filler shortlist, the ratio bands for the four grades, yield and percolation parameters |
 | `ammo.json` | Alloy ammo: the five tiers' damage/rounds multipliers, the pair-conversion weights, the yield curve |
