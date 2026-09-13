@@ -249,6 +249,8 @@ namespace ProjectEden.Compatibility
 
                 for (Exception inner = e.InnerException; inner != null; inner = inner.InnerException)
                     ProjectEdenPlugin.Log.LogWarning($"    ← {inner.GetType().Name}: {inner.Message}");
+
+                Disable(harmony, target, what);
             }
         }
 
@@ -295,27 +297,36 @@ namespace ProjectEden.Compatibility
                 return code;
             }
 
-            // **先把方法体里所有解析不出来的指令数一遍，不只是 call。**
-            // 上一版只数 call，替换成功了、Harmony 仍然编译失败——说明还有别的空操作数，
-            // 而我当时是靠猜去找它。数出来比猜快。
-            var nulls = new List<string>();
+            // **把每一条调用指令连同它的操作数原样打出来。**
+            // 到这一步我已经为「那条指令到底长什么样」猜过两轮：先按方法名+Byte 参数匹配
+            // （一处没中），再按 operand == null 匹配（报了命中，Harmony 仍然在同一条
+            // TryInsertItem 上写回失败）。两轮都是在推测 Harmony 读进来的是什么。
+            // 这个仓库的规矩本来就是「日志驱动诊断，不要从症状反推」——照做。
+            for (var i = 0; i < code.Count; i++)
+            {
+                if (code[i].opcode != OpCodes.Call && code[i].opcode != OpCodes.Callvirt) continue;
 
-            foreach (CodeInstruction ins in code)
-                if (ins.operand == null && ins.opcode.OperandType != System.Reflection.Emit.OperandType.InlineNone)
-                    nulls.Add(ins.opcode.Name);
+                object op = code[i].operand;
 
-            if (nulls.Count > 1)
-                ProjectEdenPlugin.Log.LogWarning(
-                    $"UXAssist 兼容：{owner} 里有 {nulls.Count} 条指令的操作数解析不出来" +
-                    $"（{string.Join("、", nulls.Distinct().ToArray())}）——" +
-                    "不止那一条调用，逐条确认之前不改");
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"    [{owner} #{i}] {code[i].opcode.Name} " +
+                    (op == null ? "<null>" : $"{op.GetType().Name} :: {op}"));
+            }
 
             var spots = new List<int>();
 
             for (var i = 0; i < code.Count; i++)
-                if ((code[i].opcode == OpCodes.Call || code[i].opcode == OpCodes.Callvirt) &&
-                    code[i].operand == null)
-                    spots.Add(i);
+            {
+                if (code[i].opcode != OpCodes.Call && code[i].opcode != OpCodes.Callvirt) continue;
+
+                object op = code[i].operand;
+
+                // 两种都认：解析不出来（null），以及解析出来了但签名里还带 Byte
+                // ——加宽之后游戏里真正存在的那个签名一个 Byte 都没有。
+                bool broken = op == null || (op is MethodInfo mi && HasByte(mi));
+
+                if (broken) spots.Add(i);
+            }
 
             if (spots.Count != 1)
             {
@@ -326,7 +337,17 @@ namespace ProjectEden.Compatibility
                 return code;
             }
 
-            // 就地改写而不是换对象：原指令上可能挂着跳转标签
+            // 就地改写而不是换对象：原指令上可能挂着跳转标签。
+            // **绝不写 null 操作数**——那会活过转译器、活过写盘，等 MonoMod 写 IL 时
+            // 才抛「Invalid argument for callvirt NULL」，栈里指不到这一行。
+            // CLAUDE.md 已经为这条付过一次账。
+            if (shim == null)
+            {
+                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：{owner} 的垫片方法解析不到，不改");
+
+                return code;
+            }
+
             code[spots[0]].opcode = OpCodes.Call;
             code[spots[0]].operand = shim;
 
@@ -334,6 +355,40 @@ namespace ProjectEden.Compatibility
 
             return code;
         }
+
+        private static bool HasByte(MethodInfo m) =>
+            m.GetParameters().Any(p =>
+                p.ParameterType == typeof(byte) ||
+                (p.ParameterType.IsByRef && p.ParameterType.GetElementType() == typeof(byte)));
+
+        /// <summary>
+        /// 补丁打不上时的兜底：<b>把那个方法整个停掉</b>，而不是留着它在运行路径上抛异常。
+        ///
+        /// 一个前置返回 <c>false</c> 就够——它是个 <c>Postfix</c>，不跑等于那个功能不生效。
+        /// <b>少一个功能好过每帧一个 <c>MissingMethodException</c></b>，而且它是<b>说出来</b>的，
+        /// 不是静默的。
+        /// </summary>
+        private static void Disable(Harmony harmony, MethodInfo target, string what)
+        {
+            try
+            {
+                harmony.Patch(target,
+                    prefix: new HarmonyMethod(AccessTools.Method(typeof(UXAssistCompat), nameof(SkipIt))));
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"UXAssist 兼容：「{what}」修不好，已把它**停用**——" +
+                    "少一个功能好过让它在运行时每次都抛 MissingMethodException。" +
+                    "要用它就得卸掉本 mod 的 preloader（那样 5000 层集装会退回 63 层）。");
+            }
+            catch (Exception e)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"UXAssist 兼容：「{what}」既修不好也停不掉（{e.Message}）——" +
+                    "用到它的时候会抛 MissingMethodException。");
+            }
+        }
+
+        private static bool SkipIt() => false;
 
         // ── 垫片：字节进、字节出，中间走加宽后的真实 API ──
         //
