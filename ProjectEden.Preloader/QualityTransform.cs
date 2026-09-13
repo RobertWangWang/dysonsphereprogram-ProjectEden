@@ -680,7 +680,8 @@ namespace ProjectEden.Preloader
         {
             "ldfld:PAY stloc",      // local = X.inc
             "ldfld:PAY div stloc",  // local = X.inc / count（求等级）
-            "ldc stloc",            // local = 常量（零初始化，孪生值恒为 0）
+            "ldc stloc",            // local = 0（零初始化，孪生值也是 0）
+            "ldcN stloc",           // local = 非零常量（夹取，品质不动）
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
             "call:get_Value ldfld:PAY stloc",
@@ -845,7 +846,19 @@ namespace ProjectEden.Preloader
 
                 if (!code[i - 1].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal)) continue;
 
-                extra.Add(new Stmt { From = i - 1, To = i, Core = "ldc stloc", Synth = true });
+                // 零和非零要分开，它们不是一回事：
+                //   `V = 0` 是声明时的零初始化 → 孪生也是 0。
+                //   `V = 10` 是**夹取**（`if (level > 10) level = 10`，给增产表当下标用）
+                //            → 品质那边没有这张表，夹取不该动品质，孪生保持原值。
+                // 合成一个名字让报告能分开数——把两者当成同一件事，会在夹取那一支上
+                // 把品质清零，而那正是「品质分／件」最该保住的地方。
+                bool zero = code[i - 1].OpCode == OpCodes.Ldc_I4_0;
+
+                extra.Add(new Stmt
+                {
+                    From = i - 1, To = i, Synth = true,
+                    Core = zero ? "ldc stloc" : "ldcN stloc",
+                });
             }
 
             return extra;
@@ -1649,6 +1662,14 @@ namespace ProjectEden.Preloader
                 // 「每一处赋值都要能发射」这条规则会因为这一处而把 V_3 判死，
                 // 连带它后面三处真正的 `V_3 = storage[i].inc` 全部拼不出来。
                 // 实测 StationComponent::InternalTickLocal 就是这样卡住的。
+                // V = <非零常量>：夹取，品质不动。**空列表不是失败**——
+                // 这条语句确实什么都不用发射，而那和「拼不出来」是两回事。
+                case "ldcN stloc":
+                    return VarOf(ctx.Method, store) is VariableDefinition cv
+                           && ctx.Locals.ContainsKey(cv)
+                        ? new List<Instruction>()
+                        : null;
+
                 case "ldc stloc":
                 {
                     VariableDefinition cdst = VarOf(ctx.Method, store);
@@ -1940,6 +1961,33 @@ namespace ProjectEden.Preloader
                 if (ar != null) return ar;
             }
 
+            // (0.7) 载荷**数组元素**：`incServed[i]` 的品质版是 `incServedQua[i]`。
+            // 数组表达式里那个载荷字段换成孪生字段，下标原样重放。
+            if (to > from && code[to].OpCode.Name.StartsWith("ldelem", StringComparison.Ordinal))
+            {
+                int[] ea = ArgStarts(code, to, 2);
+
+                if (ea != null && ea[0] >= from && HasMainline(code, ea[0], ea[1] - 1, ctx.Twin))
+                {
+                    var el = new List<Instruction>();
+                    var ok = true;
+
+                    for (int k = ea[0]; k < to; k++)
+                    {
+                        if (!IsStructural(code[k], false)) { ok = false; break; }
+
+                        el.Add(CloneSwap(ctx, code[k]));
+                    }
+
+                    if (ok)
+                    {
+                        el.Add(Instruction.Create(OpCodes.Ldelem_I4));
+
+                        return el;
+                    }
+                }
+            }
+
             var outp = new List<Instruction>();
 
             Instruction last = code[to];
@@ -2011,6 +2059,9 @@ namespace ProjectEden.Preloader
                    || n.StartsWith("ldelem", StringComparison.Ordinal)
                    || n.StartsWith("ldc", StringComparison.Ordinal)
                    || n == "dup" || n == "conv.i4" || n == "conv.u1" || n == "conv.i2"
+                   // 解引用是纯读：`*count` 这种实参在 split_inc 的第三个位置上很常见,
+                   // 不放行的话整条 split 都拼不出来。
+                   || n.StartsWith("ldind.", StringComparison.Ordinal)
                    || IsTrivialGetter(i);
         }
 
@@ -2176,6 +2227,7 @@ namespace ProjectEden.Preloader
             // local = <常量> → twinLocal = 0。**它不是按载荷切出来的**，
             // 是载荷局部认定之后反过来补进语句表的，理由见 Build 里那一段。
             "ldc stloc",
+            "ldcN stloc",
 
             // localB = localA → twinB = twinA。同样是补进去的。
             "ldloc stloc",
@@ -2258,7 +2310,8 @@ namespace ProjectEden.Preloader
             "ldc stfld:PAY",                                        // X.inc = 常数
             "stfld:PAY",                                            // X.inc = 栈上的值
             "ldfld:PAY stloc",                                      // local = X.inc
-            "ldc stloc",                                            // local = 常量（载荷局部的零初始化）
+            "ldc stloc",                                            // local = 0（零初始化）
+            "ldcN stloc",                                           // local = 非零常量（夹取）
             "ldloc stloc",                                          // local = 另一个载荷局部
             "ldarg:PAY stloc",                                      // local = 载荷参数
             "call:split_inc stloc",                                 // local = split_inc(...)
