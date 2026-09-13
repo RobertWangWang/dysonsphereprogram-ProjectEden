@@ -1,11 +1,12 @@
-using System.Text;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Reflection.Emit;
 using HarmonyLib;
-using UnityEngine.UI;
 
 namespace ProjectEden.Patches
 {
     /// <summary>
-    /// 让品质在<b>物品提示栏</b>里看得见：鼠标悬停到一格货上，属性表末尾多出一行
+    /// 让品质在<b>物品提示栏</b>里看得见：鼠标悬停到一格货上，属性表里多出一行
     /// 「品质　顶尖（82）」。
     ///
     /// <b>为什么是提示栏，而不是属性行。</b> 设计稿第八节第 1 条原本写的是走
@@ -14,12 +15,7 @@ namespace ProjectEden.Patches
     /// 同一个 <c>ItemProto</c> 在不同格子里品质不同，做成属性行的话，
     /// 全图每一堆铜块都会显示同一个数，而那个数不属于任何一格具体的货。
     ///
-    /// 提示栏则天然握着那个上下文：
-    /// <c>UIItemTip.SetTip(itemId, corner, offset, parent, <b>itemCount</b>, <b>incCount</b>, …)</c>
-    /// —— 件数和整堆增产点数都是传进来的，也就是说调用方手里正是一格具体的货，
-    /// 原版自己也在这里画增产剂那一块。品质和增产点数是同构的量，放同一个地方最省解释。
-    ///
-    /// <b>品质那个数是查出来的，不是猜的。</b> <c>SetTip</c> 的签名里没有品质
+    /// <b>品质那个数是查出来的，不是靠调用方喂。</b> <c>SetTip</c> 的签名里没有品质
     /// （那是 preloader 新加的孪生字段，原版签名里没有它的位置），所以这里反过来问鼠标：
     /// <c>VFInput.mouseInStorage</c> 指着鼠标当前所在的储物格控件，
     /// <c>mouseOnX / mouseOnY</c> 是它里面的第几格。这一条覆盖<b>储物箱和机甲背包</b>——
@@ -27,13 +23,16 @@ namespace ProjectEden.Patches
     ///
     /// <b>查出来的那一格必须和提示栏说的是同一样东西</b>（<c>itemId</c> 相等）。
     /// 没有这道核对，物品选取窗口、配方面板那些同样会弹提示栏的地方
-    /// 会挂上鼠标底下某个储物格的品质——数字看着很合理，只是属于别的货，
-    /// 而那种错比不显示难查得多。
+    /// 会挂上鼠标底下某个储物格的品质——数字看着很合理，只是属于别的货。
     ///
-    /// <b>追加不会失控</b>，虽然 <c>SetTip</c> 每帧都被调一次：它在 IL 0497 / 04AB 处
-    /// 先把两列属性文本整个重写一遍，所以我们每次拿到的都是干净的原版文本。
-    /// （这一条必须验，不能假设——每帧往同一个 <c>Text</c> 后面接一行，
-    /// 一分钟就能把提示栏撑满整屏。）
+    /// <b>为什么是 transpiler 而不是后缀。</b> 第一版是后缀，直接往两列 <c>Text</c> 后面接一行,
+    /// 结果<b>那一行压在下面那条分隔线上</b>——因为 <c>SetTip</c> 一路数着自己写了几行
+    /// （局部 <c>V_11</c>），最后拿这个数去排下半截和整个窗口的高度。后缀在那之后跑，
+    /// 排版早就按少一行算完了。
+    ///
+    /// 所以改成把这一行<b>插进原版自己的记账里</b>：在
+    /// <c>propsText.text = …</c> 那两句之前改写两列字符串、并把行数 +1，
+    /// 之后的高度计算由原版自己完成。<b>不要重算版面，去修改版面的输入。</b>
     ///
     /// <b>还没覆盖到的地方</b>：传送带窗口、装配机的进料/产物口、研究站、分馏塔。
     /// 那几个窗口自己画数量和增产箭头、不走这条提示栏，各需要一个类似
@@ -48,6 +47,28 @@ namespace ProjectEden.Patches
         private const int TopFrom = 67;
 
         /// <summary>
+        /// 由 transpiler 在 <c>propsText.text = …</c> 之前调用：
+        /// 往两列末尾各补一行，并把原版的行计数 +1。
+        ///
+        /// <b>每行以 <c>\n</c> 结尾</b>，这是原版自己的写法（见它拼「不能手动制造」那一行）。
+        /// </summary>
+        internal static void AddRow(ref string props, ref string values, ref int rows, int itemId)
+        {
+            if (itemId <= 0) return;
+
+            int perItem = FromHoveredStorage(itemId);
+
+            // **0 分不画。** 没提纯过的货本来就是 0 分，给每一格都加一行
+            // 「品质 普通（0）」只是噪声——0 分和「查不到」在显示上应当一样。
+            if (perItem <= 0) return;
+
+            props = (props ?? "") + "品质".Translate() + "\n";
+            values = (values ?? "") + Describe(perItem) + "\n";
+
+            rows++;
+        }
+
+        /// <summary>
         /// 「顶尖（82）」。三档只是<b>显示分层</b>，内部一直是连续分数——
         /// 效果层将来按分数线性插值，不按档跳。
         /// </summary>
@@ -58,29 +79,6 @@ namespace ProjectEden.Patches
                 : "普通".Translate();
 
             return string.Format("{0}（{1}）".Translate(), band, perItem);
-        }
-
-        [HarmonyPostfix]
-        [HarmonyPatch(typeof(UIItemTip), nameof(UIItemTip.SetTip))]
-        private static void UIItemTip_SetTip(UIItemTip __instance, int itemId)
-        {
-            if (__instance == null || itemId <= 0) return;
-
-            int perItem = FromHoveredStorage(itemId);
-
-            // **0 分不画。** 没提纯过的货本来就是 0 分，给每一格货都加一行
-            // 「品质 普通（0）」只是噪声——0 分和「查不到」在显示上应当一样。
-            if (perItem <= 0) return;
-
-            Text props = __instance.propsText;
-            Text values = __instance.valuesText;
-
-            if (props == null || values == null) return;
-
-            // 追加到原版那两列（左属性名、右值）的末尾。**追加而不是替换**：
-            // 这两列上面还写着堆叠上限、燃料热值这些原版内容，覆盖掉就是砸别人的窗口。
-            props.text = Append(props.text, "品质".Translate());
-            values.text = Append(values.text, Describe(perItem));
         }
 
         /// <summary>
@@ -108,22 +106,177 @@ namespace ProjectEden.Patches
 
             if (count <= 0) return 0;
 
-            return QualityAccess.GetGridQua(ref ui.storage.grids[index]) / count;
+            int per = QualityAccess.GetGridQua(ref ui.storage.grids[index]) / count;
+
+            WarnIfOverCap(itemId, count, per);
+
+            return per;
         }
 
-        private static string Append(string s, string line)
+        private static bool _warned;
+
+        /// <summary>
+        /// 单件品质超过上限就吼一声。<b>这不是装饰，它抓到过一个真的洞</b>：
+        /// 实测报上来「不断电解铜，品质到了 502」，而上限是 100——病因是
+        /// <c>StationExpandPatches</c> 那个 <c>return false</c> 的前缀顶掉了
+        /// preloader 改写过的 <c>StationComponent.AddItem</c>，
+        /// 侧信道寄存器里的品质既没入库、也没被消费，留给了下一个读它的方法。
+        ///
+        /// 上限是个<b>不变量</b>，而不变量要在能查到的地方查。显示层是最省的那个地方：
+        /// 它本来就要算单件分数，多一句比较不花钱。
+        /// </summary>
+        private static void WarnIfOverCap(int itemId, int count, int perItem)
         {
-            if (string.IsNullOrEmpty(s)) return line;
+            if (_warned || perItem <= QualityRefineryPatches.MaxPerItem) return;
 
-            var sb = new StringBuilder(s.Length + line.Length + 1);
+            _warned = true;
 
-            sb.Append(s);
+            ProjectEdenPlugin.Log.LogError(
+                $"物品品质：**单件品质越界**——物品 {itemId}（{LDB.items.Select(itemId)?.name}）" +
+                $"在储物格里 {count} 件、单件 {perItem} 分，而上限是 " +
+                $"{QualityRefineryPatches.MaxPerItem}。说明有一条搬运路径只搬了件数没搬品质，" +
+                "或者顶掉了某个 preloader 改写过的方法而没接管它的侧信道那一步。");
+        }
 
-            if (!s.EndsWith("\n")) sb.Append('\n');
+        // ── transpiler：把这一行插进原版自己的行计数里 ────────────
 
-            sb.Append(line);
+        [HarmonyTranspiler]
+        [HarmonyPatch(typeof(UIItemTip), nameof(UIItemTip.SetTip))]
+        private static IEnumerable<CodeInstruction> SetTip_Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            var code = new List<CodeInstruction>(instructions);
 
-            return sb.ToString();
+            FieldInfo propsField = AccessTools.Field(typeof(UIItemTip), "propsText");
+            FieldInfo valuesField = AccessTools.Field(typeof(UIItemTip), "valuesText");
+            MethodInfo setText = AccessTools.PropertySetter(typeof(UnityEngine.UI.Text), "text");
+            MethodInfo add = AccessTools.Method(typeof(QualityTipPatches), nameof(AddRow));
+
+            if (propsField == null || valuesField == null || setText == null || add == null)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    "物品品质：提示栏的品质行没接上——propsText / valuesText / set_text / AddRow " +
+                    "有一个没解析出来。**宁可不插也不插 null 操作数**（那会在 Harmony 写回时才炸，" +
+                    "堆栈指向的是写入器而不是这里）。");
+
+                return code;
+            }
+
+            // 锚点：`ldarg.0 ; ldfld propsText ; ldloc V_12 ; callvirt set_text`，
+            // 紧跟着 `ldarg.0 ; ldfld valuesText ; ldloc V_13 ; callvirt set_text`。
+            var at = -1;
+
+            for (var i = 0; i + 7 < code.Count; i++)
+            {
+                if (!code[i].LoadsField(propsField)) continue;
+                if (!code[i + 1].IsLdloc() || !code[i + 2].Calls(setText)) continue;
+                if (!code[i + 4].LoadsField(valuesField)) continue;
+                if (!code[i + 5].IsLdloc() || !code[i + 6].Calls(setText)) continue;
+
+                at = i;
+
+                break;
+            }
+
+            if (at < 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    "物品品质：在 UIItemTip.SetTip 里没找到写两列属性文本的那一段，提示栏不显示品质。" +
+                    "游戏更新动过这个方法的话，重新对一遍锚点。");
+
+                return code;
+            }
+
+            LocalBuilder props = code[at + 1].operand as LocalBuilder;
+            LocalBuilder values = code[at + 5].operand as LocalBuilder;
+            LocalBuilder rows = FindRowCounter(code, at);
+
+            if (props == null || values == null || rows == null)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    "物品品质：提示栏的两列局部或行计数局部没认出来，不插品质行——" +
+                    $"props={props != null}／values={values != null}／rows={rows != null}。");
+
+                return code;
+            }
+
+            // 插在 `ldarg.0 ; ldfld propsText` 之前的那个 ldarg.0 上
+            int insert = at > 0 && code[at - 1].opcode == OpCodes.Ldarg_0 ? at - 1 : at;
+
+            var emit = new List<CodeInstruction>
+            {
+                new CodeInstruction(OpCodes.Ldloca_S, props),
+                new CodeInstruction(OpCodes.Ldloca_S, values),
+                new CodeInstruction(OpCodes.Ldloca_S, rows),
+                new CodeInstruction(OpCodes.Ldarg_1),
+                new CodeInstruction(OpCodes.Call, add)
+            };
+
+            // **标签要跟着搬。** 插入点上挂的跳转标签必须落到新的第一条指令上，
+            // 否则那些分支会跳过我们这一段——本仓库在 IL 改写上反复记过这一条。
+            emit[0].labels.AddRange(code[insert].labels);
+            code[insert].labels.Clear();
+
+            code.InsertRange(insert, emit);
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物品品质：提示栏的品质行已接进 UIItemTip.SetTip（第 {insert} 条指令前，" +
+                $"两列局部 V_{props.LocalIndex} / V_{values.LocalIndex}，行计数 V_{rows.LocalIndex}）。");
+
+            return code;
+        }
+
+        /// <summary>
+        /// 找原版数行数用的那个局部。
+        ///
+        /// 它的形状是 <c>ldloc X ; ldc.i4.1 ; add ; stloc X</c>——但<b>光靠形状不够</b>：
+        /// 锚点之前随便一个 <c>for</c> 循环的计数器长得一模一样，而认错了的后果是
+        /// 我们去改一个循环变量，那是死循环或越界，不是排版错位。两道判据一起用：
+        ///
+        /// <list type="number">
+        /// <item><b>数得最多的那个</b>，且至少 4 次——原版每写一行属性就 +1 一次，
+        ///       实测在写两列文本之前有 5 次；循环计数器凑够 4 次要有四个用同一个局部的循环。</item>
+        /// <item><b>锚点之后还被读</b>——行计数的用处正是排下半截的版面（实测 IL 0888 / 0971），
+        ///       而锚点之前的循环计数器出了循环就没人再看它了。这一条才是真正的判据。</item>
+        /// </list>
+        /// </summary>
+        private static LocalBuilder FindRowCounter(List<CodeInstruction> code, int anchor)
+        {
+            var hits = new Dictionary<LocalBuilder, int>();
+
+            for (var i = 0; i + 3 < anchor; i++)
+            {
+                if (!code[i].IsLdloc() || !(code[i].operand is LocalBuilder v)) continue;
+                if (v.LocalType != typeof(int)) continue;
+                if (code[i + 1].opcode != OpCodes.Ldc_I4_1 || code[i + 2].opcode != OpCodes.Add) continue;
+                if (!code[i + 3].IsStloc() || !ReferenceEquals(code[i + 3].operand, v)) continue;
+
+                hits.TryGetValue(v, out int n);
+
+                hits[v] = n + 1;
+            }
+
+            LocalBuilder best = null;
+            var bestHits = 0;
+
+            foreach (KeyValuePair<LocalBuilder, int> pair in hits)
+            {
+                if (pair.Value < 4 || pair.Value <= bestHits) continue;
+                if (!ReadAfter(code, anchor, pair.Key)) continue;
+
+                best = pair.Key;
+                bestHits = pair.Value;
+            }
+
+            return best;
+        }
+
+        private static bool ReadAfter(List<CodeInstruction> code, int anchor, LocalBuilder v)
+        {
+            for (int i = anchor; i < code.Count; i++)
+                if (code[i].IsLdloc() && ReferenceEquals(code[i].operand, v))
+                    return true;
+
+            return false;
         }
     }
 }

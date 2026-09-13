@@ -86,6 +86,52 @@ namespace ProjectEden.Patches
             }
         }
 
+        // ── 侧信道 ────────────────────────────────────────────
+
+        internal delegate int ChannelGet();
+
+        /// <summary>
+        /// preloader 的品质侧信道 0 号寄存器。
+        ///
+        /// <b>协议是「调用方在调用前写，被调方在体内读」。</b> 改写后的
+        /// <c>StationComponent.AddItem</c> 体内是
+        /// <c>storage[i].qua += ProjectEdenQualityChannel.Q0</c>（实测 IL 0070~007D）——
+        /// 品质没法加进方法签名（那是结构性改动），所以走一个 <c>[ThreadStatic]</c> 寄存器。
+        ///
+        /// <b>任何 <c>return false</c> 顶掉这类方法的前缀，都必须自己把这一步补上。</b>
+        /// 不补有两重后果：这一次的品质丢了（看起来像「品质怎么越搬越少」），
+        /// 而寄存器里那个值<b>留在原地</b>，被下一个读它的方法当成自己的——
+        /// 那才是难查的那一半，症状是品质在某个不相干的地方凭空变大。
+        /// </summary>
+        internal static readonly ChannelGet GetChannel0 = MakeChannelGet();
+
+        internal static bool ChannelReady => GetChannel0 != null;
+
+        private static ChannelGet MakeChannelGet()
+        {
+            Type t = AccessTools.TypeByName("ProjectEdenQualityChannel");
+
+            FieldInfo f = t != null ? AccessTools.Field(t, "Q0") : null;
+
+            if (f == null || !f.IsStatic || f.FieldType != typeof(int)) return null;
+
+            try
+            {
+                var dm = new DynamicMethod("ProjectEden_GetQ0", typeof(int), new Type[0], t, true);
+
+                ILGenerator il = dm.GetILGenerator();
+
+                il.Emit(OpCodes.Ldsfld, f);
+                il.Emit(OpCodes.Ret);
+
+                return (ChannelGet)dm.CreateDelegate(typeof(ChannelGet));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
         // ── 储物格（储物箱 / 背包 / 物流塔共用的那张表）────────────
 
         internal delegate int GridGet(ref StorageComponent.GRID g);

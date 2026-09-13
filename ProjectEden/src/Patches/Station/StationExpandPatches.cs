@@ -56,6 +56,29 @@ namespace ProjectEden.Patches
         /// <summary>
         /// 运输机到站靠 AddItem 入库，而原版把它展开成了六个 if，
         /// 第 7 格往后一个都匹配不上直接 return 0——货物凭空消失。
+        ///
+        /// <b>这个前缀 <c>return false</c> 顶掉了整个原版方法体，而 preloader 改写过它</b>——
+        /// 所以品质那一笔必须在这里自己补。改写后的原版体是三行：
+        ///
+        /// <code>
+        /// storage[i].count += count;
+        /// storage[i].inc   += inc;
+        /// storage[i].qua   += ProjectEdenQualityChannel.Q0;   // 实测 IL 0070~007D
+        /// </code>
+        ///
+        /// 品质进不了方法签名（那是结构性改动），所以走一个侧信道寄存器：
+        /// <b>调用方在调用前写，被调方在体内读</b>。漏掉它有两重后果，
+        /// 而且第二重才是真正难查的那个：
+        ///
+        /// <list type="number">
+        /// <item>这一批货的品质<b>丢了</b>——看起来像「品质越搬越少」；</item>
+        /// <item>寄存器里那个值<b>留在原地没人消费</b>，被下一个读它的方法当成自己的——
+        ///       品质在一个不相干的地方凭空变大。实测报上来的
+        ///       「不断电解铜，品质到了 502」（上限本该是 100）就是它。</item>
+        /// </list>
+        ///
+        /// <b>这条规矩对所有 <c>return false</c> 的前缀都成立</b>：顶掉一个 preloader 改写过的
+        /// 方法，就要连它被改写出来的那部分一起接管。
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(StationComponent), nameof(StationComponent.AddItem))]
@@ -78,6 +101,13 @@ namespace ProjectEden.Patches
 
                     storage[i].count += count;
                     storage[i].inc += inc;
+
+                    // 品质走侧信道，理由见方法注释。孪生字段不在时两个 Ready 都是 false，
+                    // 整句跳过——没装 preloader 的情况下这里本来也没有品质可搬。
+                    if (QualityAccess.Ready && QualityAccess.ChannelReady)
+                        QualityAccess.SetStationQua(ref storage[i],
+                            QualityAccess.GetStationQua(ref storage[i]) + QualityAccess.GetChannel0());
+
                     __result = count;
 
                     return false;
