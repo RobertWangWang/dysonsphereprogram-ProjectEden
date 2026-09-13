@@ -136,16 +136,30 @@ namespace ProjectEden.Patches
 
         internal delegate int GridGet(ref StorageComponent.GRID g);
 
+        internal delegate void GridSet(ref StorageComponent.GRID g, int v);
+
         /// <summary>
         /// <c>StorageComponent.GRID.qua</c> 的读取器。
         ///
-        /// <b>只读，没有写入器</b>，这是有意的：这条路只服务显示层。品质的搬运在
-        /// preloader 的孪生改写里，由游戏自己的方法完成；显示层要是能写，
-        /// 就多了一条谁都想不到的旁路。真需要写的时候再加，并在这里写明理由。
+        /// 搬运一律由 preloader 改写出来的游戏方法完成，这边<b>不参与搬运</b>——
+        /// 读是给显示层用的，写只有一个用途，见 <see cref="SetGridQua"/>。
         /// </summary>
         internal static readonly GridGet GetGridQua = MakeGridGet();
 
+        /// <summary>
+        /// <b>唯一的用途是存档修复</b>（<see cref="QualityRepairPatches"/>）：
+        /// 把越界的整格点数夹回上限。
+        ///
+        /// 写入器是后来才加的，加它之前这里写着「只读是有意的」——那句话当时对，
+        /// 直到发现<b>已经胀出去的存量自己不会好</b>：品质按比例跟着货走，
+        /// 一格 502 分的铜块会一路 502 下去，哪怕病因早就修掉了。
+        /// 搬运仍然一句都不走这里。
+        /// </summary>
+        internal static readonly GridSet SetGridQua = MakeGridSet();
+
         internal static bool GridReady => GetGridQua != null;
+
+        internal static bool GridWritable => GetGridQua != null && SetGridQua != null;
 
         private static GridGet MakeGridGet()
         {
@@ -166,6 +180,33 @@ namespace ProjectEden.Patches
                 il.Emit(OpCodes.Ret);
 
                 return (GridGet)dm.CreateDelegate(typeof(GridGet));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        private static GridSet MakeGridSet()
+        {
+            FieldInfo f = AccessTools.Field(typeof(StorageComponent.GRID), "qua");
+
+            if (f == null || f.FieldType != typeof(int)) return null;
+
+            try
+            {
+                var dm = new DynamicMethod("ProjectEden_SetGridQua", null,
+                    new[] { typeof(StorageComponent.GRID).MakeByRefType(), typeof(int) },
+                    typeof(StorageComponent.GRID), true);
+
+                ILGenerator il = dm.GetILGenerator();
+
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldarg_1);
+                il.Emit(OpCodes.Stfld, f);
+                il.Emit(OpCodes.Ret);
+
+                return (GridSet)dm.CreateDelegate(typeof(GridSet));
             }
             catch (Exception)
             {

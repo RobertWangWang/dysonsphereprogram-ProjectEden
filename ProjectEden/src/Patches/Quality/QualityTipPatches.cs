@@ -113,7 +113,8 @@ namespace ProjectEden.Patches
             return per;
         }
 
-        private static bool _warned;
+        /// <summary>报过的最高单件分数。<b>只报一次是不够的</b>——见 WarnIfOverCap。</summary>
+        private static int _warnedAt;
 
         /// <summary>
         /// 单件品质超过上限就吼一声。<b>这不是装饰，它抓到过一个真的洞</b>：
@@ -124,12 +125,17 @@ namespace ProjectEden.Patches
         ///
         /// 上限是个<b>不变量</b>，而不变量要在能查到的地方查。显示层是最省的那个地方：
         /// 它本来就要算单件分数，多一句比较不花钱。
+        ///
+        /// <b>报的是「又创新高」，不是「报过就闭嘴」。</b> 只报一次的话，
+        /// 「修完之后还在涨」和「这是修复前留下的存量」在日志上长得一模一样——
+        /// 而这两件事的处理完全相反（一个要继续查，一个只要修一次存档）。
+        /// 数字每涨一次就再吼一次，「还在漏」自己就会现形。
         /// </summary>
         private static void WarnIfOverCap(int itemId, int count, int perItem)
         {
-            if (_warned || perItem <= QualityRefineryPatches.MaxPerItem) return;
+            if (perItem <= QualityRefineryPatches.MaxPerItem || perItem <= _warnedAt) return;
 
-            _warned = true;
+            _warnedAt = perItem;
 
             ProjectEdenPlugin.Log.LogError(
                 $"物品品质：**单件品质越界**——物品 {itemId}（{LDB.items.Select(itemId)?.name}）" +
