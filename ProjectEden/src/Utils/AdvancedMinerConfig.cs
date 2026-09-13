@@ -38,6 +38,17 @@ namespace ProjectEden.Utils
         /// </summary>
         public int smallMinerCapacity;
 
+        /// <summary>
+        /// 小型采矿机是否也不消耗矿脉。
+        ///
+        /// 大型采矿机 / 抽水站 / 采油站由 <see cref="forceMiningCostRate"/> 覆盖，
+        /// 小型采矿机原本是个缺口。补上它之后，本 mod 对<b>所有</b>采矿设备都提供
+        /// 「矿脉完全不消耗」，玩家因此可以放心关掉 UXAssist 的「矿脉保护」——
+        /// 那个功能的前置<b>返回 false、整个跳过原版方法体</b>，会让本 mod 的
+        /// 矿石→锭替换、缓存上限、钻头消耗全部静默失效。见 <c>UXAssistCompat</c>。
+        /// </summary>
+        public bool protectSmallMinerVeins;
+
         /// <summary>站点仓储上限（面板上的「上限」），来自 PrefabDesc.stationMaxItemCount</summary>
         public int stationCapacity;
 

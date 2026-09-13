@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Threading;
 using HarmonyLib;
 
 namespace ProjectEden.Compatibility
@@ -86,8 +87,22 @@ namespace ProjectEden.Compatibility
             Fix(harmony, "UXAssist.Patches.FactoryPatch+BeltSignalsForBuyOut",
                 "GameLogic_OnFactoryFrameBegin_Postfix", "传送带信号购买");
 
-            Fix(harmony, "UXAssist.Patches.FactoryPatch+ProtectVeinsFromExhaustion",
-                "MinerComponent_InternalUpdate_Prefix", "矿脉保护");
+            // **矿脉保护刻意不修，理由不是修不动，是修好了更糟。**
+            //
+            // 读它的源码才看清：ProtectVeinsFromExhaustion 的前置**返回 false**，
+            // 整个重实现了 MinerComponent.InternalUpdate（矿脉 / 原油 / 抽水三条分支）。
+            // 而本 mod 的 AdvancedMinerPatches 是**转译原版方法体**的——矿石→锭替换、
+            // 缓存上限、钻头消耗、小型采矿机的节流分母，全在那个被跳过的方法体里。
+            //
+            // 所以把签名修好只会得到一个**静默的功能互斥**：矿脉保护能用了，
+            // 但铜矿不再自动变铜块、缓存回到 50、钻头不再消耗，而且一条报错都没有。
+            //
+            // 而这两个功能本来就重叠：advancedminer.json 的 forceMiningCostRate 为 0，
+            // 本 mod 对大型采矿机 / 抽水站 / 采油站早就是「矿脉完全不消耗」；
+            // 它唯一多给的是小型采矿机，而那一块已经由 protectSmallMinerVeins 补上了。
+            //
+            // 于是这里改成**检测并说清楚**，检测点在采矿 tick 上（玩家可能中途才打开开关，
+            // 启动时检查会漏）。见 CheckMinerConflictOnce。
 
             // 状态行无论成败都打：**「补了几处」是这条兼容唯一能被看见的证据**，
             // 而它修的那两个功能平时很少走到，坏了也不会有人立刻发现。
@@ -100,6 +115,59 @@ namespace ProjectEden.Compatibility
                     "UXAssist 兼容：一处都没接上——它的内部类名或方法名可能变了。" +
                     "那两个功能在本 mod 下会抛 MissingMethodException，" +
                     "对照 UXAssist 的版本重新确认类名");
+        }
+
+        private static int _minerConflictChecked;
+
+        /// <summary>
+        /// 检测 UXAssist 的「矿脉保护」有没有真的挂在 <c>MinerComponent.InternalUpdate</c> 上，
+        /// 挂了就把互斥说清楚。
+        ///
+        /// <b>检测点必须在采矿 tick 上，不能在启动时。</b> 那是个可以在游戏里随时勾的开关，
+        /// UXAssist 是在勾选的那一刻才打补丁的——启动时查一定查不到。
+        ///
+        /// <b>查的是 Harmony 的实际补丁表，不是配置项。</b> 别人的配置字段名会变，
+        /// 而「这个方法上到底挂了谁」是结果本身。
+        ///
+        /// 采矿 tick 跑在 <c>_miner_parallel</c> 上，一次性标志必须用 Interlocked 抢，
+        /// 否则三十多个线程各打一行。
+        /// </summary>
+        internal static void CheckMinerConflictOnce()
+        {
+            if (!Installed) return;
+
+            if (Interlocked.Exchange(ref _minerConflictChecked, 1) != 0) return;
+
+            try
+            {
+                MethodInfo target = AccessTools.Method(typeof(MinerComponent), nameof(MinerComponent.InternalUpdate));
+
+                if (target == null) return;
+
+                // 写全名：HarmonyLib.Patches 和本仓库自己的 ProjectEden.Patches 命名空间同名
+                HarmonyLib.Patches info = Harmony.GetPatchInfo(target);
+
+                if (info?.Prefixes == null) return;
+
+                bool theirs = info.Prefixes.Any(p =>
+                    p.PatchMethod?.DeclaringType?.Name == "ProtectVeinsFromExhaustion");
+
+                if (!theirs) return;
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    "检测到 UXAssist 的「矿脉保护」已挂在采矿机上，而它和本 mod 的采矿机改造**互斥**：" +
+                    "它的前置返回 false、整个跳过原版方法体，而本 mod 的矿石→锭替换、机内缓存上限、" +
+                    "钻头消耗、小型采矿机节流全都在那个方法体里——这些会静默失效。");
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    "建议关掉 UXAssist 的矿脉保护：本 mod 已经提供同样的效果——" +
+                    "大型采矿机 / 抽水站 / 采油站由 advancedminer.json 的 forceMiningCostRate=0 覆盖，" +
+                    "小型采矿机由 protectSmallMinerVeins 覆盖，两者都是矿脉完全不消耗。");
+            }
+            catch (Exception e)
+            {
+                ProjectEdenPlugin.Log.LogWarning($"检查 UXAssist 采矿机冲突时出错（不影响游戏）：{e.Message}");
+            }
         }
 
         /// <summary>把加宽后的两个签名绑成委托。绑不上就整个不动，而不是打半截补丁。</summary>
@@ -174,7 +242,13 @@ namespace ProjectEden.Compatibility
             }
             catch (Exception e)
             {
+                // **打全异常链，不要只打 Message。** HarmonyX 把真正的原因包在
+                // 「IL Compile Error (unknown location)」里面，只看 Message 等于什么都没说，
+                // 而这一条已经害得诊断多走了一轮。
                 ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：给 {what} 打补丁失败：{e.Message}");
+
+                for (Exception inner = e.InnerException; inner != null; inner = inner.InnerException)
+                    ProjectEdenPlugin.Log.LogWarning($"    ← {inner.GetType().Name}: {inner.Message}");
             }
         }
 
@@ -220,6 +294,21 @@ namespace ProjectEden.Compatibility
 
                 return code;
             }
+
+            // **先把方法体里所有解析不出来的指令数一遍，不只是 call。**
+            // 上一版只数 call，替换成功了、Harmony 仍然编译失败——说明还有别的空操作数，
+            // 而我当时是靠猜去找它。数出来比猜快。
+            var nulls = new List<string>();
+
+            foreach (CodeInstruction ins in code)
+                if (ins.operand == null && ins.opcode.OperandType != System.Reflection.Emit.OperandType.InlineNone)
+                    nulls.Add(ins.opcode.Name);
+
+            if (nulls.Count > 1)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"UXAssist 兼容：{owner} 里有 {nulls.Count} 条指令的操作数解析不出来" +
+                    $"（{string.Join("、", nulls.Distinct().ToArray())}）——" +
+                    "不止那一条调用，逐条确认之前不改");
 
             var spots = new List<int>();
 

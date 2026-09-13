@@ -2182,7 +2182,25 @@ this mod first, at which point `Chainloader.PluginInfos` does not yet contain th
 it logged only on success, the symptom would have been "the fix does nothing" with no clue
 why — the fifth-time-lesson from `LensPatches.ReportInsert`, paying for itself again.
 
-`UXAssistCompat` repairs them by **transpiling UXAssist's own two methods**, swapping the
+**Only one of the two is repaired, and the reason the other is not is worth more than the
+repair would be.** Reading UXAssist's source settles it: `ProtectVeinsFromExhaustion`'s
+prefix **returns `false` and fully reimplements `MinerComponent.InternalUpdate`** (vein, oil
+and water branches). This repo's `AdvancedMinerPatches` *transpiles that same body* — the
+ore→ingot remap, the capacity gates, drill-bit consumption and the small miner's throttle
+all live inside it. So making the signature resolve would buy a **silent feature conflict**:
+vein protection works, and copper ore quietly stops becoming copper ingot, the buffer drops
+back to 50, and drill bits stop being consumed, with nothing logged.
+
+The two features also overlap: `forceMiningCostRate: 0` already means "veins never deplete"
+for the advanced miner, pumps and oil extractors. The only gap was the plain miner, now
+closed by `protectSmallMinerVeins`, so **this mod covers the whole of what UXAssist's switch
+does** and turning it off costs the player nothing. `UXAssistCompat.CheckMinerConflictOnce`
+therefore detects and explains instead of patching — **from the miner tick path, not at
+startup**, because that switch can be toggled mid-game, and by reading Harmony's own patch
+table rather than UXAssist's config field (the applied state is the fact; a config field
+name is a guess that rots).
+
+`UXAssistCompat` repairs the other one by **transpiling UXAssist's `BeltSignalsForBuyOut`**, swapping the
 call to the old signature for a shim in this assembly that reaches the widened API through
 a runtime-bound delegate — the same technique `CargoWidening` already uses for this mod's
 own calls. Harmony's transpiler runs before JIT, so the broken MemberRef is never resolved.

@@ -362,10 +362,22 @@ namespace ProjectEden.Patches
         private static void MinerComponent_InternalUpdate_Prefix(ref MinerComponent __instance, PlanetFactory factory,
             float power, ref float miningRate, ref float miningSpeed)
         {
+            // UXAssist 的「矿脉保护」和本 mod 的采矿机改造互斥，而那是静默的——
+            // 它的前置返回 false，本 mod 转译进原版方法体的那些改动整个不执行。
+            // 检测点放在这里而不是启动时：那是个游戏内随时可勾的开关。
+            Compatibility.UXAssistCompat.CheckMinerConflictOnce();
+
             if (!IsBoosted(ref __instance, factory))
             {
                 // 小型采矿机不进提速那一套，但缓存上限抬高之后节流分母必须跟着抬
                 RetuneSmallMinerDamper(ref __instance, factory);
+
+                // 矿脉不消耗。大型采矿机走下面那条 FullMiningCostRate，小型的原本是个缺口；
+                // 补上之后本 mod 对所有采矿设备都覆盖了「矿脉完全不消耗」，
+                // 玩家关掉 UXAssist 的矿脉保护不会损失任何东西。
+                if (Config != null && Config.protectSmallMinerVeins &&
+                    __instance.type == EMinerType.Vein)
+                    miningRate = 0f;
 
                 return;
             }
