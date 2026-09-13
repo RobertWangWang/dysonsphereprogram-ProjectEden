@@ -2168,6 +2168,20 @@ plugins in this profile, **exactly two call sites break**, both in UXAssist —
 been broken since the preloader shipped in 1.7.0** and nobody reported it, presumably
 because those paths run rarely.
 
+**A `SoftDependency` on the target mod is not optional decoration — it is load order, and
+leaving it out makes the whole compat layer silently inert.** Without it BepInEx may load
+this mod first, at which point `Chainloader.PluginInfos` does not yet contain the target and
+`IsLoaded` returns false. Measured, in the log, in exactly that order:
+
+```
+[Project Eden] UXAssist 没装，跳过它的兼容补丁
+[BepInEx]      Loading [UXAssist 1.5.8]
+```
+
+**That two-line pair is only visible because the compat layer logs the boring state.** Had
+it logged only on success, the symptom would have been "the fix does nothing" with no clue
+why — the fifth-time-lesson from `LensPatches.ReportInsert`, paying for itself again.
+
 `UXAssistCompat` repairs them by **transpiling UXAssist's own two methods**, swapping the
 call to the old signature for a shim in this assembly that reaches the widened API through
 a runtime-bound delegate — the same technique `CargoWidening` already uses for this mod's

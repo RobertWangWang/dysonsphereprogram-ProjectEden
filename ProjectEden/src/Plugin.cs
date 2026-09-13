@@ -22,6 +22,10 @@ namespace ProjectEden
     [CommonAPISubmoduleDependency(nameof(TabSystem))]
     [BepInDependency(GenesisBookCompat.MODGUID, BepInDependency.DependencyFlags.SoftDependency)]
     [BepInDependency(GalacticScaleCompat.MODGUID, BepInDependency.DependencyFlags.SoftDependency)]
+    // **软依赖在这里不是「可选的适配」，是加载顺序。** 没有它，BepInEx 可能先加载本 mod，
+    // 那时 Chainloader.PluginInfos 里还没有 UXAssist，兼容层会认定「没装」而整个跳过——
+    // 实测就是这样：日志里「UXAssist 没装」那一行紧接着就是「Loading [UXAssist]」。
+    [BepInDependency(UXAssistCompat.Guid, BepInDependency.DependencyFlags.SoftDependency)]
     public class ProjectEdenPlugin : BaseUnityPlugin, IModCanSave
     {
         public const string GUID    = "com.wangyu.projecteden";
