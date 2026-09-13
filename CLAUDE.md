@@ -2157,6 +2157,38 @@ needs[i] = served[i] < requireCounts[i] * num2 ? requires[i] : 0;
 
 So the real lever for belt-fed throughput is **looping the pick** (same idea as `RunExtraCycles`), not the batch count. Fixing `CalcNeedsBatch`-style overflow would be pure insurance against a future speed change.
 
+## Compatibility damage this mod causes, and how it is repaired
+
+**`CargoIncWidener` changes 33 method signatures, and every other mod compiled against
+vanilla still names the old ones.** That is not a hypothetical: measured across the nine
+plugins in this profile, **exactly two call sites break**, both in UXAssist —
+`BeltSignalsForBuyOut` → `CargoPath.TryInsertItem(int,int,byte,byte)` (传送带信号购买) and
+`ProtectVeinsFromExhaustion` → `PlanetFactory.InsertInto(int,int,int,byte,byte,out byte)`
+(矿脉保护). Both throw `MissingMethodException` the first time they execute. **They have
+been broken since the preloader shipped in 1.7.0** and nobody reported it, presumably
+because those paths run rarely.
+
+`UXAssistCompat` repairs them by **transpiling UXAssist's own two methods**, swapping the
+call to the old signature for a shim in this assembly that reaches the widened API through
+a runtime-bound delegate — the same technique `CargoWidening` already uses for this mod's
+own calls. Harmony's transpiler runs before JIT, so the broken MemberRef is never resolved.
+
+**The rejected alternative is worth recording: do NOT synthesize old-signature overloads in
+the game assembly.** It would fix every mod at once, and it creates a worse problem —
+an extra overload is an extra target for anything patching *by name*. This repo's own
+`MegaAssemblerPatches` uses `TargetMethods()` to take **every** `InsertInto` overload, so a
+forwarder would be transpiled too and the same logic would run twice; other mods' patching
+strategies are not knowable at all. (CLAUDE.md already records `AmbiguousMatchException`
+from name-based patching of overloads as a crash that takes the whole mod down.)
+
+**The measurement method matters here, because the first attempt got it wrong.** Comparing
+pre/post signatures by *name + parameter count* reports 1277 changes — almost all of them
+overload pairs like `VectorLF3::.ctor(Single,Single,Single)` vs `(Double,Double,Double)`
+masquerading as edits. Matching **by index within the type** (the widener never adds or
+removes methods) gives the true answer: 33. An earlier claim in this session that
+InstantDelivery was also broken came from that bad comparison and is **retracted** —
+InstantDelivery calls nothing that the widener touches.
+
 ## Third-party mod bugs worked around
 
 **GalacticScale 2 (2.78.8) can make a save look corrupted.** Its postfix on `GameDesc.Import` calls `GS2.Import(r, loadPath)`, which reads **two length-prefixed strings straight out of the game's save stream with no marker check**, parses the second as JSON, and on failure rewinds `BaseStream.Position` and loads the galaxy from the `.gs2` sidecar instead. That fallback is fine; the missing guard is not. When the save holds no GS2 block at that offset (the normal case here — the log says `DSV Contained No GS2 Data` on every load), `ReadString` interprets whatever bytes are there as a 7-bit-encoded length. Land on a plausible length and you get garbage, a failed parse and the healthy fallback; land on a huge one and it throws `EndOfStreamException` out through `GameSave.LoadCurrentGame`, and the save simply won't load. **Whether a given save opens is therefore luck, and it can flip between two saves of the same world.**

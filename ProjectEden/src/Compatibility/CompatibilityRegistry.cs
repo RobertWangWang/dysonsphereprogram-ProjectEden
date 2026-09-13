@@ -23,6 +23,7 @@ namespace ProjectEden.Compatibility
             GalacticScaleCompat.ApplyPatches(harmony);
             OreGalacticScaleCompat.ApplyPatches(harmony);
             OreVeinTipCompat.ApplyPatches(harmony);
+            UXAssistCompat.ApplyPatches(harmony);
         }
 
         /// <summary>按 GUID 判断某个插件是否已加载。</summary>
