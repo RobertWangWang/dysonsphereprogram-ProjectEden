@@ -54,6 +54,12 @@ namespace ProjectEden.Preloader
 
             /// <summary>通知汇里被跳过的方法数</summary>
             internal int SkippedParamMethods;
+
+            /// <summary>单个方法里最多有几个载荷参数位——决定侧信道要几个寄存器</summary>
+            internal int MaxParamSlots;
+
+            /// <summary>槽位最多的那个方法，报出来便于核对</summary>
+            internal string MaxParamSlotsAt = "-";
             internal int SaveStreams;
 
             /// <summary>按访问数排序的纯搬运方法，用来核对改写阶段的命中数</summary>
@@ -595,6 +601,16 @@ namespace ProjectEden.Preloader
             r.SkippedParamMethods = skipped;
             r.ParamMethods = sel.Count;
             r.ParamSlots = sel.Values.Sum(v => v.Count);
+
+            // 侧信道的寄存器数量由「单个方法最多几个载荷参数位」决定：
+            // 跨边界传递时每个槽位要一个独立寄存器，否则同一次调用里两个品质会互相覆盖。
+            foreach (KeyValuePair<MethodDefinition, List<int>> kv in sel)
+            {
+                if (kv.Value.Count <= r.MaxParamSlots) continue;
+
+                r.MaxParamSlots = kv.Value.Count;
+                r.MaxParamSlotsAt = kv.Key.FullName;
+            }
         }
 
         /// <summary>

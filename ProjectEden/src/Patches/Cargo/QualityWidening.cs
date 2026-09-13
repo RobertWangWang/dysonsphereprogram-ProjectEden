@@ -26,8 +26,20 @@ namespace ProjectEden.Patches
         internal static readonly bool FieldsPresent = Probe();
 
         /// <summary>
-        /// 搬运层是否已接线。<b>阶段 1a 恒为 false</b>，搬运层落地后改为按实际能力探测。
-        /// 留成独立的一条，是为了让日志能把「字段在但还没通水」和「字段都不在」分开。
+        /// 跨方法边界传递品质的<b>线程静态寄存器组</b>在不在（阶段 1b）。
+        ///
+        /// 它是 preloader 合成进 <c>Assembly-CSharp</c> 的一个类型，所以这里只能按名字反射探。
+        /// <b>和 <see cref="FieldsPresent"/> 分开探</b>：1a 和 1b 是两刀，各自可能单独失败，
+        /// 而「字段在、通道不在」和「两样都不在」需要不同的处理。
+        ///
+        /// 它<b>不改任何方法签名</b>——这正是它存在的理由，见 <c>物品品质.md</c>：
+        /// 前一版给 90 个方法加尾参，实测会打死 UXAssist 和 InstantDelivery。
+        /// </summary>
+        internal static readonly bool ChannelPresent = ProbeChannel();
+
+        /// <summary>
+        /// 搬运层是否已接线。<b>阶段 1a / 1b 恒为 false</b>，搬运层落地后改为按实际能力探测。
+        /// 留成独立的一条，是为了让日志能把「字段和通道都在但还没通水」和「什么都不在」分开。
         ///
         /// 写成 <c>static readonly</c> 而不是 <c>const</c>：后者会让编译器证明下面那条
         /// 分支不可达而报 CS0162，而本仓库是 0 警告构建。这里要的是一个<b>运行时</b>的值。
@@ -49,6 +61,24 @@ namespace ProjectEden.Patches
             }
         }
 
+        private static bool ProbeChannel()
+        {
+            try
+            {
+                Type t = AccessTools.TypeByName("ProjectEdenQualityChannel");
+
+                if (t == null) return false;
+
+                FieldInfo q0 = AccessTools.Field(t, "Q0");
+
+                return q0 != null && q0.IsStatic && q0.FieldType == typeof(int);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
 
         internal static void Report()
         {
@@ -65,8 +95,14 @@ namespace ProjectEden.Patches
             {
                 ProjectEdenPlugin.Log.LogInfo(
                     $"物品品质：孪生字段已就位（Cargo 现在 {CargoWidening.Stride} 字节），" +
-                    "但搬运层尚未接线，所以品质点数恒为 0——这是阶段 1a 的预期状态，不是故障。" +
+                    $"跨方法通道{(ChannelPresent ? "已合成" : "**没有**")}。" +
+                    "搬运层尚未接线，所以品质点数恒为 0——这是阶段 1a / 1b 的预期状态，不是故障。" +
                     "游戏行为与不装 preloader 时一致。");
+
+                if (!ChannelPresent)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        "物品品质：字段加上了但 ProjectEdenQualityChannel 不存在——" +
+                        "说明 preloader 的 1b 那一刀失败了，看它自己那几行 ERROR。");
 
                 return;
             }

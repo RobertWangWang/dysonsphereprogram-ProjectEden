@@ -80,9 +80,35 @@ namespace ProjectEden.Preloader
                 return;
             }
 
+            Log.LogWarning($"物品品质：已添加 {q.Added.Count} 个孪生字段（阶段 1a）。");
+
+            BuildQualityChannel(assembly);
+        }
+
+        /// <summary>
+        /// 物品品质 · 阶段 1b：合成线程静态寄存器组，让品质能跨方法边界传递而<b>不动任何签名</b>。
+        ///
+        /// 失败不影响游戏：没有寄存器，品质就只能停在各自的字段里，其余一切照常。
+        /// </summary>
+        private static void BuildQualityChannel(AssemblyDefinition assembly)
+        {
+            QualityChannelBuilder.Report c = QualityChannelBuilder.Apply(assembly.MainModule);
+
+            foreach (string n in c.Notes) Log.LogInfo(n);
+
+            if (!c.Applied)
+            {
+                Log.LogError($"物品品质：侧信道**未合成**，共 {c.Blockers.Count} 条阻塞项：");
+
+                foreach (string b in c.Blockers) Log.LogError("  " + b);
+
+                return;
+            }
+
             Log.LogWarning(
-                $"物品品质：已添加 {q.Added.Count} 个孪生字段（阶段 1a）。" +
-                "它们现在恒为 0，方法之间还传不了品质——搬运层改走线程静态侧信道，见 物品品质.md。");
+                $"物品品质：侧信道已就位（{c.Registers} 个线程静态寄存器）。" +
+                "字段和通道都有了，但还没有任何代码去写它们——品质恒为 0，" +
+                "游戏行为与不加时一致。让品质真的流动是 1c。");
         }
     }
 }

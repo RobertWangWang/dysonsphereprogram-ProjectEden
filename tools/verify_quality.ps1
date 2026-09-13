@@ -71,6 +71,7 @@ Write-Host ("  effect-only (untouched) : {0} methods" -f (Field $r "EffectOnlyMe
 Write-Host ("  display only (stage 4)  : {0} methods, {1} accesses" -f (Field $r "UiMethods"), (Field $r "UiAccesses"))
 Write-Host ("  twin-parameter seeds    : {0} methods, {1} slots" -f (Field $r "ParamMethods"), (Field $r "ParamSlots"))
 Write-Host ("  notify sink (skipped)   : {0} methods" -f (Field $r "SkippedParamMethods"))
+Write-Host ("  max slots in one method : {0}  ({1})" -f (Field $r "MaxParamSlots"), (Field $r "MaxParamSlotsAt"))
 Write-Host ("  save streams to branch  : {0}" -f (Field $r "SaveStreams"))
 
 if ($suspects.Count -gt 0) {
@@ -205,29 +206,89 @@ $asm3.Dispose()
 #
 #    Quality therefore carries across method boundaries WITHOUT touching signatures.
 #    If this check ever fails, that decision has been silently reversed.
-$origAsm = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($target, $rp2)
-$sigDiff = 0
-$sigShown = 0
-foreach ($t in $origAsm.MainModule.Types) {
-    $t2 = $mod3.GetType($t.FullName)
-    if ($t2 -eq $null) { continue }
-    foreach ($m in $t.Methods) {
-        $m2 = $t2.Methods | Where-Object { $_.Name -eq $m.Name -and $_.Parameters.Count -eq $m.Parameters.Count }
-        if ($m2 -eq $null) {
-            $sigDiff++
-            if ($sigShown -lt 5) { Write-Host ("        signature changed or missing: {0}::{1}" -f $t.FullName, $m.Name) -ForegroundColor Red; $sigShown++ }
+function SignatureDiff($origModule, $newModule) {
+    # Index the new module once per type; a Where-Object per method is O(n^2) and takes
+    # minutes over 25k methods.
+    $diff = New-Object System.Collections.Generic.List[string]
+    foreach ($t in $origModule.Types) {
+        $t2 = $newModule.GetType($t.FullName)
+        if ($t2 -eq $null) { continue }
+        $have = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($m2 in $t2.Methods) { [void]$have.Add($m2.Name + "/" + $m2.Parameters.Count) }
+        foreach ($m in $t.Methods) {
+            if (-not $have.Contains($m.Name + "/" + $m.Parameters.Count)) {
+                $diff.Add($t.FullName + "::" + $m.Name)
+            }
         }
     }
+    return $diff
 }
-Check ($sigDiff -eq 0) "no method signature differs from vanilla (mod compatibility preserved)"
+
+$origAsm = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($target, $rp2)
+$sigDiff = SignatureDiff $origAsm.MainModule $mod3
+foreach ($d in ($sigDiff | Select-Object -First 5)) { Write-Host ("        signature changed or missing: $d") -ForegroundColor Red }
+Check ($sigDiff.Count -eq 0) "no method signature differs from vanilla (mod compatibility preserved)"
 
 $origAsm.Dispose()
 $asm3.Dispose()
+
+# ============================================================================
+# Stage 1b: synthesize the thread-static register file used to carry quality
+# across method boundaries WITHOUT touching any signature.
+# ============================================================================
+
+Write-Host ""
+Write-Host "=== stage 1b: quality side channel ===" -ForegroundColor Cyan
+
+$out2 = Join-Path $work "Assembly-CSharp.quality1b.dll"
+$asm4 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out, $rp2)
+
+$chanT  = $pre.GetType("ProjectEden.Preloader.QualityChannelBuilder")
+$capply = $chanT.GetMethod("Apply", [Reflection.BindingFlags]"NonPublic,Static")
+$cr     = $capply.Invoke($null, @($asm4.MainModule))
+
+foreach ($n in (Field $cr "Notes")) { Write-Host "  note: $n" }
+
+$cBlock = Field $cr "Blockers"
+if ($cBlock.Count -gt 0) {
+    Write-Host "=== 1b BLOCKERS ($($cBlock.Count)) ===" -ForegroundColor Red
+    foreach ($b in $cBlock) { Write-Host "  $b" -ForegroundColor Red }
+    $asm4.Dispose()
+    exit 1
+}
+
+$asm4.Write($out2)
+$asm4.Dispose()
+Write-Host "  written: $out2"
+
+Write-Host ""
+Write-Host "=== 1b re-read assertions ===" -ForegroundColor Cyan
+$asm5 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out2, $rp2)
+$mod5 = $asm5.MainModule
+
+$cverify = $chanT.GetMethod("Verify", [Reflection.BindingFlags]"NonPublic,Static")
+$vr2     = $cverify.Invoke($null, @($mod5))
+foreach ($b in (Field $vr2 "Blockers")) { Check $false $b }
+Check ((Field $vr2 "Blockers").Count -eq 0) `
+    ("side channel has $(Field $vr2 'Registers') thread-static Int32 registers after write/re-read")
+
+# 1a's fields must survive 1b
+$vr3 = $verify.Invoke($null, @($mod5))
+Check ((Field $vr3 "Blockers").Count -eq 0) "1a twin fields still intact after 1b"
+
+# and the compatibility invariant must STILL hold - adding a type must change no signature
+$origAsm2 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($target, $rp2)
+$sigDiff2 = SignatureDiff $origAsm2.MainModule $mod5
+foreach ($d in ($sigDiff2 | Select-Object -First 5)) { Write-Host ("        signature changed or missing: $d") -ForegroundColor Red }
+Check ($sigDiff2.Count -eq 0) "still no signature differs from vanilla after 1b"
+
+$origAsm2.Dispose()
+$asm5.Dispose()
 
 Write-Host ""
 if ($fail -gt 0) {
     Write-Host "$fail assertion(s) FAILED" -ForegroundColor Red
     exit 1
 }
-Write-Host "stage 1a OK - fields added, signatures untouched, assembly re-read clean" -ForegroundColor Green
+Write-Host "stages 1a + 1b OK - fields, side channel, signatures untouched" -ForegroundColor Green
 exit 0
