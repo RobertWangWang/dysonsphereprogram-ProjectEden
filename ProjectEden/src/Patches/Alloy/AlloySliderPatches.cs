@@ -616,7 +616,8 @@ namespace ProjectEden.Patches
             _resultText.color = new Color(0.92f, 0.86f, 0.70f);
         }
 
-        private static bool _refineClickLatch;
+        /// <summary>按下的那一下是不是落在选料行上。<b>抬起</b>时才真正开窗，理由见下。</summary>
+        private static bool _refineArmed;
 
         /// <summary>点开选择器的那一刻是哪台建筑——回调里拿不到别的上下文。</summary>
         private static PlanetFactory _refineFactory;
@@ -635,25 +636,45 @@ namespace ProjectEden.Patches
         /// 意味着把命中测试、滚动、提示、翻页重写一遍，且只服务这一个面板。
         /// <see cref="ItemPickerSearchPatches.Restrict"/> 把它限定成一张短名单，
         /// 这一行就成了真正的下拉框。
+        ///
+        /// <b>必须在鼠标<i>抬起</i>时开窗，不能在按下那一帧开。</b> 这是本次最后一个
+        /// 「点了没反应」的真正病因，而它在原版自己的代码里写得明明白白——
+        /// <c>UIItemPicker._OnUpdate</c> 末尾（IL 01CF~0221）是：
+        ///
+        /// <code>
+        /// if (Input.GetKeyDown(Mouse0) || GetKeyDown(Mouse1) || GetKeyDown(Mouse2))
+        ///     if (!RectTransformUtility.RectangleContainsScreenPoint(pickerTrans, mousePos, cam))
+        ///         _Close();
+        /// </code>
+        ///
+        /// <c>GetKeyDown</c> 在<b>按下的整整一帧</b>里都为真。我们在那一帧把窗口打开，
+        /// 而鼠标此刻在面板这一行上、不在选择器矩形内——于是它开起来之后，
+        /// 同一帧稍后就被原版这段「点窗外即关闭」关掉了。
+        ///
+        /// <b>日志说它「已打开」并不矛盾</b>：那一行是紧接着 <c>Popup</c> 打的，
+        /// 比选择器自己的 <c>_OnUpdate</c> 早。**测到的是开窗那一瞬，不是这一帧的终态。**
+        ///
+        /// 抬起时 <c>GetKeyDown</c> 为假，这段判断根本不进——而且「按下与抬起都落在同一个
+        /// 控件上才算一次点击」本来就是按钮该有的语义。
         /// </summary>
         private static void HandleRefineInput(PlanetFactory factory, int entityId,
             QualityRefineryRegistry.Tier tier, int[] state)
         {
-            if (!Input.GetMouseButton(0))
-            {
-                _refineClickLatch = false;
+            // 按下那一下落在这一行上就先记着，此刻什么都不做
+            if (Input.GetMouseButtonDown(0)) _refineArmed = InRow(0, out Vector2 _);
 
-                return;
-            }
+            if (!Input.GetMouseButtonUp(0)) return;
 
-            if (_refineClickLatch) return;
+            bool armed = _refineArmed;
+
+            _refineArmed = false;
+
+            if (!armed || !InRow(0, out Vector2 _)) return;
 
             List<QualityRefineryRegistry.Feed> pool = QualityRefineryRegistry.Feeds;
 
-            if (pool.Count < 1 || !InRow(0, out Vector2 _)) return;
+            if (pool.Count < 1) return;
             if (UIItemPicker.isOpened) return;
-
-            _refineClickLatch = true;
 
             _refineFactory = factory;
             _refineEntity = entityId;
@@ -665,20 +686,12 @@ namespace ProjectEden.Patches
 
             ItemPickerSearchPatches.Restrict(ids, "只能选可提纯的金属");
 
-            // **位置交给 Popup 自己，不再挪。**
+            // 传 (0, 0) 只是先把它开出来，位置随后由 PlacePicker 用世界坐标摆正。
             //
-            // 第一版挪过，结果是「点了没反应、没出现列表」——它其实开了，只是被挪到了屏幕外。
-            // 原因是 `GetWorldCorners` 返回的是<b>世界坐标</b>，而这个 UI canvas 是
-            // Screen Space - Camera（本仓库早就记着 `UIRoot.ScreenPointIntoRect` 走的是
-            // `overlayCanvas.worldCamera`，那说明 worldCamera 非空），所以那几个数是 ±8 量级的世界单位，
-            // 拿去和 `Screen.width`（1920）比，一次修正就把窗口推出一千多个世界单位。
-            //
-            // 这正是本仓库记过的坑：**屏幕坐标和世界坐标长得一样，都是两个 float。**
-            //
-            // 但「干脆不挪」也是错的，日志证明了：窗口确实开了（锚定位置 (0, 0)），
-            // 屏幕上还是没有——(0, 0) 是<b>父级的锚点原点</b>，不是屏幕中心，
-            // 锚点在哪由 prefab 说了算，离线读不到。原版每个调用方都自己算位置，
-            // 这本身就是「默认值不可用」的证据。
+            // **别把 (0, 0) 当成「默认位置」**：实测它是<b>父级的锚点原点</b>，
+            // 而这个选择器的锚点是 (0.5, 0.5)、pivot 是 (0, 1)，于是窗口从父级正中心
+            // 往右下伸出去——离面板十万八千里。原版每个调用方都自己算位置，
+            // 这本身就是「没有可用默认值」的证据。
             UIItemPicker.Popup(Vector2.zero, OnRefinePicked);
 
             // **没开起来就当场把白名单撤掉。** `Popup` 在 UIRoot 还没就绪或窗口已激活时
@@ -798,7 +811,10 @@ namespace ProjectEden.Patches
                 $"  {inParent}\n" +
                 $"  这一行在世界坐标 {Rows[0].Track.position}；" +
                 $"选择器 activeInHierarchy={p.gameObject.activeInHierarchy}，" +
-                $"排第 {p.GetSiblingIndex() + 1}/{(parent != null ? parent.childCount : 0)} 个子物体。");
+                $"排第 {p.GetSiblingIndex() + 1}/{(parent != null ? parent.childCount : 0)} 个子物体。\n" +
+                $"  （注意：这一行打在 Popup 之后、选择器自己的 _OnUpdate 之前，" +
+                $"测的是**开窗那一瞬**而不是这一帧的终态——上一轮就是靠这个差别才没看出" +
+                $"它被原版的「点窗外即关闭」当场关掉了。）");
         }
 
         /// <summary>
