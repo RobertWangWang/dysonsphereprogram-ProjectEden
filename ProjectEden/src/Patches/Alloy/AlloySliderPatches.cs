@@ -75,12 +75,13 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(UIAssemblerWindow), "_OnUpdate")]
         private static void UIAssemblerWindow_OnUpdate(UIAssemblerWindow __instance)
         {
-            // 七种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
+            // 八种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
             // 只判 AlloyRatioPatches.Count 的话，关掉 alloys.json 会连带让
-            // 弹药、复合材、增产剂和燃烧厂的面板一起消失——那是几个不相干的功能。
+            // 弹药、复合材、增产剂、燃烧厂和提纯厂的面板一起消失——那是几个不相干的功能。
             if (__instance?.factory == null
                 || (AlloyRatioPatches.Count == 0 && !AmmoRegistry.Ready && !CompositeRegistry.Ready
-                    && !ProliferatorPatches.Ready && !CatalystBedPatches.Ready && !RedoxRegistry.Ready))
+                    && !ProliferatorPatches.Ready && !CatalystBedPatches.Ready && !RedoxRegistry.Ready
+                    && !QualityRefineryRegistry.Ready))
             {
                 Hide();
 
@@ -185,6 +186,30 @@ namespace ProjectEden.Patches
                     redox = nowRedox;
 
                 RefreshRedox(__instance.factory, entityId, redox);
+
+                return;
+            }
+
+            // 同位提纯：第八种模式，也是**唯一一种候选项不是配置列出来而是推导出来的**——
+            // 选料行里那串金属是运行时从矿脉原型和原版配方推出来的（QualityRefineryRegistry），
+            // 三级提纯共用同一串。面板形状和烧结析出一样：一行选择器。
+            if (QualityRefinerySelectPatches.Current(__instance.factory, entityId,
+                    out QualityRefineryRegistry.Tier tier, out int[] refine))
+            {
+                if (!EnsurePanel(__instance)) return;
+
+                _panel.SetActive(true);
+
+                HandleRefineInput(__instance.factory, entityId, tier, refine);
+
+                if (QualityRefinerySelectPatches.Current(__instance.factory, entityId,
+                        out QualityRefineryRegistry.Tier nowTier, out int[] nowRefine))
+                {
+                    tier = nowTier;
+                    refine = nowRefine;
+                }
+
+                RefreshRefine(tier, refine);
 
                 return;
             }
@@ -587,6 +612,88 @@ namespace ProjectEden.Patches
                 $"{(grade != null ? grade.name : "?")} ×{pick.Entry.input}"
                 + $"  →  {(target != null ? target.name : "?")} ×{pick.Entry.count}"
                 + $"   {pick.Entry.timeSpend / 60f:0.##}s";
+
+            _resultText.color = new Color(0.92f, 0.86f, 0.70f);
+        }
+
+        private static bool _refineClickLatch;
+
+        /// <summary>同位提纯的输入：一行选择器，点左右半边换金属。</summary>
+        private static void HandleRefineInput(PlanetFactory factory, int entityId,
+            QualityRefineryRegistry.Tier tier, int[] state)
+        {
+            if (!Input.GetMouseButton(0))
+            {
+                _refineClickLatch = false;
+
+                return;
+            }
+
+            if (_refineClickLatch) return;
+
+            List<QualityRefineryRegistry.Feed> pool = QualityRefineryRegistry.Feeds;
+
+            if (pool.Count < 2 || !InRow(0, out Vector2 hit)) return;
+
+            _refineClickLatch = true;
+
+            Rect rect = Rows[0].Track.rect;
+            int step = hit.x < rect.center.x ? -1 : 1;
+
+            int at = QualityRefineryRegistry.IndexOfFeed(state[0]);
+
+            var next = new[] { pool[((at + step) % pool.Count + pool.Count) % pool.Count].ItemId };
+
+            if (!QualityRefinerySelectPatches.Apply(factory, entityId, next)) return;
+
+            AlloyRatioStore.SetPlayerDefault(tier.RecipeId, next);
+        }
+
+        /// <summary>
+        /// 同位提纯的一行：选哪种金属。<b>进出是同一种物品，差别只在品质</b>，
+        /// 所以结果行必须把品质那个数写出来——不写的话面板上是
+        /// 「铜块 ×100 → 铜块 ×80」，看起来像一条纯亏料的废配方。
+        ///
+        /// 而品质没有别的地方能看：它是<b>容器</b>的属性，物品 tip 里放不下
+        /// （那里只有原型），提纯厂自己那 30 个储物格对玩家也是不可见的
+        /// （MegaStationWindowPatches 把 stationId 报成 0 让配方窗口顶上来）。
+        /// </summary>
+        private static void RefreshRefine(QualityRefineryRegistry.Tier tier, int[] state)
+        {
+            _titleText.text = "同位提纯　选料与产出".Translate();
+
+            _panelTrs.sizeDelta = new Vector2(0f, HeadHeight + RowHeight + FootHeight);
+
+            for (var i = 0; i < MaxRows; i++)
+            {
+                var on = i == 0;
+
+                if (Rows[i].Root.activeSelf != on) Rows[i].Root.SetActive(on);
+            }
+
+            Rows[0].Root.transform.localPosition = new Vector3(0f, -HeadHeight, 0f);
+
+            QualityRefineryRegistry.Feed feed = QualityRefineryRegistry.FindFeed(state[0]);
+
+            PickerRow(Rows[0], "提纯金属".Translate(), feed?.Name);
+
+            _resultText.rectTransform.anchoredPosition =
+                new Vector2(SidePad, -(HeadHeight + RowHeight + 4f));
+
+            if (feed == null)
+            {
+                // 配方原型上那一种没进候选表时会走到这里。
+                // 报出来，别让它和「面板没画」长得一样。
+                _resultText.text = "配料未就绪".Translate();
+                _resultText.color = new Color(0.95f, 0.55f, 0.45f);
+
+                return;
+            }
+
+            _resultText.text = string.Format(
+                "{0} ×{1}  →  {0} ×{2}　品质 {3}/件　{4:0.##}s".Translate(),
+                feed.Name, tier.InputUnits, QualityRefineryRegistry.OutputOf(tier),
+                tier.Quality, tier.TimeSpend / 60f);
 
             _resultText.color = new Color(0.92f, 0.86f, 0.70f);
         }

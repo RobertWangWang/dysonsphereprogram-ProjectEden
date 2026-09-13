@@ -1,6 +1,4 @@
-using System.Collections.Generic;
 using System.Threading;
-using ProjectEden.Utils;
 
 namespace ProjectEden.Patches
 {
@@ -22,9 +20,6 @@ namespace ProjectEden.Patches
     /// </summary>
     internal static class QualityRefineryPatches
     {
-        /// <summary>配方 ID → 产物每件多少品质分。只有提纯配方在里面。</summary>
-        private static Dictionary<int, int> _byRecipe;
-
         private static int _reported;
 
         /// <summary>
@@ -43,9 +38,14 @@ namespace ProjectEden.Patches
         {
             if (units <= 0 || !QualityAccess.Ready) return;
 
-            Dictionary<int, int> map = _byRecipe;
+            // 三级提纯，线性扫三条比字典查一次还便宜，而且不分配。
+            QualityRefineryRegistry.Tier tier = QualityRefineryRegistry.FindTier(recipeId);
 
-            if (map == null || !map.TryGetValue(recipeId, out int perItem) || perItem <= 0) return;
+            if (tier == null) return;
+
+            int perItem = tier.Quality;
+
+            if (perItem <= 0) return;
 
             int had = QualityAccess.GetStationQua(ref store);
             int add = units * perItem;
@@ -64,75 +64,12 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// 按<b>配方名</b>去 LDB 把实际 ID 读回来。名字是 LDBTool 记 ID 的键，
-        /// 所以它比配置里写的 ID 更接近运行时的事实。
-        /// </summary>
-        private static int ResolveId(OreRecipeEntry r)
-        {
-            RecipeProto[] all = LDB.recipes?.dataArray;
-
-            if (all == null || string.IsNullOrEmpty(r.name)) return 0;
-
-            foreach (RecipeProto p in all)
-                if (p != null && p.Name == r.name)
-                    return p.ID;
-
-            return 0;
-        }
-
-        /// <summary>
         /// 建表。<b>在 PostAddData 之后调</b>，那时配方 ID 已经被 LDBTool 敲定。
         ///
-        /// 状态行三种情况都打：没有提纯配方、字段不在、建好了各多少条——
-        /// 只在成功时打日志会让「没配」和「没装」长得一模一样。
+        /// 表本身住在 <see cref="QualityRefineryRegistry"/> 里——注入要的
+        /// 「这条配方每件多少分」和面板要的「这一级能吃哪些矿」是同一张表的两面，
+        /// 分两处建会让它们有机会不一致。状态行也在那边一并打。
         /// </summary>
-        internal static void Build()
-        {
-            if (OreRegistry.Config?.recipes == null)
-            {
-                ProjectEdenPlugin.Log.LogInfo("物品品质：ores.json 没读到，提纯注入表为空。");
-
-                return;
-            }
-
-            var map = new Dictionary<int, int>();
-            var missing = 0;
-
-            foreach (OreRecipeEntry r in OreRegistry.Config.recipes)
-            {
-                if (r == null || !r.enabled || r.quality <= 0) continue;
-
-                // **按名字去 LDB 把实际 ID 读回来，不用配置里写的那个。**
-                // LDBTool 的 CustomID.cfg 按显示名记 ID，并在后面的每次启动把记下的值
-                // 写回原型——所以配置里那个数在这台机器上可能早就不是它了。
-                // 查表用的是 component.recipeId，那是**运行时**的 ID，对不上就一条都注入不了,
-                // 而且不会报错：品质恒为 0，看起来像提纯没生效。
-                int id = ResolveId(r);
-
-                if (id <= 0) { missing++; continue; }
-
-                map[id] = r.quality > MaxPerItem ? MaxPerItem : r.quality;
-            }
-
-            if (missing > 0)
-                ProjectEdenPlugin.Log.LogError(
-                    $"物品品质：有 {missing} 条提纯配方在 LDB 里按名字找不到，" +
-                    "它们产出的东西不会带品质。改过配方名的话，LDBTool 那两个 cfg 里的旧条目要删。");
-
-            _byRecipe = map;
-
-            if (map.Count == 0)
-            {
-                ProjectEdenPlugin.Log.LogWarning(
-                    "物品品质：**一条提纯配方都没有**——品质将永远是 0。" +
-                    "检查 ores.json 里那几条配方的 quality 字段。");
-
-                return;
-            }
-
-            ProjectEdenPlugin.Log.LogInfo(
-                $"物品品质：提纯注入表已建，{map.Count} 条配方会产出带品质的产物" +
-                $"（单件上限 {MaxPerItem} 分）。");
-        }
+        internal static void Build() => QualityRefineryRegistry.Build();
     }
 }

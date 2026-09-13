@@ -418,6 +418,21 @@ namespace ProjectEden.Utils
         /// </summary>
         public int quality;
 
+        /// <summary>
+        /// 提纯配方的<b>收率</b>，0~1，相对<b>原版换算</b>而不是相对矿数。
+        ///
+        /// 提纯是万用模板：吃什么矿由每台建筑自己选，产物推导出来
+        /// （见 <c>QualityRefineryRegistry</c>），所以「一炉出几件」不能写死在配置里，
+        /// 只能写一个比例，由运行时按那种矿在原版里的换算比算出来。
+        ///
+        /// <b>为什么是相对原版而不是相对矿数。</b> 写成相对矿数会在 2 进 1 出的矿上失真：
+        /// 硅石原版就是 2 换 1，「100 矿出 40 块」看着像 40% 收率，实际是原版的 80%——
+        /// 于是第二级和第一级一样慷慨，品质阶梯断在这里，而配置上看不出来。
+        ///
+        /// 只有提纯配方（<c>quality</c> &gt; 0）读这个字段。
+        /// </summary>
+        public double yield;
+
         public RecipeItemEntry[] items;
         public RecipeItemEntry[] results;
     }

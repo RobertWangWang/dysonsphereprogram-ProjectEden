@@ -2062,6 +2062,140 @@ def refinery_plant():
     return d
 
 
+def electrorefining():
+    """铜块 · 电解精燃：**一槽电解液，粗锭在左边溶掉、精锭在右边长出来**。
+
+    三张提纯图标要在 80px 下彼此分得开，所以识别点各占一样东西：
+    这一张是<b>那槽青蓝色的液体</b>（整套图标里只有它和电解液本身是这个颜色）,
+    区域熔炼是<b>一道横亮带</b>，羰基提纯是<b>一缕上升的气</b>。
+
+    左边那块画成缺了口的粗坯、右边画成完整的板，方向就说清楚了：
+    金属从一头被搬到另一头，杂质留在原地。收率两成的损耗就是留下的那些。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6659)
+    liquid = _pal("#39b6d8")
+
+    # 槽体
+    d.append(dw.Lines(-38, -6, 38, -6, 32, 30, -32, 30, close=True,
+                      fill=dark[1], stroke=dark[3], stroke_width=1.6, stroke_linejoin="round"))
+    # 液面
+    d.append(dw.Lines(-38, -6, 38, -6, 34, 4, -34, 4, close=True,
+                      fill=liquid[0], stroke=dark[3], stroke_width=1.3))
+    d.append(dw.Lines(-34, 4, 34, 4, 32, 30, -32, 30, close=True,
+                      fill=liquid[1], stroke=dark[3], stroke_width=1.3))
+
+    # 左：正在溶掉的粗阳极，边上啃出两个缺口
+    d.append(dw.Lines(-24, -26, -12, -26, -12, 20, -16, 14, -19, 22, -24, 12,
+                      close=True, fill=dark[0], stroke=dark[3], stroke_width=1.4,
+                      stroke_linejoin="round"))
+
+    # 右：长出来的阴极板，规规矩矩一整片
+    d.append(dw.Rectangle(11, -26, 13, 48, fill=p[0], stroke=dark[3], stroke_width=1.4))
+    d.append(dw.Rectangle(13.5, -22, 3.4, 40, fill="#ffffff", fill_opacity=0.42))
+
+    # 中间的电流：一支箭，说明方向
+    d.append(dw.Lines(-7, -13, 5, -13, 5, -17, 10, -11, 5, -5, 5, -9, -7, -9,
+                      close=True, fill="#ffd97a", stroke=dark[3], stroke_width=1.1,
+                      stroke_linejoin="round"))
+
+    return d
+
+
+def zone_melting():
+    """高纯硅块 · 区域熔炼：**一根锭，腰上一圈发亮的熔区，尾巴是攒满杂质的那一截**。
+
+    识别点是那道横亮带——整套图标里没有第二个会发光的横带，和提纯厂建筑图标上
+    那圈熔区是同一个画面（图标与建模对得上，是本仓库的规矩）。
+
+    右端画成灰暗的一截并用一道切口分开：区域熔炼的收率不是「烧掉了」,
+    是**切掉了**，切掉的正是杂质被赶去的那一头。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6659)
+
+    # **正视，不等距。** 这一张的全部信息在「一根条 + 一道亮带 + 一截暗尾」的
+    # 横向排布上，等距投影会让亮带斜过去、和线圈叠成一堆划痕——试过，80px 下读不出来。
+    top, y, h = -13, -13, 26
+
+    # 锭身
+    d.append(dw.Rectangle(-38, y, 68, h, fill=p[1], stroke=dark[3], stroke_width=1.6))
+    d.append(dw.Rectangle(-38, y, 68, 7, fill=p[0], stroke="none"))
+
+    # 尾巴：杂质全被赶到这一截，明显更暗；它要被锯掉，收率就是这么丢的
+    d.append(dw.Rectangle(18, y, 12, h, fill=dark[0], stroke=dark[3], stroke_width=1.6))
+
+    # 锯缝
+    d.append(dw.Lines(18, y - 6, 18, y + h + 6, fill="none", stroke="#1a1c22",
+                      stroke_width=2.4, stroke_dasharray="4 3"))
+
+    # 熔区：那道亮带。整套图标里唯一会发光的横带，也是提纯厂建模上那一圈
+    d.append(dw.Rectangle(-9, y - 4, 15, h + 8, fill="#ffc061", stroke=dark[3], stroke_width=1.4))
+    d.append(dw.Rectangle(-5.5, y - 4, 4.5, h + 8, fill="#fff0c8", stroke="none"))
+
+    # 感应线圈：夹在熔区上下的两道，横平竖直，不和亮带交叉
+    for cy in (y - 9.5, y + h + 9.5):
+        d.append(dw.Lines(-15, cy, 30, cy, fill="none", stroke="#d8dde6",
+                          stroke_width=5.0, stroke_linecap="round"))
+        d.append(dw.Lines(-15, cy, 30, cy, fill="none", stroke=dark[3],
+                          stroke_width=1.2, stroke_opacity=0.6, stroke_linecap="round"))
+
+    # 熔区往右移动的方向
+    d.append(dw.Lines(3, y + h + 18, 13, y + h + 18, 13, y + h + 15, 19, y + h + 20,
+                      13, y + h + 25, 13, y + h + 22, 3, y + h + 22, close=True,
+                      fill="#ffd97a", stroke=dark[3], stroke_width=1.1, stroke_linejoin="round"))
+
+    return d
+
+
+def carbonyl_refining():
+    """铁块 · 羰基提纯：**一只曲颈瓶，气把金属牵上去，纯粉落下来**。
+
+    识别点是那缕上升的气流和瓶子的曲颈——另外两张一个是液槽一个是横锭,
+    三张在 80px 缩图下不会互相认错。
+
+    画的是<b>气相搬运</b>这件事本身：只有被 CO 牵得动的那一部分上得去,
+    别的留在瓶底。收率只有一成半，画面上就是瓶底剩得比落下来的多。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6659)
+    gas = _pal("#8ad7b4")
+
+    # 瓶身
+    d.append(dw.Lines(-34, -2, -8, -2, -8, 20, -14, 30, -28, 30, -34, 20,
+                      close=True, fill=dark[1], stroke=dark[3], stroke_width=1.6,
+                      stroke_linejoin="round"))
+    # 瓶底剩下的粗料
+    d.append(dw.Lines(-32, 16, -10, 16, -14, 28, -28, 28, close=True,
+                      fill=dark[0], stroke=dark[3], stroke_width=1.2, stroke_linejoin="round"))
+    # 曲颈：从瓶肩斜着往右上
+    d.append(dw.Lines(-21, -2, 6, -26, fill="none", stroke=dark[3], stroke_width=9.5,
+                      stroke_linecap="round"))
+    d.append(dw.Lines(-21, -2, 6, -26, fill="none", stroke=gas[1], stroke_width=6.2,
+                      stroke_linecap="round"))
+
+    # 气里的 CO：三个小分子，顺着颈往上走
+    for x, y, r in ((-15, -8, 2.6), (-7, -15, 2.3), (1, -21, 2.0)):
+        d.append(dw.Circle(x, y, r, fill="#f2fbf6", stroke=dark[3], stroke_width=1.0))
+        d.append(dw.Circle(x + r * 1.5, y - r * 0.5, r * 0.72, fill="#c9483f",
+                           stroke=dark[3], stroke_width=0.9))
+
+    # 右边：分解落下来的纯铁粉，堆成一小撮
+    d.append(dw.Lines(8, -24, 20, -24, 24, 18, 12, 18, close=True,
+                      fill=gas[1], fill_opacity=0.3, stroke="none"))
+
+    for x, y, r in ((14, -6, 1.9), (19, -1, 1.7), (13, 4, 1.6), (20, 8, 1.8), (15, 12, 1.5)):
+        d.append(dw.Circle(x, y, r, fill=p[0], stroke=dark[3], stroke_width=0.9))
+
+    d.append(dw.Lines(6, 22, 28, 22, 24, 30, 10, 30, close=True,
+                      fill=p[1], stroke=dark[3], stroke_width=1.4, stroke_linejoin="round"))
+
+    return d
+
+
 def electrolyte():
     """电解液：**一槽深蓝溶液，两片电极插在里面**。
 
@@ -2765,6 +2899,12 @@ if __name__ == "__main__":
 
     # 提纯线的耗材
     render(electrolyte(), "electrolyte")
+
+    # 三级提纯配方。进料和产物是同一种金属，所以图标画的是**工艺**不是产物——
+    # 三张各占一个识别点：青蓝液槽 / 横亮带 / 上升的气
+    render(electrorefining(), "electrorefining")
+    render(zone_melting(), "zone-melting")
+    render(carbonyl_refining(), "carbonyl-refining")
 
     # 三档药柱：氧化还原燃烧厂压出来的燃料
     render(bipropellant(), "bipropellant")

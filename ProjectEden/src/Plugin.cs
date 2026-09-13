@@ -511,6 +511,7 @@ namespace ProjectEden
             CompositeOutputPatches.ReapplyAll();
             ProliferatorPatches.ReapplyAll();
             RedoxBurnerPatches.ReapplyAll();
+            QualityRefinerySelectPatches.ReapplyAll();
         }
 
         public void IntoOtherSave()

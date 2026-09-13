@@ -53,6 +53,7 @@ namespace ProjectEden.Patches
         // 必须成对搬运：只搬数量不搬点数的话，源头剩下的货会顶着整堆的点数
         // （等于凭空造增产剂），而收货方拿到的是没喷过的货。
         [ThreadStatic] private static Dictionary<int, long> _poolInc, _availInc, _takenInc;
+        [ThreadStatic] private static Dictionary<int, long> _poolQua, _availQua, _takenQua;
 
         /// <summary>入库：物品 → 巨型建筑合计还缺多少。</summary>
         private static Dictionary<int, long> Need => _need ?? (_need = new Dictionary<int, long>());
@@ -74,6 +75,27 @@ namespace ProjectEden.Patches
 
         /// <summary>出库：物品 → 别的站收下的货带走了多少增产点数。</summary>
         private static Dictionary<int, long> TakenInc => _takenInc ?? (_takenInc = new Dictionary<int, long>());
+
+        // 品质和增产点数是**同一种量**：都存在整格上、都按件数可加可分。
+        // 所以它走的是一模一样的三只池子，只是换一个孪生字段。
+        //
+        // **不跟着搬的话，提纯这条线整个是白做的**：提纯厂把品质注进自己的 Supply 格，
+        // 而这个虚拟物流正是那批货离开建筑的主要途径——只搬件数不搬品质，
+        // 下游收到的是一堆 0 分的金属，源头那一格反倒因为件数变少而单件分数虚高。
+        // 原版的运输机路径不用管，1c 的孪生改写已经把 StationStore.qua 一起搬了；
+        // 要补的只有本仓库自己手写的这几条搬运。
+
+        /// <summary>入库：物品 → 这一轮取到的货带着多少品质点数。</summary>
+        private static Dictionary<int, long> PoolQua => _poolQua ?? (_poolQua = new Dictionary<int, long>());
+
+        /// <summary>出库：物品 → 巨型建筑可出的货带着多少品质点数。</summary>
+        private static Dictionary<int, long> AvailQua => _availQua ?? (_availQua = new Dictionary<int, long>());
+
+        /// <summary>出库：物品 → 别的站收下的货带走了多少品质点数。</summary>
+        private static Dictionary<int, long> TakenQua => _takenQua ?? (_takenQua = new Dictionary<int, long>());
+
+        /// <summary>孪生字段不在（没装 preloader）时整套品质搬运静默跳过，不影响增产点数那一半。</summary>
+        private static bool Qua => QualityAccess.Ready;
 
         /// <summary>
         /// 从池子里按比例切走 <paramref name="moved"/> 个物品对应的增产点数。
@@ -159,6 +181,7 @@ namespace ProjectEden.Patches
 
             Pool.Clear();
             PoolInc.Clear();
+            PoolQua.Clear();
 
             var got = false;
 
@@ -180,6 +203,7 @@ namespace ProjectEden.Patches
 
                         if (itemId <= 0 || count <= 0) continue;
                         if (!Need.TryGetValue(itemId, out long need) || need <= 0) continue;
+                        if (DemandsItself(station, itemId)) continue;
 
                         long take = count < need ? count : need;
 
@@ -188,12 +212,26 @@ namespace ProjectEden.Patches
 
                         if (incTake > station.storage[s].inc) incTake = station.storage[s].inc;
 
+                        long quaTake = 0;
+
+                        if (Qua)
+                        {
+                            long have = QualityAccess.GetStationQua(ref station.storage[s]);
+
+                            quaTake = have * take / count;
+
+                            if (quaTake > have) quaTake = have;
+
+                            QualityAccess.SetStationQua(ref station.storage[s], (int)(have - quaTake));
+                        }
+
                         station.storage[s].count -= (int)take;
                         station.storage[s].inc -= (int)incTake;
 
                         Need[itemId] = need - take;
                         Add(Pool, itemId, take);
                         Add(PoolInc, itemId, incTake);
+                        Add(PoolQua, itemId, quaTake);
 
                         got = true;
                     }
@@ -227,9 +265,14 @@ namespace ProjectEden.Patches
 
                         long give = available < want ? available : want;
                         long incGive = SplitInc(PoolInc, itemId, give, available);
+                        long quaGive = SplitInc(PoolQua, itemId, give, available);
 
                         station.storage[s].count += (int)give;
                         station.storage[s].inc += (int)incGive;
+
+                        if (Qua && quaGive > 0)
+                            QualityAccess.SetStationQua(ref station.storage[s],
+                                (int)(QualityAccess.GetStationQua(ref station.storage[s]) + quaGive));
 
                         Pool[itemId] = available - give;
                     }
@@ -245,6 +288,7 @@ namespace ProjectEden.Patches
         {
             Avail.Clear();
             AvailInc.Clear();
+            AvailQua.Clear();
 
             var any = false;
 
@@ -269,6 +313,8 @@ namespace ProjectEden.Patches
                         Add(Avail, itemId, count);
                         Add(AvailInc, itemId, station.storage[s].inc);
 
+                        if (Qua) Add(AvailQua, itemId, QualityAccess.GetStationQua(ref station.storage[s]));
+
                         any = true;
                     }
                 }
@@ -278,6 +324,7 @@ namespace ProjectEden.Patches
 
             Taken.Clear();
             TakenInc.Clear();
+            TakenQua.Clear();
 
             var moved = false;
 
@@ -306,13 +353,19 @@ namespace ProjectEden.Patches
 
                         long give = available < room ? available : room;
                         long incGive = SplitInc(AvailInc, itemId, give, available);
+                        long quaGive = SplitInc(AvailQua, itemId, give, available);
 
                         station.storage[s].count += (int)give;
                         station.storage[s].inc += (int)incGive;
 
+                        if (Qua && quaGive > 0)
+                            QualityAccess.SetStationQua(ref station.storage[s],
+                                (int)(QualityAccess.GetStationQua(ref station.storage[s]) + quaGive));
+
                         Avail[itemId] = available - give;
                         Add(Taken, itemId, give);
                         Add(TakenInc, itemId, incGive);
+                        Add(TakenQua, itemId, quaGive);
 
                         moved = true;
                     }
@@ -345,8 +398,18 @@ namespace ProjectEden.Patches
                         // 按**欠账**的比例扣，而不是按这一格自己的喷涂率——
                         // 这样「对方收下的点数」和「源头扣掉的点数」严格相等，账不会漂
                         long incPay = SplitInc(TakenInc, itemId, pay, owed);
+                        long quaPay = SplitInc(TakenQua, itemId, pay, owed);
 
                         if (incPay > station.storage[s].inc) incPay = station.storage[s].inc;
+
+                        if (Qua && quaPay > 0)
+                        {
+                            long have = QualityAccess.GetStationQua(ref station.storage[s]);
+
+                            if (quaPay > have) quaPay = have;
+
+                            QualityAccess.SetStationQua(ref station.storage[s], (int)(have - quaPay));
+                        }
 
                         station.storage[s].count -= (int)pay;
                         station.storage[s].inc -= (int)incPay;
@@ -360,6 +423,32 @@ namespace ProjectEden.Patches
         }
 
         // ── 小工具 ────────────────────────────────────────────
+
+        /// <summary>
+        /// 这个站点自己是不是也在要这种货。是的话就别从它的供应格上取——
+        /// <b>站点不和自己做买卖</b>。
+        ///
+        /// 这是<b>原版自己的规矩</b>，不是这里发明的：<c>StationComponent.RematchLocalPairs</c>
+        /// 的内层循环从 <c>this.id + 1</c> 开始（IL 0039~0041），所以本地配对里永远不会
+        /// 出现同一个站点的供需两格。这套虚拟物流没有那条边界，因为在此之前
+        /// <b>没有任何配方会让同一种物品同时站在供应和需求两边</b>。
+        ///
+        /// 同位提纯厂是第一个：它的进料是粗金属、出料是精金属，<b>物品相同、只差品质</b>。
+        /// 不挡的话，入库那一趟会把它刚提纯好的货从供应格搬回自己的需求格，
+        /// 于是这台厂永远在提纯自己的产物，每转一圈白亏一道收率，而且一件都出不了厂——
+        /// 每一步都成功、功能却不存在，本仓库最难查的那种症状。
+        ///
+        /// 只在这种货确实有人要（<c>Need</c> 命中）之后才查，所以正常配方一次都不会走到。
+        /// </summary>
+        private static bool DemandsItself(StationComponent station, int itemId)
+        {
+            for (var i = 0; i < station.storage.Length; i++)
+                if (station.storage[i].itemId == itemId
+                    && station.storage[i].localLogic == ELogisticStorage.Demand)
+                    return true;
+
+            return false;
+        }
 
         /// <summary>这个站点是不是挂在巨型建筑上的。</summary>
         private static bool IsMegaStation(StationComponent station, int index, PlanetFactory factory)

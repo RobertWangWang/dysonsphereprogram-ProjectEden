@@ -102,7 +102,7 @@ namespace ProjectEden.Patches
                 // 原料：储物格 → served
                 for (var i = 0; i < requires.Length; i++)
                 {
-                    int slot = FindSlot(station, requires[i]);
+                    int slot = FindSlot(station, requires[i], ELogisticStorage.Demand);
 
                     if (slot < 0) continue;
 
@@ -113,6 +113,18 @@ namespace ProjectEden.Patches
                     int take = station.storage[slot].count < want ? station.storage[slot].count : want;
 
                     if (take <= 0) continue;
+
+                    // **品质要按件数一起扣。** 只扣件数不扣品质，留下的货就白白继承了
+                    // 整格的点数——这和本仓库在 `StationStore.inc` 上记过的
+                    // 「每次搬运都白送一次增产」是同一个形状，只是换了一个孪生字段。
+                    if (QualityAccess.Ready)
+                    {
+                        int qua = QualityAccess.GetStationQua(ref station.storage[slot]);
+
+                        if (qua > 0)
+                            QualityAccess.SetStationQua(ref station.storage[slot],
+                                qua - (int)((long)qua * take / station.storage[slot].count));
+                    }
 
                     station.storage[slot].count -= take;
                     component.served[i] += take;
@@ -125,7 +137,7 @@ namespace ProjectEden.Patches
 
                     if (produced <= 0) continue;
 
-                    int slot = FindSlot(station, products[i]);
+                    int slot = FindSlot(station, products[i], ELogisticStorage.Supply);
 
                     if (slot < 0) continue;
 
@@ -252,15 +264,37 @@ namespace ProjectEden.Patches
                 "之后不会补建。拆掉重建即可。");
         }
 
-        private static int FindSlot(StationComponent station, int itemId)
+        /// <summary>
+        /// 找这种物品的储物格。<paramref name="logic"/> 是<b>期望的方向</b>：
+        /// 原料要本地需求那一格，产物要本地供应那一格。
+        ///
+        /// <b>同一种物品可以同时站在原料和产物两边，而提纯正是这个形状。</b>
+        /// 提纯的产物和原料是同一种金属，差别只在品质——而品质是<b>容器</b>的属性，
+        /// 不是物品原型的属性，所以它不可能变成另一个 <c>ItemProto</c>
+        /// （每种金属再开一个「高纯 X」物品就是在枚举，而枚举正是万用模板要消掉的东西）。
+        ///
+        /// 只按物品 ID 找的话，两个循环都会命中<b>第一格</b>，也就是进料的需求格：
+        /// 提纯出来的金属被倒回进料格，<b>永远出不了厂</b>，而屏幕上是「机器在转、
+        /// 电在耗、产量为零」——本仓库最难查的那种症状。
+        ///
+        /// 方向对不上就退回只按 ID 找，所以配方两边没有重复物品时行为和以前完全一样。
+        /// </summary>
+        private static int FindSlot(StationComponent station, int itemId, ELogisticStorage logic)
         {
             if (itemId <= 0) return -1;
 
-            for (var i = 0; i < station.storage.Length; i++)
-                if (station.storage[i].itemId == itemId)
-                    return i;
+            var any = -1;
 
-            return -1;
+            for (var i = 0; i < station.storage.Length; i++)
+            {
+                if (station.storage[i].itemId != itemId) continue;
+
+                if (station.storage[i].localLogic == logic) return i;
+
+                if (any < 0) any = i;
+            }
+
+            return any;
         }
 
         /// <summary>
