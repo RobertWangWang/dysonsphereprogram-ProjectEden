@@ -524,7 +524,10 @@ namespace ProjectEden.Preloader
                             // 绝不悄悄按 0 处理——那等于静默丢品质。
                             r.Recognized++;
 
-                            string tag = core + " [opaque]";
+                            string why = job.TypeError
+                                         ?? (ctx.TypeErrors.TryGetValue(to, out string te) ? te : null);
+
+                            string tag = core + (why != null ? " [类型不合法：" + why + "]" : " [opaque]");
 
                             r.Pending[tag] = r.Pending.TryGetValue(tag, out int q) ? q + 1 : 1;
 
@@ -600,6 +603,9 @@ namespace ProjectEden.Preloader
 
             /// <summary>见 <see cref="Stmt.Dst"/>。</summary>
             internal VariableDefinition Dst;
+
+            /// <summary>栈类型检查的说法，拼出来但类型不合法时填。报缺口时要把它带上。</summary>
+            internal string TypeError;
 
             /// <summary>
             /// 插入点的<b>指令对象</b>，由发射器在拼的时候记下来。
@@ -1478,8 +1484,22 @@ namespace ProjectEden.Preloader
 
             if (lt < lf || rt < rf) return null;
 
-            List<Instruction> lv = TwinValue(ctx, code, lf, lt);
-            List<Instruction> rv = TwinValue(ctx, code, rf, rt);
+            // **常量先摘出来，不能交给 TwinValue。**
+            //
+            // TwinValue 对常量的答案是「品质 0」，那在「X.inc = 4」这种整条语句上是对的,
+            // 可一旦常量只是算式里的一项，它就既错了类型也错了含义：
+            // `(点数/件数) × 新件数 + 0.5f` 的孪生被写成 `(品质/件数) × 新件数 + (int)0`,
+            // 于是 `add` 一边 float 一边 int32 —— **IL 类型不合法，游戏在 PatchAll 时就炸**。
+            // 实测就是这一条把 PilerComponent::InternalUpdate 打成了 InvalidProgramException。
+            //
+            // 常量本来就不是品质来源：乘除里它是系数，加减里它是同一个算式的一部分（四舍五入项）,
+            // 两种情况都该**原样重放**。摘出来之后 mul/div 那边的「两侧都带品质=含义不明」
+            // 也不会再被常量误触发。
+            bool lc = ConstOnly(code, lf, lt);
+            bool rc = ConstOnly(code, rf, rt);
+
+            List<Instruction> lv = lc ? null : TwinValue(ctx, code, lf, lt);
+            List<Instruction> rv = rc ? null : TwinValue(ctx, code, rf, rt);
 
             if (code[to].OpCode == OpCodes.Mul || code[to].OpCode == OpCodes.Div)
             {
@@ -1525,24 +1545,24 @@ namespace ProjectEden.Preloader
             // 例外：一侧是**常量**时原样重放，而不是要求它也带品质。
             // `(点数/件数) × 新件数 + 0.5` 里那个 0.5 是四舍五入项，品质那边同样要加——
             // 它不是另一个量纲，是同一个算式的一部分。
-            bool lc = lt == lf && code[lf].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal);
-            bool rc = rt == rf && code[rf].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal);
-
-            if (lv == null && lc && rv != null) lv = new List<Instruction> { Clone(code[lf]) };
-            if (rv == null && rc && lv != null) rv = new List<Instruction> { Clone(code[rf]) };
+            if (lc && rv != null) lv = new List<Instruction> { Clone(code[lf]) };
+            if (rc && lv != null) rv = new List<Instruction> { Clone(code[rf]) };
 
             // **加法可以把认不出来的一侧当 0，减法不行。** 这不是对称的：
             //   `a + b`，b 的品质不明 → 取 0 是**少算**，品质只会丢不会凭空出现。
             //   `a - b`，b 的品质不明 → 取 0 是**少减**，等于凭空多出品质。
             // 原版在这一带本来就混用件数和点数（`rem -= count`），所以「不明」是常态,
             // 方向选保守的那一边。减法照旧两侧都要有品质，`件数 - 点数` 仍然被挡住。
+            // 那个 0 的**类型要跟着另一侧走**。整数算式里是 `ldc.i4.0`，浮点算式里必须是
+            // `ldc.r4 0`——写错一边就是上面那条 InvalidProgramException，而它在离线
+            // 结构校验里完全看不出来（分支目标都对、写盘重读都干净）。
             if (code[to].OpCode == OpCodes.Add)
             {
                 if (lv == null && rv != null && PureRange(code, lf, lt))
-                    lv = new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_0) };
+                    lv = new List<Instruction> { Zero(IsFloatRange(code, rf, rt)) };
 
                 if (rv == null && lv != null && PureRange(code, rf, rt))
-                    rv = new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_0) };
+                    rv = new List<Instruction> { Zero(IsFloatRange(code, lf, lt)) };
             }
 
             if (lv == null || rv == null) return null;
@@ -1554,6 +1574,123 @@ namespace ProjectEden.Preloader
             sum.Add(Instruction.Create(code[to].OpCode));
 
             return sum;
+        }
+
+        /// <summary>
+        /// 对**一条孪生语句**做栈类型模拟：算出每条指令压的是什么，并检查二元运算两边对不对得上。
+        ///
+        /// <b>这是那次崩溃直接换来的检查。</b> 离线校验原来只验结构——分支目标可解析、
+        /// 写盘重读干净——而 `float + int32` 这种在结构上完全正常，
+        /// 只有 CLR 在 JIT 的时候才会说 `InvalidProgramException: IL_0588: add`,
+        /// 而那时游戏已经起不来了，栈里连我们的名字都没有（报的是 Harmony 的 DMD）。
+        ///
+        /// 只认自己发射的那点指令集合；遇到不认识的一律记成「不确定」并放行——
+        /// 这个检查的职责是**抓住确定的错**，不是证明整条 IL 合法。
+        /// </summary>
+        private static string TypeError(Ctx ctx, IList<Instruction> emit)
+        {
+            var stack = new List<char>();   // 'i' 整数 / 'f' 浮点 / '?' 不确定
+
+            foreach (Instruction i in emit)
+            {
+                string n = i.OpCode.Name;
+
+                if (n.StartsWith("ldc.r", StringComparison.Ordinal)) { stack.Add('f'); continue; }
+                if (n.StartsWith("ldc.", StringComparison.Ordinal)) { stack.Add('i'); continue; }
+                if (n == "conv.r4" || n == "conv.r8") { Pop(stack); stack.Add('f'); continue; }
+                if (n.StartsWith("conv.", StringComparison.Ordinal)) { Pop(stack); stack.Add('i'); continue; }
+
+                if (n.StartsWith("ldloc", StringComparison.Ordinal)
+                    || n.StartsWith("ldarg", StringComparison.Ordinal)
+                    || n.StartsWith("ldsfld", StringComparison.Ordinal)
+                    || n.StartsWith("ldfld", StringComparison.Ordinal)
+                    || n.StartsWith("ldelem", StringComparison.Ordinal)
+                    || n.StartsWith("ldind", StringComparison.Ordinal)
+                    || n == "ldnull" || n == "ldlen" || n == "newarr")
+                {
+                    // 取字段/取元素会先弹掉对象，取局部取参数不会——这里只关心栈顶的类型,
+                    // 弹几个由 Push/Pop 表算，免得两套规则各说各话。
+                    for (var p = 0; p < Pop(i); p++) Pop(stack);
+
+                    stack.Add(TypeOf(ctx, i));
+
+                    continue;
+                }
+
+                if (n == "dup") { stack.Add(stack.Count > 0 ? stack[stack.Count - 1] : '?'); continue; }
+
+                if (n == "add" || n == "sub" || n == "mul" || n == "div")
+                {
+                    char b = Pop(stack), a = Pop(stack);
+
+                    if (a != '?' && b != '?' && a != b)
+                        return $"{n} 两边类型对不上（{(a == 'f' ? "float" : "int")} 与 " +
+                               $"{(b == 'f' ? "float" : "int")}）";
+
+                    stack.Add(a == '?' ? b : a);
+
+                    continue;
+                }
+
+                for (var p = 0; p < Pop(i); p++) Pop(stack);
+
+                if (Push(i) > 0) stack.Add('?');
+            }
+
+            return null;
+        }
+
+        private static char Pop(List<char> s)
+        {
+            if (s.Count == 0) return '?';
+
+            char c = s[s.Count - 1];
+
+            s.RemoveAt(s.Count - 1);
+
+            return c;
+        }
+
+        /// <summary>这条取值指令压上来的是整数还是浮点。</summary>
+        private static char TypeOf(Ctx ctx, Instruction i)
+        {
+            switch (i.Operand)
+            {
+                case FieldReference f: return Float(f.FieldType) ? 'f' : 'i';
+                case VariableDefinition v: return Float(v.VariableType) ? 'f' : 'i';
+                case ParameterDefinition p: return Float(p.ParameterType) ? 'f' : 'i';
+            }
+
+            string n = i.OpCode.Name;
+
+            if (n == "ldind.r4" || n == "ldind.r8") return 'f';
+            if (n == "ldnull" || n == "newarr") return '?';
+
+            return 'i';
+        }
+
+        private static bool Float(TypeReference t) =>
+            t.MetadataType == MetadataType.Single || t.MetadataType == MetadataType.Double;
+
+        /// <summary>这一段是不是<b>只有一条常量指令</b>。</summary>
+        private static bool ConstOnly(IList<Instruction> code, int from, int to) =>
+            from == to && code[from].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal);
+
+        /// <summary>类型对得上的零。</summary>
+        private static Instruction Zero(bool asFloat) =>
+            asFloat ? Instruction.Create(OpCodes.Ldc_R4, 0f) : Instruction.Create(OpCodes.Ldc_I4_0);
+
+        /// <summary>这一段算出来的是浮点吗——只要里面出现过浮点常量或转换就是。</summary>
+        private static bool IsFloatRange(IList<Instruction> code, int from, int to)
+        {
+            for (int k = from; k <= to; k++)
+            {
+                string n = code[k].OpCode.Name;
+
+                if (n == "conv.r4" || n == "conv.r8" || n == "ldc.r4" || n == "ldc.r8") return true;
+            }
+
+            return false;
         }
 
         private static bool PureRange(IList<Instruction> code, int from, int to)
@@ -1725,7 +1862,30 @@ namespace ProjectEden.Preloader
         }
 
         /// <summary>按形状拼出孪生语句。拼不出来返回 null。</summary>
+        /// <summary>
+        /// 拼孪生语句，并在交出去之前<b>过一遍栈类型</b>。
+        ///
+        /// 类型检查放在这个唯一出口上，而不是各个发射器里：分类遍、不动点、发射遍
+        /// 走的都是这里，三处的判断因此永远一致。**类型不合法等同于拼不出来**——
+        /// 报成缺口，而不是发射出去让 CLR 在玩家那边说 InvalidProgramException。
+        /// </summary>
         private static List<Instruction> Build(Ctx ctx, IList<Instruction> code, Job job)
+        {
+            List<Instruction> emit = BuildCore(ctx, code, job);
+
+            if (emit == null || emit.Count == 0) return emit;
+
+            string bad = TypeError(ctx, emit);
+
+            if (bad == null) return emit;
+
+            job.TypeError = bad;
+            ctx.TypeErrors[job.To] = bad;
+
+            return null;
+        }
+
+        private static List<Instruction> BuildCore(Ctx ctx, IList<Instruction> code, Job job)
         {
             Instruction store = code[job.To];
 
@@ -2426,6 +2586,15 @@ namespace ProjectEden.Preloader
 
             /// <summary>侧信道的 <c>Split(countAfter, ref qua, p)</c>——原版 split_inc 的品质版。</summary>
             internal MethodDefinition ChannelSplit;
+
+            /// <summary>
+            /// 哪条语句拼出来的 IL 类型不合法（语句末指令下标 → 说法）。
+            ///
+            /// 记在上下文里而不是 Job 上：类型错误最先是在**不动点**里被发现的，
+            /// 那一轮会把它的目的地局部判死，等分类遍再来时它已经因为「局部不可用」而失败,
+            /// 于是报成一句没有信息量的 [opaque]——原因在两步之前就被丢掉了。
+            /// </summary>
+            internal readonly Dictionary<int, string> TypeErrors = new Dictionary<int, string>();
 
             /// <summary>
             /// <b>全模块</b>的「哪个方法的哪几个形参是载荷」。
