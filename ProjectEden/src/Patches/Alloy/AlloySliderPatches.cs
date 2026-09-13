@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using ProjectEden.Utils;
@@ -616,14 +617,6 @@ namespace ProjectEden.Patches
             _resultText.color = new Color(0.92f, 0.86f, 0.70f);
         }
 
-        /// <summary>按下的那一下是不是落在选料行上。<b>抬起</b>时才真正开窗，理由见下。</summary>
-        private static bool _refineArmed;
-
-        /// <summary>点开选择器的那一刻是哪台建筑——回调里拿不到别的上下文。</summary>
-        private static PlanetFactory _refineFactory;
-        private static int _refineEntity;
-        private static int _refineRecipe;
-
         /// <summary>
         /// 同位提纯的输入：点这一行<b>打开原版的物品选择器</b>，限定在可提纯的金属里。
         ///
@@ -660,31 +653,103 @@ namespace ProjectEden.Patches
         private static void HandleRefineInput(PlanetFactory factory, int entityId,
             QualityRefineryRegistry.Tier tier, int[] state)
         {
-            // 按下那一下落在这一行上就先记着，此刻什么都不做
-            if (Input.GetMouseButtonDown(0)) _refineArmed = InRow(0, out Vector2 _);
+            ArmRows(0);
 
-            if (!Input.GetMouseButtonUp(0)) return;
-
-            bool armed = _refineArmed;
-
-            _refineArmed = false;
-
-            if (!armed || !InRow(0, out Vector2 _)) return;
+            if (!Clicked(0)) return;
 
             List<QualityRefineryRegistry.Feed> pool = QualityRefineryRegistry.Feeds;
 
             if (pool.Count < 1) return;
-            if (UIItemPicker.isOpened) return;
 
-            _refineFactory = factory;
-            _refineEntity = entityId;
-            _refineRecipe = tier.RecipeId;
+            var ids = new List<int>(pool.Count);
 
-            var ids = new int[pool.Count];
+            for (var i = 0; i < pool.Count; i++) ids.Add(pool[i].ItemId);
 
-            for (var i = 0; i < pool.Count; i++) ids[i] = pool[i].ItemId;
+            int recipeId = tier.RecipeId;
 
-            ItemPickerSearchPatches.Restrict(ids, "只能选可提纯的金属");
+            OpenPicker(factory, entityId, state, 0, ids, "只能选可提纯的金属",
+                id => QualityRefineryRegistry.FindFeed(id) != null,
+                QualityRefinerySelectPatches.Apply,
+                picked => AlloyRatioStore.SetPlayerDefault(recipeId, new[] { picked }));
+        }
+
+        // ── 选料行的共用部件：按下记落点、抬起开窗、限定名单、回调落地 ──────
+        //
+        // 三家都要它（同位提纯一行，燃烧厂两行；弹药、复合材、增产剂随时可以跟上），
+        // 而它踩过的四个坑没有一个是「这个面板」独有的：
+        // 位置的两种算错法、抬起时机、以及白名单的清理。所以它只写一份。
+
+        /// <summary>按下时落在哪一行（−1 = 不在任何一行上）。</summary>
+        private static int _armedRow = -1;
+
+        /// <summary>
+        /// 按下的那一帧记录落点。<b>一帧只扫一次</b>：逐行分别调用会让后一行的判定
+        /// 把前一行记下的结果擦掉——鼠标只可能在一行里，但 <c>_armedRow</c> 只有一个。
+        /// </summary>
+        private static void ArmRows(int maxRow)
+        {
+            if (!Input.GetMouseButtonDown(0)) return;
+
+            _armedRow = -1;
+
+            for (var i = 0; i <= maxRow; i++)
+                if (InRow(i, out Vector2 _))
+                {
+                    _armedRow = i;
+
+                    break;
+                }
+        }
+
+        /// <summary>
+        /// 这一帧是不是在 <paramref name="row"/> 上完成了一次「按下并抬起」。
+        ///
+        /// <b>开窗必须等抬起</b>——原因在原版自己的代码里：<c>UIItemPicker._OnUpdate</c>
+        /// 末尾（IL 01CF~0221）是「按下任一鼠标键且点在窗口矩形外就 <c>_Close()</c>」，
+        /// 而 <c>Input.GetKeyDown</c> 在<b>按下的整整一帧</b>里都为真。
+        /// 在那一帧开窗，鼠标正落在面板行上（不在选择器矩形内），窗口开起来同一帧就被关掉，
+        /// 屏幕上是「点了没反应」。抬起那一帧 <c>GetKeyDown</c> 为假，这段判断根本不进。
+        /// </summary>
+        private static bool Clicked(int row)
+        {
+            if (!Input.GetMouseButtonUp(0)) return false;
+
+            return _armedRow == row && InRow(row, out Vector2 _);
+        }
+
+        private static PlanetFactory _pickFactory;
+        private static int _pickEntity;
+        private static int[] _pickState;
+        private static int _pickSlot;
+        private static int _pickRow;
+        private static Func<int, bool> _pickValid;
+        private static Func<PlanetFactory, int, int[], bool> _pickApply;
+        private static Action<int> _pickRemember;
+
+        /// <summary>
+        /// 把原版的物品选择器当成这一行的下拉框打开，只许在 <paramref name="ids"/> 里选。
+        ///
+        /// 选中之后把 <paramref name="state"/> 的第 <paramref name="slot"/> 位换成选中的物品，
+        /// 再交给 <paramref name="apply"/>。<paramref name="valid"/> 是回调里的**第二道核对**——
+        /// 白名单是显示层的过滤，不是保证：窗口开着的时候玩家可能已经关了面板、
+        /// 换了配方，甚至拆了这台建筑。
+        /// </summary>
+        private static void OpenPicker(PlanetFactory factory, int entityId, int[] state, int slot,
+            List<int> ids, string hint, Func<int, bool> valid,
+            Func<PlanetFactory, int, int[], bool> apply, Action<int> remember)
+        {
+            if (ids == null || ids.Count < 1 || UIItemPicker.isOpened) return;
+
+            _pickFactory = factory;
+            _pickEntity = entityId;
+            _pickState = (int[])state.Clone();
+            _pickSlot = slot;
+            _pickRow = slot;
+            _pickValid = valid;
+            _pickApply = apply;
+            _pickRemember = remember;
+
+            ItemPickerSearchPatches.Restrict(ids, hint);
 
             // 传 (0, 0) 只是先把它开出来，位置随后由 PlacePicker 用世界坐标摆正。
             //
@@ -692,7 +757,7 @@ namespace ProjectEden.Patches
             // 而这个选择器的锚点是 (0.5, 0.5)、pivot 是 (0, 1)，于是窗口从父级正中心
             // 往右下伸出去——离面板十万八千里。原版每个调用方都自己算位置，
             // 这本身就是「没有可用默认值」的证据。
-            UIItemPicker.Popup(Vector2.zero, OnRefinePicked);
+            UIItemPicker.Popup(Vector2.zero, OnPicked);
 
             // **没开起来就当场把白名单撤掉。** `Popup` 在 UIRoot 还没就绪或窗口已激活时
             // 直接 return（IL 000B / 002E），那时 `_OnClose` 永远不会来，
@@ -700,9 +765,39 @@ namespace ProjectEden.Patches
             bool opened = UIItemPicker.isOpened;
 
             if (!opened) ItemPickerSearchPatches.Restrict(null, null);
-            else PlacePicker();
+            else PlacePicker(_pickRow);
 
-            ReportPickerOnce(opened, pool.Count);
+            ReportPickerOnce(opened, ids.Count);
+        }
+
+        private static void OnPicked(ItemProto proto)
+        {
+            PlanetFactory factory = _pickFactory;
+            int entityId = _pickEntity;
+            int[] state = _pickState;
+            int slot = _pickSlot;
+            Func<int, bool> valid = _pickValid;
+            Func<PlanetFactory, int, int[], bool> apply = _pickApply;
+            Action<int> remember = _pickRemember;
+
+            _pickFactory = null;
+            _pickEntity = 0;
+            _pickState = null;
+            _pickValid = null;
+            _pickApply = null;
+            _pickRemember = null;
+
+            if (proto == null || factory == null || entityId <= 0) return;
+            if (state == null || slot < 0 || slot >= state.Length) return;
+            if (apply == null || (valid != null && !valid(proto.ID))) return;
+
+            var next = (int[])state.Clone();
+
+            next[slot] = proto.ID;
+
+            if (!apply(factory, entityId, next)) return;
+
+            remember?.Invoke(proto.ID);
         }
 
         /// <summary>
@@ -717,12 +812,14 @@ namespace ProjectEden.Patches
         /// 夹取全程在<b>父级的局部坐标</b>里做——矩形和角点都换算到同一个空间，
         /// 没有相机、没有屏幕像素，也就没有可跨的单位。
         /// </summary>
-        private static void PlacePicker()
+        private static void PlacePicker(int row)
         {
             UIItemPicker picker = UIRoot.instance?.uiGame?.itemPicker;
             RectTransform p = picker != null ? picker.pickerTrans : null;
 
-            if (p == null || Rows[0]?.Track == null) return;
+            if (row < 0 || row >= MaxRows) row = 0;
+
+            if (p == null || Rows[row]?.Track == null) return;
 
             var parent = p.parent as RectTransform;
 
@@ -732,7 +829,7 @@ namespace ProjectEden.Patches
             // 偏移量用它自己的 rect 高度换算成世界向量，所以缩放怎么设都对。
             float gap = p.rect.height * p.pivot.y + 12f;
 
-            p.position = Rows[0].Track.position + p.TransformVector(new Vector3(0f, gap, 0f));
+            p.position = Rows[row].Track.position + p.TransformVector(new Vector3(0f, gap, 0f));
 
             // 再夹回父级矩形内。两边都换算到父级局部坐标，量纲一致。
             var corners = new Vector3[4];
@@ -818,30 +915,6 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// 选择器回调。<b>要重新核对一遍</b>：白名单是显示层的过滤，不是保证——
-        /// 玩家可能在选择器开着的时候关掉了面板，或者这台建筑已经换了配方。
-        /// </summary>
-        private static void OnRefinePicked(ItemProto proto)
-        {
-            PlanetFactory factory = _refineFactory;
-            int entityId = _refineEntity;
-            int recipeId = _refineRecipe;
-
-            _refineFactory = null;
-            _refineEntity = 0;
-            _refineRecipe = 0;
-
-            if (proto == null || factory == null || entityId <= 0) return;
-            if (QualityRefineryRegistry.FindFeed(proto.ID) == null) return;
-
-            var next = new[] { proto.ID };
-
-            if (!QualityRefinerySelectPatches.Apply(factory, entityId, next)) return;
-
-            AlloyRatioStore.SetPlayerDefault(recipeId, next);
-        }
-
-        /// <summary>
         /// 同位提纯的一行：选哪种金属。<b>进出是同一种物品，差别只在品质</b>，
         /// 所以结果行必须把品质那个数写出来——不写的话面板上是
         /// 「铜块 ×100 → 铜块 ×80」，看起来像一条纯亏料的废配方。
@@ -899,7 +972,6 @@ namespace ProjectEden.Patches
         /// 三行共用同一套控件，所以<b>每次刷新都要重跑 LayoutRow</b>：这块面板是
         /// 五种模式共用的，上一台机器要是选料模式，不重排的话这里会继承它的布局。
         /// </summary>
-        private static bool _redoxClickLatch;
 
         /// <summary>
         /// 燃烧厂面板的输入。<b>三行三个量</b>：
@@ -912,9 +984,34 @@ namespace ProjectEden.Patches
         /// </summary>
         private static void HandleRedoxInput(PlanetFactory factory, int entityId, int[] state)
         {
+            // ── 第 0 / 1 行：选料，点开限定名单的物品选择器 ──
+            //
+            // **这两段必须排在下面那个「松手就返回」之前。** 抬起的那一帧
+            // `GetMouseButton(0)` 已经是 false，而开窗恰恰要等到抬起
+            // （理由见 Clicked 的注释：按下那一帧开会被原版的「点窗外即关闭」当场关掉）。
+            ArmRows(1);
+
+            if (Clicked(0) || Clicked(1))
+            {
+                int row = Clicked(0) ? 0 : 1;
+
+                List<RedoxRegistry.Agent> pool =
+                    row == 0 ? RedoxRegistry.Reducers : RedoxRegistry.Oxidizers;
+
+                var ids = new List<int>(pool.Count);
+
+                for (var i = 0; i < pool.Count; i++) ids.Add(pool[i].ItemId);
+
+                OpenPicker(factory, entityId, state, row, ids,
+                    row == 0 ? "只能选还原剂" : "只能选氧化剂",
+                    id => Contains(pool, id),
+                    RedoxBurnerPatches.Apply, null);
+
+                return;
+            }
+
             if (!Input.GetMouseButton(0))
             {
-                _redoxClickLatch = false;
                 _dragging = -1;
 
                 return;
@@ -948,38 +1045,15 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            // ── 第 0 / 1 行：选料。左半格往前、右半格往后 ──
-            if (_redoxClickLatch) return;
+        }
 
-            var row = -1;
-            Vector2 hit;
-
-            if (InRow(0, out hit)) row = 0;
-            else if (InRow(1, out hit)) row = 1;
-            else return;
-
-            _redoxClickLatch = true;
-
-            List<RedoxRegistry.Agent> pool =
-                row == 0 ? RedoxRegistry.Reducers : RedoxRegistry.Oxidizers;
-
-            if (pool.Count == 0) return;
-
-            Rect rect = Rows[row].Track.rect;
-            int step = hit.x < rect.center.x ? -1 : 1;
-
-            var at = 0;
-
+        private static bool Contains(List<RedoxRegistry.Agent> pool, int itemId)
+        {
             for (var i = 0; i < pool.Count; i++)
-                if (pool[i].ItemId == state[row])
-                    at = i;
+                if (pool[i].ItemId == itemId)
+                    return true;
 
-            int picked = pool[((at + step) % pool.Count + pool.Count) % pool.Count].ItemId;
-
-            var next = new[] { state[0], state[1], state[2] };
-            next[row] = picked;
-
-            RedoxBurnerPatches.Apply(factory, entityId, next);
+            return false;
         }
 
         /// <summary>
@@ -1015,9 +1089,9 @@ namespace ProjectEden.Patches
             RedoxRegistry.Agent reducer = Find(RedoxRegistry.Reducers, state[0]);
             RedoxRegistry.Agent oxidizer = Find(RedoxRegistry.Oxidizers, state[1]);
 
-            // 第 0 / 1 行：选料
-            PickerRow(Rows[0], "还原剂".Translate(), reducer?.Name);
-            PickerRow(Rows[1], "氧化剂".Translate(), oxidizer?.Name);
+            // 第 0 / 1 行：选料。点开的是限定名单的物品选择器，所以画成下拉框不是 ◀ ▶
+            DropdownRow(Rows[0], "还原剂".Translate(), reducer?.Name);
+            DropdownRow(Rows[1], "氧化剂".Translate(), oxidizer?.Name);
 
             // 第 2 行：配氧比滑条
             int lo = cfg.ratioMin > 0 ? cfg.ratioMin : 70;
@@ -1077,9 +1151,13 @@ namespace ProjectEden.Patches
 
         /// <summary>选料行的通用摆法：轨道拉满、名字居中、◀ ▶ 落在左右两半。</summary>
         /// <summary>
-        /// 点开一张清单的行。和 <see cref="PickerRow"/> 的区别只在<b>它长什么样</b>：
-        /// <c>◀ 名字 ▶</c> 承诺的是「点两端会左右切换」，而这一行点哪里都是打开选择器，
-        /// 所以写成 <c>名字 ▼</c>。控件形状要和它真实的交互对得上，否则玩家会先试错一轮。
+        /// 点开一张清单的行。<c>◀ 名字 ▶</c> 承诺的是「点两端会左右切换」，
+        /// 而这一行点哪里都是打开物品选择器，所以写成 <c>名字 ▼</c>。
+        /// 控件形状要和它真实的交互对得上，否则玩家会先白试错一轮。
+        ///
+        /// 弹药、活性复合材、活性增产剂那几种模式仍然是循环式的（自己在 Refresh 里拼
+        /// <c>◀ ▶</c>），候选表短、循环够用；要改的话照这里加一行
+        /// <see cref="ArmRows"/> + <see cref="Clicked"/> + <see cref="OpenPicker"/> 就行。
         /// </summary>
         private static void DropdownRow(Row row, string label, string value)
         {
@@ -1093,20 +1171,6 @@ namespace ProjectEden.Patches
             row.Fill.offsetMin = Vector2.zero;
             row.Fill.offsetMax = Vector2.zero;
             row.TrackImage.color = new Color(1f, 1f, 1f, 0.16f);
-        }
-
-        private static void PickerRow(Row row, string label, string value)
-        {
-            row.Label.text = label;
-
-            LayoutRow(row, true);
-
-            row.Value.text = "◀  " + (value ?? "?") + "  ▶";
-            row.Fill.anchorMin = Vector2.zero;
-            row.Fill.anchorMax = new Vector2(0f, 1f);
-            row.Fill.offsetMin = Vector2.zero;
-            row.Fill.offsetMax = Vector2.zero;
-            row.TrackImage.color = new Color(1f, 1f, 1f, 0.12f);
         }
 
         /// <summary>
