@@ -8,6 +8,10 @@ It also ships six cheat switches, **all on by default** (instant build / build w
 collider pool off /
 no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one product, different raw materials" technique is section XV.
 
+> Section XI is the longest: it carries the whole chemistry chain end to end — C1, the nitrogen
+> chain, three phases of organic chemistry, and the refining line that cuts a barrel of crude into
+> four fractions. The contents give it four second-level entries; every other section is flat.
+
 **Everything this mod adds is fully translated into English** — just switch language in game. See section XVI.
 
 > Game version 0.10.34.28529 ／ BepInEx 5.4.17 ／ requires LDBTool, CommonAPI, DSPModSave
@@ -27,7 +31,11 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [VIII. Extra Recipes](#viii-extra-recipes)
 - [IX. Custom Ores and Gases](#ix-custom-ores-and-gases)
 - [X. New Buildings](#x-new-buildings)
-- [XI. The C1 Chemistry Chain (syngas → methanol → downstream)](#xi-the-c1-chemistry-chain-syngas--methanol--downstream)
+- [XI. The Chemistry Chain: C1, nitrogen, organics and refining](#xi-the-chemistry-chain-c1-nitrogen-organics-and-refining)
+  - [Organic chemistry, phase one: a real destination for formaldehyde and carbon dioxide](#organic-chemistry-phase-one-a-real-destination-for-formaldehyde-and-carbon-dioxide)
+  - [Organic chemistry, phase two: propylene + ammonia → a third route to carbon nanotubes](#organic-chemistry-phase-two-propylene--ammonia--a-third-route-to-carbon-nanotubes)
+  - [Organic chemistry, phase three: the aromatic trunk, cut down to the cumene process alone](#organic-chemistry-phase-three-the-aromatic-trunk-cut-down-to-the-cumene-process-alone)
+  - [Linking up with petroleum chemistry: three refinery units](#linking-up-with-petroleum-chemistry-three-refinery-units)
 - [XII. The standard for new items: follow real chemistry and physics](#xii-the-standard-for-new-items-follow-real-chemistry-and-physics)
 - [XIII. Interface Changes](#xiii-interface-changes)
 - [XIV. Cheat Switches (all on by default)](#xiv-cheat-switches-all-on-by-default)
@@ -935,19 +943,21 @@ changed.
 | Appearance | The Chemical Plant's model and icon, **tinted violet** (hue 285°) — vanilla's is teal and the Electrochemical Plant is cold blue, so all three are distinguishable at a glance |
 | Build | Chemical Plant ×1 + Electric Motor ×10 + Circuit Board ×10, 3 s, **hand-craftable**, no prerequisite tech |
 | Location | Follows the Chemical Plant's category, finds a free slot at startup |
-| What it does | **Redox** recipes, 13 in total: 7 metal reductions + 5 C1 chemistry + lithium cobalt oxide synthesis |
+| What it does | **Redox** recipes, 33 in total — the most of any machine in this mod; see the table below |
 | Speed / power | Identical to the Chemical Plant — a whole-building clone |
 
 #### Redox recipes
 
-This is the machine with the most recipes in the mod; the 13 fall into three groups (detailed tables live in their
-own sections and are not repeated here):
+This is the machine with the most recipes in the mod; the **33 fall into five groups** (detailed tables live in
+their own sections and are not repeated here):
 
 | Group | Count | Recipes | See |
 |---|---|---|---|
-| **Metal reduction** | 7 | Cobalt's five reduction routes (coal / CO / formaldehyde / methanol / ethylene) plus aluminium's carbothermic and hydrocarbothermic routes | Section IX |
-| **C1 chemistry** | 5 | Water gas, methanol synthesis, methanol via CO₂ hydrogenation, formaldehyde, Fischer-Tropsch | Section XI |
-| **Material synthesis** | 1 | Lithium cobalt oxide (4 LiOH + 4 Co + 3 O₂ → 4 LiCoO₂ + 2 H₂O) | Section IX |
+| **Metal reduction** | 16 | Cobalt ×6 (coal / CO / formaldehyde / methanol / ethylene / ammonia), aluminium ×3, manganese ×2, chromium ×2, vanadium ×2, tungsten ×1 | Section IX |
+| **C1 and organic chemistry** | 8 | Water gas, methanol synthesis, methanol via CO₂ hydrogenation, formaldehyde, Fischer-Tropsch, propylene ammoxidation, steam cracking, cumene cleavage | Section XI |
+| **Nitrogen chain** | 3 | Haber-Bosch ammonia, ammonia catalytic oxidation, nitric acid absorption | Section XI |
+| **Refining and sulfur** | 3 | Residue hydrodesulfurisation, contact-process sulfuric acid, hydrocracking | Section XI |
+| **Material synthesis** | 3 | Lithium cobalt oxide, aluminium nitride by direct nitridation, zeolite catalyst regeneration | Sections IX, XXIV, XXVII |
 
 What they have in common is **electron transfer**: a metal is reduced out of its oxide, or carbon/hydrogen changes
 oxidation state in the reaction. The one thing kept out is methanol-to-olefins — that is a dehydration, the carbon's
@@ -1144,7 +1154,7 @@ A thousand wind turbines pressed into one tower array.
 
 ---
 
-## XI. The C1 Chemistry Chain (syngas → methanol → downstream)
+## XI. The Chemistry Chain: C1, nitrogen, organics and refining
 
 A one-carbon chemistry route that starts from **coal and water** and never touches petroleum. The entrance is water
 gas, the junction is methanol, and there are three exits.
