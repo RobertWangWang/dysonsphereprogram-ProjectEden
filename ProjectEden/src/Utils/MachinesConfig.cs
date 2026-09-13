@@ -135,6 +135,9 @@ namespace ProjectEden.Utils
 
         /// <summary>kind == generator 时的参数</summary>
         public MachineGeneratorEntry generator;
+
+        /// <summary><c>kind: "miner"</c> 专用。</summary>
+        public MachineMinerEntry miner;
     }
 
     /// <summary>
@@ -155,6 +158,33 @@ namespace ProjectEden.Utils
     /// （<c>ItemProto.GetPropValue</c> 直接读 <c>prefabDesc.genEnergyPerTick × 60</c>）。
     /// </summary>
     [Serializable]
+    /// <summary>
+    /// <c>kind: "miner"</c>：克隆一台采矿机，把产量<b>钉死</b>成一个固定值。
+    ///
+    /// <b>「钉死」是这种机器唯一的卖点，也是它全部的实现难度。</b>
+    /// 原版每 tick 的产出是
+    /// <c>time += power × speedDamper × speed × miningSpeed × veinCount</c>，
+    /// 其中 <c>miningSpeed</c> 是被「矿物利用」系列科技放大过的，<c>veinCount</c> 是脚下矿脉数。
+    /// 要让产量和这两者都无关，就得每 tick 反解 <c>speed</c> 把它们除掉——
+    /// 见 <c>MiniMinerPatches</c>。
+    /// </summary>
+    internal class MachineMinerEntry
+    {
+        /// <summary>每分钟采多少矿。固定值，不随科技和矿脉数变。</summary>
+        public int oresPerMinute;
+
+        /// <summary>工作功率，瓦。</summary>
+        public long workEnergyWatt;
+
+        /// <summary>自带物流站那一格的容量。</summary>
+        public int stationCapacity;
+
+        /// <summary>
+        /// 采矿时消耗矿脉储量吗。<c>false</c> = 矿脉永不枯竭。
+        /// </summary>
+        public bool consumeVeins;
+    }
+
     internal class MachineGeneratorEntry
     {
         /// <summary>发电功率倍率。genEnergyPerTick</summary>

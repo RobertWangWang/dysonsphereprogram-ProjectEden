@@ -131,6 +131,9 @@ namespace ProjectEden
             LDBTool.PreAddDataAction += MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MachineRegistry.OnPostAddData;
 
+            // 小型速采机的表要在 MachineRegistry 之后建：它读的是那一遍解析出来的 ItemId
+            LDBTool.PostAddDataAction += Patches.MiniMinerPatches.OnPostAddData;
+
             // 传送带提速：要等 LDB 建好才拿得到带子的 ModelProto
             LDBTool.PostAddDataAction += BeltSpeedPatches.OnPostAddData;
 
@@ -217,6 +220,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= OreRegistry.OnPostAddData;
             LDBTool.PreAddDataAction -= MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= MachineRegistry.OnPostAddData;
+            LDBTool.PostAddDataAction -= Patches.MiniMinerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= BeltSpeedPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= MetalPropertyPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= AlloyRatioPatches.OnPostAddData;

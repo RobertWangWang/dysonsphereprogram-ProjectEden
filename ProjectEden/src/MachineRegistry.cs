@@ -53,6 +53,8 @@ namespace ProjectEden
             /// <summary>发电设备型：克隆发电建筑，只放大发电功率</summary>
             internal bool IsGenerator => Entry.kind == "generator";
 
+            internal bool IsMiner => Entry.kind == "miner";
+
             /// <summary>「满」版本的物品 ID，没有则为 0</summary>
             internal int FullItemId;
         }
@@ -218,8 +220,10 @@ namespace ProjectEden
                 bool isAccumulator = entry.kind == "accumulator";
                 bool isExchanger = entry.kind == "exchanger";
                 bool isGenerator = entry.kind == "generator";
+                bool isMiner = entry.kind == "miner";
 
-                if (!isStation && !isAccumulator && !isExchanger && !isGenerator && entry.recipeType <= 0)
+                if (!isStation && !isAccumulator && !isExchanger && !isGenerator && !isMiner
+                    && entry.recipeType <= 0)
                 {
                     ProjectEdenPlugin.Log.LogError($"{entry.displayName} 没有配 recipeType，跳过");
 
@@ -240,6 +244,15 @@ namespace ProjectEden
                     ProjectEdenPlugin.Log.LogError(
                         $"{entry.displayName} 配成了 accumulator，但来源建筑 {entry.copyFromItemId} 的 " +
                         "prefabDesc.isAccumulator 是 false，跳过。来源要选蓄电器。");
+
+                    continue;
+                }
+
+                if (isMiner && !SourceIsVeinMiner(source))
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"{entry.displayName} 配成了 miner，但来源建筑 {entry.copyFromItemId} 的 " +
+                        "prefabDesc.minerType 不是 Vein，跳过。来源要选一台采矿机。");
 
                     continue;
                 }
@@ -297,6 +310,8 @@ namespace ProjectEden
                             ? "能量枢纽"
                             : machine.IsGenerator
                                 ? "发电设备"
+                                : machine.IsMiner
+                                    ? $"采矿设备：固定 {entry.miner?.oresPerMinute ?? 0} 矿/分钟"
                                 : $"配方类型 {entry.recipeType}（{entry.recipeTypeName}）";
 
                 ProjectEdenPlugin.Log.LogInfo(
@@ -427,6 +442,7 @@ namespace ProjectEden
             else if (machine.IsAccumulator) ApplyAccumulator(modelDesc, desc, machine);
             else if (machine.IsExchanger) ApplyExchanger(modelDesc, desc, machine);
             else if (machine.IsGenerator) ApplyGenerator(modelDesc, desc, machine);
+            else if (machine.IsMiner) ApplyMiner(modelDesc, desc, machine);
             else
                 // 制造设备：这一行就是整件事的目的
                 modelDesc.assemblerRecipeType = (ERecipeType)machine.Entry.recipeType;
@@ -590,6 +606,58 @@ namespace ProjectEden
             }
 
             item._iconSprite = icon;
+        }
+
+        private static bool SourceIsVeinMiner(ItemProto source)
+        {
+            ModelProto model = LDB.models.Select(source.ModelIndex);
+
+            return model?.prefabDesc != null && model.prefabDesc.minerType == EMinerType.Vein;
+        }
+
+        /// <summary>
+        /// 采矿机型：整台克隆，只改功率和自带物流站那一格的容量。
+        ///
+        /// <b>产量不在这里改。</b> 采矿速度是 <c>MinerComponent.speed</c>，
+        /// 那是建造时从 prefabDesc 抄进存档的、而且每 tick 都会被科技和矿脉数放大——
+        /// 想钉死它只能在 tick 上每次反解，见 <c>MiniMinerPatches</c>。
+        /// 这里写死一个 speed 只会得到「面板上的数对、实际产量随科技涨」。
+        ///
+        /// <b>矿脉数那一格的容量要在这里给足。</b> <c>StationComponent.Init</c>
+        /// 从 <c>stationMaxItemCount</c> 抄 <c>storage[0].max</c>，而那是进存档的；
+        /// 给小了之后再改配置，已经建好的那些不会跟着变（第 1 号坑）。
+        /// </summary>
+        private static void ApplyMiner(PrefabDesc target, PrefabDesc source, Machine machine)
+        {
+            MachineMinerEntry cfg = machine.Entry.miner;
+
+            // 采矿的那一套标志整组继承：minerType / isVeinCollector / 以及自带的物流站。
+            // 漏一个就是「建得起来、一颗矿也不产」，而且不报错。
+            target.minerType = source.minerType;
+            target.isVeinCollector = source.isVeinCollector;
+            target.isStation = source.isStation;
+            target.stationMaxItemKinds = source.stationMaxItemKinds;
+            target.stationMaxDroneCount = source.stationMaxDroneCount;
+            target.stationMaxShipCount = source.stationMaxShipCount;
+            target.stationCollectSpeed = source.stationCollectSpeed;
+            target.veinMiner = source.veinMiner;
+            target.oilMiner = source.oilMiner;
+
+            if (cfg == null) return;
+
+            if (cfg.stationCapacity > 0) target.stationMaxItemCount = cfg.stationCapacity;
+
+            if (cfg.workEnergyWatt > 0)
+            {
+                target.workEnergyPerTick = cfg.workEnergyWatt / 60L;
+                target.idleEnergyPerTick = target.workEnergyPerTick / 20L;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"  {machine.Entry.displayName}：固定产量 {cfg.oresPerMinute} 矿/分钟，" +
+                $"工作功率 {cfg.workEnergyWatt / 1000000f:0.##} MW，" +
+                $"仓位容量 {target.stationMaxItemCount}，" +
+                $"矿脉{(cfg.consumeVeins ? "会" : "不会")}消耗");
         }
 
         private static bool SourceIsPowerGen(ItemProto source)

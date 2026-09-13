@@ -417,6 +417,58 @@
           "count": 24
         }
       ]
+    },
+    {
+      "//": "一台把产量钉死的小采矿机。它和大型采矿机不是「大小之分」而是**两条曲线**：大型采矿机跟着矿物利用系列科技一路涨，早期弱、后期强；这一台从头到尾都是每分钟固定那么多——开局第一分钟就能用，而且永远不会更快。开局铺产线、或者在贫矿星上要一个可预测的产量时，它比大型采矿机好算得多。",
+      "key": "mini-miner",
+      "enabled": true,
+      "kind": "miner",
+      "displayName": "小型速采机",
+      "description": "一台不等科技的采矿机。钻头的转速由机内的定速器锁死，采得多快只取决于它自己，和矿脉厚薄、和实验室里那些矿物利用的成果都无关。代价是它永远这么快——别的采矿设备会随着科技越挖越猛，它不会。矿脉在它手里也不会变少：钻头只取表层的松散矿砂。",
+      "//copyFromItemId": "2316 = 大型采矿机。整台克隆：模型、材质、碰撞体、自带的物流站槽位全部继承，本 mod 只改功率、仓位容量和产量。「用大型采矿机的资源换色建模」就是这一句加下面的 tint。",
+      "copyFromItemId": 2316,
+      "//itemId": "6530~6536 已被本文件其它条目占，6560 起是 ores.json 的地盘，取中间空着的 6537。",
+      "itemId": 6537,
+      "//modelId": "上限 727。700~705、707~709、710~727 已被巨型建筑、矿脉和其它新建筑排满，只剩 706 一个空位。模型 ID 进存档，这个数定下来就别动。",
+      "modelId": 706,
+      "//megaTab": "放进本 mod 自己的「巨型建筑」分页与同名建造分类。前 12 格已经排满（1~6、8~12 是十一座巨型建筑，7 是风力发电机集群），所以这一条落在第 13 格。第 13 格界面上没有按钮，靠 BuildMenuScrollPatches 的子项滑动翻到——启动时 BuildMenuSlotGuardPatches 会为此打一行 WARNING，那是预期内的兜底记录，不是缺陷；判据是「能不能滑到」，不是「有没有这行警告」。",
+      "megaTab": true,
+      "gridRow": 1,
+      "gridCol": 13,
+      "buildSlot": 13,
+      "//tint": "大型采矿机本体是黄灰色，染成暖橙偏红——和它的来源一眼分得开，也不和分页里那几座（青/蓝/紫）撞色。",
+      "tint": [
+        1.15,
+        0.62,
+        0.38
+      ],
+      "iconHue": 22.0,
+      "iconSaturationScale": 1.3,
+      "iconMinSaturation": 0.24,
+      "iconValueScale": 1.05,
+      "//miner": "产量钉死的那三个数。**oresPerMinute 不是写进 prefabDesc 的**——采矿速度每 tick 都要乘一遍被科技放大过的 miningSpeed，写死 prefabDesc 只会得到「面板上的数对、实际产量随科技涨」。真正的实现是每 tick 反解 speed 把 miningSpeed 和矿脉数都除掉，见 MiniMinerPatches。",
+      "miner": {
+        "oresPerMinute": 10000,
+        "workEnergyWatt": 1000000,
+        "stationCapacity": 100000,
+        "consumeVeins": false
+      },
+      "recipeId": 6534,
+      "//recipeHandcraftOnly": "只能手搓，而且没有前置科技：配方 Type 设成 0(None)，合成器照样列得出来，而配方选择器按 filter != recipe.Type 过滤，没有哪台机器的 assemblerRecipeType 会等于 0。「无需科技即可解锁」由注册时的 UnlockKey = -1 保证，和这一条是两件事。",
+      "recipeHandcraftOnly": true,
+      "recipeTimeSpend": 60,
+      "recipeGridIndex": 0,
+      "//recipeItems": "一铁一铜。1101 = 铁块，1104 = 铜块，两个都是原版物品。",
+      "recipeItems": [
+        {
+          "id": 1101,
+          "count": 1
+        },
+        {
+          "id": 1104,
+          "count": 1
+        }
+      ]
     }
   ]
 }
