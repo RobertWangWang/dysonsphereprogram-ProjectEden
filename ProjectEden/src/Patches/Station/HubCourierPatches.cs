@@ -518,7 +518,16 @@ namespace ProjectEden.Patches
                 // 按比例带走增产点数——只扣数量不扣 inc 等于凭空增产
                 int inc = slots[s].count > 0 ? (int)((long)slots[s].inc * move / slots[s].count) : 0;
 
+                // **调游戏的搬运方法之前把品质侧信道清零。** preloader 把
+                // StorageComponent.AddItem 改写成了「从 ProjectEdenQualityChannel 读品质」,
+                // 协议是调用方在调用前写——它只在游戏自己的调用点上接好了。
+                // 我们不清的话，它消费的是上一个人留下的值，品质会凭空长出来。
+                // 清零 = 这一笔不带品质（品质在这条路上被丢掉，有界且可解释）。
+                if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+
                 int added = buffer.AddItem(itemId, move, inc, out int remainInc, false);
+
+                if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
 
                 if (added <= 0) continue;
 

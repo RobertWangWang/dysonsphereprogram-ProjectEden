@@ -251,14 +251,56 @@ namespace ProjectEden.Patches
             return AccessTools.MethodDelegate<T>(m);
         }
 
-        internal static bool InsertAtHead(CargoPath path, int itemId, int stack, int inc) =>
-            IsActive
+        /// <summary>
+        /// <b>本 mod 自己调游戏的搬运方法之前，必须先把品质侧信道清零。</b>
+        ///
+        /// preloader 把这些方法改写成了「从 <c>ProjectEdenQualityChannel.Qn</c> 读品质」，
+        /// 协议是<b>调用方在调用前写</b>——而它只在<b>游戏自己的</b>调用点上接好了这条协议。
+        /// 我们直接调的时候一个字都没写，于是它们消费的是<b>上一个人留在寄存器里的值</b>，
+        /// 品质就这么凭空长出来（实测单件涨到 1010，上限是 100）。
+        ///
+        /// 取货类的方法是反过来的（被调方写、调用方读），所以<b>调用后也要清一次</b>，
+        /// 否则它写进去的值会留给下一个读它的人。
+        ///
+        /// 清零的语义是「这一笔不带品质」：这几条路上的品质会被丢掉。
+        /// 那是一笔<b>有界且可解释</b>的损失，而凭空增长不是——阶段 3 把这几条路
+        /// 接上真正的品质之后，这里就从「清零」变成「赋值」。
+        /// </summary>
+        private static void Gate()
+        {
+            if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+        }
+
+        internal static bool InsertAtHead(CargoPath path, int itemId, int stack, int inc)
+        {
+            Gate();
+
+            bool ok = IsActive
                 ? _insertWide != null && _insertWide(path, itemId, (short)stack, (short)inc)
                 : _insertByte != null && _insertByte(path, itemId, Clamp(stack), Clamp(inc));
+
+            Gate();
+
+            return ok;
+        }
 
         private static byte Clamp(int v) => (byte)(v > 255 ? 255 : v < 0 ? 0 : v);
 
         internal static int PickAtRear(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc)
+        {
+            Gate();
+
+            try
+            {
+                return PickAtRearCore(path, needs, out needIdx, out stack, out inc);
+            }
+            finally
+            {
+                Gate();
+            }
+        }
+
+        private static int PickAtRearCore(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc)
         {
             if (IsActive && _pickPathWide != null)
             {
@@ -288,6 +330,20 @@ namespace ProjectEden.Patches
         }
 
         internal static int PickAtRear(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack, out int inc)
+        {
+            Gate();
+
+            try
+            {
+                return PickAtRearCore(traffic, beltId, filter, needs, out stack, out inc);
+            }
+            finally
+            {
+                Gate();
+            }
+        }
+
+        private static int PickAtRearCore(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack, out int inc)
         {
             if (IsActive && _pickTrafficWide != null)
             {

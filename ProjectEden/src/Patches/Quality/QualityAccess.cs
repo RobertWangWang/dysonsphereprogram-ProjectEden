@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -105,7 +106,31 @@ namespace ProjectEden.Patches
         /// </summary>
         internal static readonly ChannelGet GetChannel0 = MakeChannelGet();
 
+        internal delegate void ChannelClear();
+
+        /// <summary>
+        /// 把四个寄存器全部清零。
+        ///
+        /// <b>这是「本 mod 自己调游戏的搬运方法」之前必须做的一步。</b>
+        /// 侧信道的协议是「调用方在调用前写，被调方在体内读」——而这条协议
+        /// preloader 只在<b>游戏自己的</b>调用点上接好了。我们的代码直接调
+        /// <c>PlanetFactory.InsertInto</c>（实测读 11 次）、<c>StorageComponent.AddItem</c>
+        /// （读 3 次）这些方法时，从来没写过寄存器，于是它们消费的是
+        /// <b>上一个人留在里面的值</b>——品质就这么凭空长出来。
+        ///
+        /// 清零的语义是「这一笔我不带品质」。这会让那几条路径上的品质被<b>丢掉</b>，
+        /// 是一笔损失；但损失是有界的、可解释的，而凭空增长不是。
+        /// 等阶段 3 把那几条路接上真正的品质，再把清零换成赋值。
+        ///
+        /// <b>调用前后各清一次。</b> 取货类的方法是反过来的（被调方写、调用方读），
+        /// 只清前面的话，它写进去的那个值会留给下一个读它的人。
+        /// </summary>
+        internal static readonly ChannelClear ClearChannel = MakeChannelClear();
+
         internal static bool ChannelReady => GetChannel0 != null;
+
+        /// <summary>清零器可用。<b>探的是结果</b>，不是「我以为 preloader 装了」。</summary>
+        internal static bool ChannelClearable => ClearChannel != null;
 
         private static ChannelGet MakeChannelGet()
         {
@@ -131,6 +156,59 @@ namespace ProjectEden.Patches
                 return null;
             }
         }
+
+        /// <summary>
+        /// 现编一个把 <c>Q0…Qn</c> 全写 0 的方法。
+        ///
+        /// <b>寄存器个数是数出来的，不是写死 4。</b> preloader 那边的注释说「4 个是实测出来的
+        /// 余量」——余量会变，而这里写死一个数的后果是：将来加到第 5 个寄存器时，
+        /// 多出来那个永远不清，漏法和现在一模一样，且没有任何提示。
+        /// </summary>
+        private static ChannelClear MakeChannelClear()
+        {
+            Type t = AccessTools.TypeByName("ProjectEdenQualityChannel");
+
+            if (t == null) return null;
+
+            var fields = new List<FieldInfo>();
+
+            for (var i = 0; i < 32; i++)
+            {
+                FieldInfo f = AccessTools.Field(t, "Q" + i);
+
+                if (f == null || !f.IsStatic || f.FieldType != typeof(int)) break;
+
+                fields.Add(f);
+            }
+
+            if (fields.Count == 0) return null;
+
+            try
+            {
+                var dm = new DynamicMethod("ProjectEden_ClearChannel", null, new Type[0], t, true);
+
+                ILGenerator il = dm.GetILGenerator();
+
+                foreach (FieldInfo f in fields)
+                {
+                    il.Emit(OpCodes.Ldc_I4_0);
+                    il.Emit(OpCodes.Stsfld, f);
+                }
+
+                il.Emit(OpCodes.Ret);
+
+                Registers = fields.Count;
+
+                return (ChannelClear)dm.CreateDelegate(typeof(ChannelClear));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>数出来的寄存器个数，只用于开机那行状态。</summary>
+        internal static int Registers;
 
         // ── 储物格（储物箱 / 背包 / 物流塔共用的那张表）────────────
 
