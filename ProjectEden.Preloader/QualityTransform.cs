@@ -82,6 +82,16 @@ namespace ProjectEden.Preloader
 
             internal readonly Dictionary<string, string> UnhandledExample =
                 new Dictionary<string, string>(StringComparer.Ordinal);
+
+            /// <summary>
+            /// 认得但没发射的形状，各举一个出处。
+            ///
+            /// <b>没有出处的缺口查不动。</b> 「10 处 ldfld:PAY stloc 拼不出来」本身不指向任何地方，
+            /// 要去读那 10 处的 IL 才知道卡在哪——而找出它们又得再写一遍切分逻辑。
+            /// 缺口报告里带上出处，这一步就免了。
+            /// </summary>
+            internal readonly Dictionary<string, string> PendingExample =
+                new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
         internal static Report Apply(ModuleDefinition module)
@@ -184,6 +194,17 @@ namespace ProjectEden.Preloader
                 regs.Add(q);
             }
 
+            // ── 侧信道的 split：品质那边的「按比例分走」 ──
+            MethodDefinition chSplit = channel.Methods
+                .FirstOrDefault(x => x.Name == QualityChannelBuilder.SplitName);
+
+            if (chSplit == null)
+            {
+                r.Blockers.Add($"侧信道缺 {QualityChannelBuilder.SplitName}");
+
+                return r;
+            }
+
             // ── 哪些参数是载荷参数（→ 映射到寄存器槽位） ──
             Dictionary<MethodDefinition, List<int>> paramSlots =
                 QualityFieldAnalyzer.SelectTwinParams(module, out int _);
@@ -202,7 +223,7 @@ namespace ProjectEden.Preloader
                     // 混合方法要手工写，这一趟不碰
                     if (IsHandWritten(t, m)) continue;
 
-                    Process(m, twin, regs, paramSlots, r, mutate);
+                    Process(m, twin, regs, paramSlots, chSplit, r, mutate);
                 }
             }
 
@@ -304,7 +325,7 @@ namespace ProjectEden.Preloader
         /// </summary>
         private static void Process(MethodDefinition m, IDictionary<string, FieldDefinition> twin,
             IList<FieldDefinition> regs, IDictionary<MethodDefinition, List<int>> paramSlots,
-            Report r, bool mutate)
+            MethodDefinition chSplit, Report r, bool mutate)
         {
             var code = m.Body.Instructions.ToList();
             var work = new List<Job>();
@@ -312,7 +333,7 @@ namespace ProjectEden.Preloader
             // **两遍用同一个上下文。** 分类要调发射器判断「拼不拼得出来」，
             // 所以局部变量映射和参数槽位在分析遍就得建好；
             // 真正往方法体里加孪生局部只在 mutate 那一遍做。
-            var ctx = new Ctx { Method = m, Twin = twin, Regs = regs };
+            var ctx = new Ctx { Method = m, Twin = twin, Regs = regs, ChannelSplit = chSplit };
 
             if (paramSlots.TryGetValue(m, out List<int> slots))
                 for (var s = 0; s < slots.Count && s < regs.Count; s++)
@@ -320,11 +341,47 @@ namespace ProjectEden.Preloader
 
             // 先把语句切出来并算好形状，再据此判定载荷局部——**顺序不能反**。
             // 「一个局部只有在它的每一处赋值都能发射时才可用」这条规则要知道每条语句的形状，
-            // 而形状的计算不依赖载荷局部，所以两阶段能拆开、不循环。
+            // 而形状的计算不依赖载荷局部，所以这一步拆得开。
             List<Stmt> stmts = Split(m, code, twin);
 
-            foreach (VariableDefinition v in SafeCarriers(m, code, stmts))
-                ctx.Locals[v] = null; // 占位：分类只关心「是不是载荷局部」
+            // 载荷局部的零初始化不含载荷字段，切不出来，得反过来补——理由见 ConstInits。
+            stmts.AddRange(ConstInits(m, code, stmts));
+            stmts.Sort((x, y) => x.To.CompareTo(y.To));
+
+            // **但「形状对」不等于「拼得出来」**，而拼不拼得出来又要先知道载荷局部——这是个环。
+            // 形状是 ldfld:PAY stloc 却拼不出来的语句实测有 10 处；只按形状收，
+            // 它们赋值的局部会被当成可用载荷，而它的孪生在那条路径上永远是 0,
+            // 读的人把 0 当真值 —— 不报错，品质凭空归零。正是这一期反复在修的那种自欺。
+            //
+            // 解法是**从乐观集合出发跑不动点**：每轮拿当前集合分类，把定义语句拼不出来的
+            // 局部剔掉再来一轮。集合只减不增，所以一定收敛，最多跑 |集合| 轮。
+            var carriers = new HashSet<VariableDefinition>(SafeCarriers(m, code, stmts));
+
+            while (true)
+            {
+                ctx.Locals.Clear();
+
+                foreach (VariableDefinition v in carriers)
+                    ctx.Locals[v] = null; // 占位：分类只关心「是不是载荷局部」
+
+                var doomed = new HashSet<VariableDefinition>();
+
+                foreach (Stmt st in stmts)
+                {
+                    if (!DefinesCarrier.Contains(st.Core) || !Emitted.Contains(st.Core)) continue;
+
+                    VariableDefinition dv = VarOf(m, code[st.To]);
+
+                    if (dv == null || !carriers.Contains(dv)) continue;
+
+                    if (Build(ctx, code, new Job { Core = st.Core, From = st.From, To = st.To }) == null)
+                        doomed.Add(dv);
+                }
+
+                if (doomed.Count == 0) break;
+
+                carriers.ExceptWith(doomed);
+            }
 
             // 2) 逐语句匹配
             var touched = false;
@@ -359,6 +416,10 @@ namespace ProjectEden.Preloader
 
                             r.Pending[tag] = r.Pending.TryGetValue(tag, out int q) ? q + 1 : 1;
 
+                            if (!r.PendingExample.ContainsKey(tag))
+                                r.PendingExample[tag] =
+                                    $"{m.DeclaringType.Name}::{m.Name} @IL_{code[from].Offset:X4}";
+
                             continue;
                         }
 
@@ -373,6 +434,10 @@ namespace ProjectEden.Preloader
                     r.Recognized++;
 
                     r.Pending[core] = r.Pending.TryGetValue(core, out int p) ? p + 1 : 1;
+
+                    if (!r.PendingExample.ContainsKey(core))
+                        r.PendingExample[core] =
+                            $"{m.DeclaringType.Name}::{m.Name} @IL_{code[from].Offset:X4}";
 
                     continue;
                 }
@@ -552,7 +617,202 @@ namespace ProjectEden.Preloader
         {
             "ldfld:PAY stloc",      // local = X.inc
             "ldfld:PAY div stloc",  // local = X.inc / count（求等级）
+            "ldc stloc",            // local = 常量（零初始化，孪生值恒为 0）
+            "ldloc stloc",          // local = 另一个载荷局部（复制传播）
+            "call:split_inc stloc",  // local = split_inc(ref n, ref m, p)
         }, StringComparer.Ordinal);
+
+        /// <summary>
+        /// 把「载荷局部的<b>常量初始化</b>」补进语句表。
+        ///
+        /// 这些语句里没有任何载荷字段，所以按载荷切分时压根看不见它们——
+        /// 而「一个局部的每一处赋值都要能发射」那条规则看得见，于是
+        /// <c>int num = 0;</c> 这一行就足以把整个局部判死。实测
+        /// <c>StationComponent::InternalTickLocal</c> 的 V_3 正是这样：
+        /// 三处真正的 <c>V_3 = storage[i].inc</c> 全被开头那条 <c>ldc.i4.0</c> 拖下水。
+        ///
+        /// <b>顺序上它必须在载荷语句之后算</b>：谁是候选载荷局部，要先看载荷语句。
+        /// </summary>
+        private static List<Stmt> ConstInits(MethodDefinition m, IList<Instruction> code,
+            List<Stmt> stmts)
+        {
+            var extra = new List<Stmt>();
+            var cand = new HashSet<VariableDefinition>();
+
+            foreach (Stmt st in stmts)
+            {
+                if (!DefinesCarrier.Contains(st.Core)) continue;
+
+                VariableDefinition v = VarOf(m, code[st.To]);
+
+                if (v != null) cand.Add(v);
+            }
+
+            if (cand.Count == 0) return extra;
+
+            var taken = new HashSet<int>();
+
+            // (1) 复制传播与 split_inc，一起跑到不动点——它们互相喂：
+            //     `V_44 = V_3`（复制）→ `V_45 = split_inc(ref n, ref V_44, p)`（分走）
+            //     → `X.inc -= V_45`（下游那 9 处 sub）。中间断一环，后面全塌。
+            //
+            // 这条以前是**明确拒绝**的，因为一个「标记成载荷却从不发射」的局部会让
+            // 读它的地方拿到 0 并当成真值。现在拒绝的理由消失了：这里不只是把 B 标记成
+            // 载荷，同时把 `Bq = Aq` 这条语句一起补进语句表，赋值和标记是一起发生的。
+            //
+            // 它是 split_inc 那一族的前置：`V_44 = V_3` 这一步不通，
+            // 后面 `split_inc(ref n, ref V_44, p)` 就没有孪生可动。
+            bool grew;
+
+            do
+            {
+                grew = false;
+
+                for (var i = 1; i < code.Count; i++)
+                {
+                    if (taken.Contains(i) || !IsStloc(code[i])) continue;
+
+                    VariableDefinition dst = VarOf(m, code[i]);
+                    VariableDefinition src = IsLdloc(code[i - 1]) ? VarOf(m, code[i - 1]) : null;
+
+                    if (dst == null || src == null || !cand.Contains(src)) continue;
+
+                    taken.Add(i);
+
+                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldloc stloc" });
+
+                    if (cand.Add(dst)) grew = true;
+                }
+
+                for (var i = 1; i < code.Count; i++)
+                {
+                    if (taken.Contains(i) || !IsStloc(code[i])) continue;
+
+                    VariableDefinition dst = VarOf(m, code[i]);
+
+                    if (dst == null) continue;
+
+                    int[] a = SplitIncArgs(m, code, i - 1, out VariableDefinition mv);
+
+                    if (a == null || mv == null || !cand.Contains(mv)) continue;
+
+                    taken.Add(i);
+
+                    extra.Add(new Stmt { From = a[0], To = i, Core = "call:split_inc stloc" });
+
+                    if (cand.Add(dst)) grew = true;
+                }
+            }
+            while (grew);
+
+            // (2) 零初始化。`ldc ; stloc` 自成一条语句：ldc 压一个、stloc 弹一个，
+            // 栈深进出都是零，所以只看前一条指令就够，不必再跑一遍切分。
+            for (var i = 1; i < code.Count; i++)
+            {
+                if (taken.Contains(i) || !IsStloc(code[i])) continue;
+
+                VariableDefinition v = VarOf(m, code[i]);
+
+                if (v == null || !cand.Contains(v)) continue;
+
+                if (!code[i - 1].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal)) continue;
+
+                extra.Add(new Stmt { From = i - 1, To = i, Core = "ldc stloc" });
+            }
+
+            return extra;
+        }
+
+        /// <summary>
+        /// 认一次 <c>split_inc(ref n, ref m, p)</c> 调用：<paramref name="at"/> 是那条 call。
+        /// 认出来就返回三个（或四个，实例方法多一个 this）实参的起点，
+        /// 并从 <c>ref m</c> 取出被分走点数的那个局部。
+        ///
+        /// <b>只认 <c>ldloca &lt;局部&gt;</c> 形式的两个 ref 实参。</b> 品质那边要发的是
+        /// <c>Split(n之后的值, ref m的孪生, p)</c>——第一个实参是<b>值</b>不是地址，
+        /// 而原版 split_inc 在调用里已经把 n 减掉了 p，所以调用之后读那个局部
+        /// 拿到的正是 Split 要的 countAfter。这层对应关系只在「n 是个局部」时成立，
+        /// 换成别的表达式就不成立了，所以宁可认不出来。
+        /// </summary>
+        private static int[] SplitIncArgs(MethodDefinition m, IList<Instruction> code, int at,
+            out VariableDefinition mv)
+        {
+            mv = null;
+
+            if (at < 0 || code[at].OpCode != OpCodes.Call && code[at].OpCode != OpCodes.Callvirt)
+                return null;
+
+            if (!(code[at].Operand is MethodReference mr) || mr.Name != "split_inc") return null;
+
+            // 原版有两个同名重载（byte 那个是传送带侧、Int32 那个是仓储账本），
+            // 按**参数类型**分，绝不按名字和个数——那正是 CargoIncWidener 踩过的坑。
+            if (mr.Parameters.Count != 3) return null;
+            if (!mr.Parameters[0].ParameterType.IsByReference) return null;
+            if (!mr.Parameters[1].ParameterType.IsByReference) return null;
+
+            int argc = mr.Parameters.Count + (mr.HasThis ? 1 : 0);
+            int[] a = ArgStarts(code, at, argc);
+
+            if (a == null) return null;
+
+            int nAt = a[argc - 3];
+            int mAt = a[argc - 2];
+            int pAt = a[argc - 1];
+
+            // 两个 ref 实参各自必须只有一条指令，而且是 ldloca
+            if (mAt - nAt != 1 || pAt - mAt != 1) return null;
+            if (code[nAt].OpCode != OpCodes.Ldloca && code[nAt].OpCode != OpCodes.Ldloca_S) return null;
+            if (code[mAt].OpCode != OpCodes.Ldloca && code[mAt].OpCode != OpCodes.Ldloca_S) return null;
+
+            mv = code[mAt].Operand as VariableDefinition;
+
+            return a;
+        }
+
+        /// <summary>
+        /// 这条指令能不能原样重放？<paramref name="last"/> 为真时额外放行那条收尾的写指令
+        /// （<c>stfld</c> / <c>stelem</c> / <c>Array.Resize</c>）——它写的是孪生字段，
+        /// 由调用方保证。
+        ///
+        /// <b>放行清单是白名单而不是黑名单。</b> 认不出来的指令一律拒绝：重放一条带副作用的
+        /// 指令等于把那个副作用做两遍，而那是静默的——数量对不上要很久以后才看得出来。
+        /// </summary>
+        private static bool IsStructural(Instruction i, bool last)
+        {
+            if (IsPureLoad(i)) return true;
+
+            string n = i.OpCode.Name;
+
+            if (n == "ldnull" || n == "newarr" || n == "ldlen"
+                || n.StartsWith("conv.", StringComparison.Ordinal)
+                || n.StartsWith("ldflda", StringComparison.Ordinal)) return true;
+
+            if (!last) return false;
+
+            if (n.StartsWith("stfld", StringComparison.Ordinal)
+                || n.StartsWith("stelem", StringComparison.Ordinal)) return true;
+
+            return (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt)
+                   && i.Operand is MethodReference mr
+                   && mr.Name == "Resize"
+                   && mr.DeclaringType.FullName == "System.Array";
+        }
+
+        /// <summary>原样克隆一条指令，但把主干道载荷字段换成它的孪生。</summary>
+        private static Instruction CloneSwap(Ctx ctx, Instruction i)
+        {
+            if (i.Operand is FieldReference fr
+                && ctx.Twin.TryGetValue(fr.DeclaringType.FullName + "::" + fr.Name,
+                    out FieldDefinition tf))
+                return Instruction.Create(i.OpCode, (FieldReference)tf);
+
+            return Clone(i);
+        }
+
+        private static bool IsLdloc(Instruction i) =>
+            i.OpCode == OpCodes.Ldloc || i.OpCode == OpCodes.Ldloc_S ||
+            i.OpCode == OpCodes.Ldloc_0 || i.OpCode == OpCodes.Ldloc_1 ||
+            i.OpCode == OpCodes.Ldloc_2 || i.OpCode == OpCodes.Ldloc_3;
 
         /// <summary>
         /// 可用的载荷局部：<b>它的每一处赋值都必须来自会被发射的形状</b>。
@@ -674,6 +934,192 @@ namespace ProjectEden.Preloader
                     outp.Add(Instruction.Create(OpCodes.Stfld, tf));
 
                     return outp;
+                }
+
+                // *outInc += X.inc  →  Q<槽位> += X.qua
+            //
+            // 这是**把值带出方法**的那一族：被加的地址是一个 `ref int` 出参。
+            // 出参那条路正是被推翻的「给方法加参数」方案要走的，所以品质这边改走侧信道：
+            // 写进静态寄存器 Q，调用方读回来。**只认地址就是那个出参本身**——
+            // 换成别的地址表达式就没有对应的寄存器可写，宁可认不出来。
+            case "ldind.i4 ldfld:PAY add stind.i4":
+            {
+                if (job.To - job.From < 4) return null;
+                if (code[job.To].OpCode != OpCodes.Stind_I4) return null;
+                if (code[job.To - 1].OpCode != OpCodes.Add) return null;
+                if (code[job.From + 2].OpCode != OpCodes.Ldind_I4) return null;
+
+                ParameterDefinition op = ParamOf(ctx.Method, code[job.From]);
+
+                if (op == null || op != ParamOf(ctx.Method, code[job.From + 1])) return null;
+                if (!ctx.ParamSlot.TryGetValue(op, out int oslot) || oslot >= ctx.Regs.Count) return null;
+
+                List<Instruction> add = TwinValue(ctx, code, job.From + 3, job.To - 2);
+
+                if (add == null) return null;
+
+                var oout = new List<Instruction> { Instruction.Create(OpCodes.Ldsfld, ctx.Regs[oslot]) };
+
+                oout.AddRange(add);
+                oout.Add(Instruction.Create(OpCodes.Add));
+                oout.Add(Instruction.Create(OpCodes.Stsfld, ctx.Regs[oslot]));
+
+                return oout;
+            }
+
+            // ── 数组本身的那一族：分配、清零、改长度 ──
+            //
+            // 这几种语句碰的不是点数值，而是**装点数的那个数组**。孪生数组和原数组
+            // 永远等长、同生共死，所以孪生语句就是同一条语句把字段换成孪生字段。
+            // 值那一侧一律照抄（<c>new int[n]</c>、<c>null</c>、<c>= 0</c>），
+            // 因为新数组的品质本来就该是零。
+            //
+            // **前提是整条语句除了那个载荷字段之外没有别的副作用**——否则照抄会把副作用
+            // 做第二遍。所以每条指令都要过一遍纯度检查，不纯就拒绝。
+            case "ldnull stfld:PAY":
+            case "newarr stfld:PAY":
+            case "ldlen newarr stfld:PAY":
+            case "ldflda:PAY call:Resize":
+            case "ldfld:PAY ldc stelem":
+            {
+                var aout = new List<Instruction>();
+
+                for (int k = job.From; k <= job.To; k++)
+                {
+                    if (!IsStructural(code[k], k == job.To)) return null;
+
+                    aout.Add(CloneSwap(ctx, code[k]));
+                }
+
+                return aout;
+            }
+
+            // served[i] = (incServed[i] = 0)
+            //
+            // 一条语句里有**两个** stelem，其中只有一个是载荷。整条照抄会连
+            // `served[i] = 0` 一起做第二遍——那是往真实计数里写东西，不是多写一条孪生。
+            // 所以这里只取载荷那一半：`incServedQua[i] = 0`。
+            case "ldfld:PAY ldc dup stloc stelem stelem":
+            {
+                int inner = job.To - 1;
+
+                if (code[inner].OpCode != OpCodes.Stelem_I4 && code[inner].OpCode != OpCodes.Stelem_Any)
+                    return null;
+
+                int[] ea = ArgStarts(code, inner, 3);
+
+                if (ea == null) return null;
+
+                // 值那一侧必须是常量——它后面挂着 `dup ; stloc`，照抄会重复写那个局部
+                if (!code[ea[2]].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal)) return null;
+
+                var eout = new List<Instruction>();
+
+                for (int k = ea[0]; k < ea[2]; k++)
+                {
+                    if (!IsStructural(code[k], false)) return null;
+
+                    eout.Add(CloneSwap(ctx, code[k]));
+                }
+
+                eout.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+                eout.Add(Clone(code[inner]));
+
+                return eout;
+            }
+
+            // local = split_inc(ref n, ref m, p)  →  twin = Split(n, ref mTwin, p)
+            //
+            // 原版这一行是「从 m 点数里按比例分走 p 件的份额」，同时把 n 减掉 p、把 m 减掉份额。
+            // 品质那边一模一样：侧信道的 Split 镜像了同一段算式，**但第一个参数取值不取址**
+            // ——因为原版调用返回时 n 已经减过了，这时读那个局部正是 Split 要的 countAfter。
+            //
+            // 不能改成再调一次原版 split_inc：它会把 n **再**减一次 p，那是凭空吃掉物品。
+            case "call:split_inc stloc":
+            {
+                if (ctx.ChannelSplit == null) return null;
+
+                int[] sa = SplitIncArgs(ctx.Method, code, job.To - 1, out VariableDefinition smv);
+
+                if (sa == null || smv == null) return null;
+
+                VariableDefinition sdst = VarOf(ctx.Method, store);
+
+                if (sdst == null) return null;
+                if (!ctx.Locals.TryGetValue(smv, out VariableDefinition smt)) return null;
+                if (!ctx.Locals.TryGetValue(sdst, out VariableDefinition sdt)) return null;
+
+                var snv = code[sa[sa.Length - 3]].Operand as VariableDefinition;
+
+                if (snv == null) return null;
+
+                // 第三个实参原样重放——必须是纯取值，否则重放会把副作用做第二遍
+                var sout = new List<Instruction>();
+
+                for (int k = sa[sa.Length - 1]; k < job.To - 1; k++)
+                {
+                    if (!IsPureLoad(code[k])) return null;
+
+                    sout.Add(Clone(code[k]));
+                }
+
+                if (smt == null || sdt == null) return new List<Instruction>();
+
+                var body = new List<Instruction>
+                {
+                    Instruction.Create(OpCodes.Ldloc, snv),
+                    Instruction.Create(OpCodes.Ldloca, smt),
+                };
+
+                body.AddRange(sout);
+                body.Add(Instruction.Create(OpCodes.Call,
+                    ctx.Method.Module.ImportReference(ctx.ChannelSplit)));
+                body.Add(Instruction.Create(OpCodes.Stloc, sdt));
+
+                return body;
+            }
+
+            // localB = localA  →  twinB = twinA
+            case "ldloc stloc":
+            {
+                VariableDefinition psrc = VarOf(ctx.Method, code[job.From]);
+                VariableDefinition pdst = VarOf(ctx.Method, store);
+
+                if (psrc == null || pdst == null) return null;
+                if (!ctx.Locals.TryGetValue(psrc, out VariableDefinition pst)) return null;
+                if (!ctx.Locals.TryGetValue(pdst, out VariableDefinition pdt)) return null;
+
+                // 分类遍里两个孪生局部都还没建，能走到这一步就说明拼得出来
+                if (pst == null || pdt == null) return new List<Instruction>();
+
+                return new List<Instruction>
+                {
+                    Instruction.Create(OpCodes.Ldloc, pst),
+                    Instruction.Create(OpCodes.Stloc, pdt),
+                };
+            }
+
+            // local = <常量>  →  twinLocal = 0
+                //
+                // C# 编译器给每个声明的局部都会在方法开头放一条 `ldc.i4.0 ; stloc`，
+                // 而这条语句里没有任何载荷字段，所以它**不在按载荷切出来的语句表里**。
+                // 它不发射的后果不是少发一条，而是整个局部作废：
+                // 「每一处赋值都要能发射」这条规则会因为这一处而把 V_3 判死，
+                // 连带它后面三处真正的 `V_3 = storage[i].inc` 全部拼不出来。
+                // 实测 StationComponent::InternalTickLocal 就是这样卡住的。
+                case "ldc stloc":
+                {
+                    VariableDefinition cdst = VarOf(ctx.Method, store);
+
+                    if (cdst == null || !ctx.Locals.TryGetValue(cdst, out VariableDefinition ctv)) return null;
+
+                    var cout = new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_0) };
+
+                    if (ctv == null) return cout;
+
+                    cout.Add(Instruction.Create(OpCodes.Stloc, ctv));
+
+                    return cout;
                 }
 
                 // local = X.inc  →  twinLocal = X.qua
@@ -893,6 +1339,9 @@ namespace ProjectEden.Preloader
             internal MethodDefinition Method;
             internal IDictionary<string, FieldDefinition> Twin;
             internal IList<FieldDefinition> Regs;
+
+            /// <summary>侧信道的 <c>Split(countAfter, ref qua, p)</c>——原版 split_inc 的品质版。</summary>
+            internal MethodDefinition ChannelSplit;
             internal Dictionary<VariableDefinition, VariableDefinition> Locals =
                 new Dictionary<VariableDefinition, VariableDefinition>();
             internal Dictionary<ParameterDefinition, int> ParamSlot =
@@ -1110,6 +1559,17 @@ namespace ProjectEden.Preloader
             // local = X.inc  →  twinLocal = X.qua。局部变量孪生的第一个用户。
             "ldfld:PAY stloc",
 
+            // local = <常量> → twinLocal = 0。**它不是按载荷切出来的**，
+            // 是载荷局部认定之后反过来补进语句表的，理由见 Build 里那一段。
+            "ldc stloc",
+
+            // localB = localA → twinB = twinA。同样是补进去的。
+            "ldloc stloc",
+
+            // local = split_inc(ref n, ref m, p)。**split_inc 一族的入口**：
+            // 站点内搬运那 9 处 `X.inc -= 份额` 的被减数就是它定义的局部。
+            "call:split_inc stloc",
+
             // local = X.inc / count（求单件等级）。**依赖链的上游**：
             // `X.inc -= 等级` 那一族要用它定义的局部，它一通，下游整族跟着通。
             "ldfld:PAY div stloc",
@@ -1121,6 +1581,18 @@ namespace ProjectEden.Preloader
             "ldflda:PAY dup ldind.i4 sub stind.i4",
             "ldfld:PAY ldc dup ldind.i4 add stind.i4",
             "ldc ldflda:PAY dup ldind.i4 add stind.i4",
+
+            // *outInc += X.inc → Q<槽位> += X.qua。把值带出方法的那一族，走侧信道。
+            "ldind.i4 ldfld:PAY add stind.i4",
+
+            // 数组本身的一族：分配、清零、改长度。孪生数组与原数组等长同生死，
+            // 所以孪生语句就是同一条语句换个字段——**前提是整条语句没有别的副作用**。
+            "ldnull stfld:PAY",
+            "newarr stfld:PAY",
+            "ldlen newarr stfld:PAY",
+            "ldflda:PAY call:Resize",
+            "ldfld:PAY ldc stelem",
+            "ldfld:PAY ldc dup stloc stelem stelem",
         }, StringComparer.Ordinal);
 
         /// <summary>
@@ -1133,6 +1605,9 @@ namespace ProjectEden.Preloader
             "ldc stfld:PAY",                                        // X.inc = 常数
             "stfld:PAY",                                            // X.inc = 栈上的值
             "ldfld:PAY stloc",                                      // local = X.inc
+            "ldc stloc",                                            // local = 常量（载荷局部的零初始化）
+            "ldloc stloc",                                          // local = 另一个载荷局部
+            "call:split_inc stloc",                                 // local = split_inc(...)
             "ldflda:PAY dup ldind.i4 add stind.i4",                 // X.inc += v
             "ldflda:PAY dup ldind.i4 sub stind.i4",                 // X.inc -= v
             "ldfld:PAY ldc dup ldind.i4 add stind.i4",              // 数组元素 += v

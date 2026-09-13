@@ -91,7 +91,11 @@ Write-Host ("    EMITTED {0} | no-twin-needed {1} | dropped {2} | recognized-but
 if ($pending.Count -gt 0) {
     Write-Host ""
     Write-Host "=== recognized but NO EMITTER yet ($($pending.Count) kinds) ===" -ForegroundColor Magenta
-    foreach ($k in ($pending.Keys | Sort-Object { -$pending[$_] })) { Write-Host ("{0,4}x  {1}" -f $pending[$k], $k) -ForegroundColor Magenta }
+    $pendE = Field $r "PendingExample"
+    foreach ($k in ($pending.Keys | Sort-Object { -$pending[$_] })) {
+        Write-Host ("{0,4}x  {1}" -f $pending[$k], $k) -ForegroundColor Magenta
+        Write-Host ("        e.g. {0}" -f $pendE[$k]) -ForegroundColor DarkGray
+    }
 }
 
 if ($un.Count -gt 0) {
