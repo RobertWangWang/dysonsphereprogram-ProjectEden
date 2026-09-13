@@ -152,6 +152,39 @@ No tests, no linter. Verification is: launch DSP through r2modman and read `BepI
 
 **Rider needs its MSBuild pinned.** Because the project targets `net472`, Rider switches to a .NET Framework MSBuild and on auto picks VS BuildTools 18.0, which cannot resolve `Microsoft.NET.Sdk` against SDK 8.0.424 — the project then fails to load with `找不到指定的 SDK "Microsoft.NET.SDK.WorkloadAutoImportPropsLocator"`. Fix: Settings → Build, Execution, Deployment → **Toolset and Build** → *Use MSBuild version* → `C:\Program Files\JetBrains\JetBrains Rider 2026.2.1\tools\MSBuild\Current\Bin\amd64\MSBuild.exe`. Rider's bundled MSBuild is the only one on this machine that works; both VS MSBuilds fail on any SDK-style project. `dotnet build` is unaffected, so **a green CLI build does not prove Rider can open the solution** — verify both after touching the TFM or toolset. Rider's real error lands in `%LOCALAPPDATA%\JetBrains\Rider<ver>\log\MsBuildTask\<pid>.<solution>.msbuild-task.log`.
 
+## Editing files: use the Write/Edit tools, not shell heredocs
+
+**Write and edit files with the `Write` and `Edit` tools. Do not route edits through `bash`
+heredocs, `python - <<'EOF'` one-liners, or `sed -i`.** This is an owner instruction, and it was
+given after watching the shell route fail repeatedly in a single session.
+
+Every failure below is real and happened here, none of them in the content being written — all of
+them in the layer that was supposed to deliver it:
+
+- **The heredoc itself gets eaten.** `python - <<'PY'` with a script containing quotes came back as
+  `bash: unexpected EOF while looking for matching '''`, twice, on scripts that were perfectly valid
+  Python. The delimiter is quoted, so this should not be possible; it is, so stop relying on it.
+- **PowerShell scripts must be pure ASCII, and a heredoc makes that easy to forget.** Windows
+  PowerShell reads `.ps1` as ANSI, so one Chinese comment turns the whole file into parser errors
+  that look nothing like an encoding problem (`unexpected token 'case'`, `missing string
+  terminator`). This trap is already documented further down and was re-triggered anyway, *because*
+  the script was being written through a heredoc instead of a file.
+- **Python's own escape warnings.** `\s` / `\S` inside a heredoc-delivered regex raises
+  `SyntaxWarning: invalid escape sequence`, noise that hides real output.
+- **Anchor mismatches cost a round trip each.** A replace-with-assert script fails on the first
+  wrong character of indentation or a full-width comma, and each failure is one more round of "print
+  the surrounding text, adjust, rerun". `Edit` matches against the file as read, so the mismatch is
+  caught before anything runs.
+
+**What the shell is still right for:** running builds, `git`, `dotnet`, the packager, the icon
+generator, Cecil/IL inspection — anything that *executes* rather than *authors*. A script that is
+genuinely a program (a numeric verification sweep, a one-off migration over many files) belongs in a
+real file under the scratchpad, written with `Write` and then run — not inlined into a heredoc.
+
+The underlying rule: **the delivery mechanism for an edit should not be able to fail in ways the
+edit itself cannot.** Every failure above was invisible in the change being made and only appeared
+in the shell's parsing of it.
+
 ## How to debug this mod
 
 Reading IL beats guessing. Every mechanism documented below was found this way, and several rounds were wasted by not doing it first:
