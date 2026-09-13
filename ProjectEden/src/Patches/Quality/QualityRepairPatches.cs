@@ -30,7 +30,65 @@ namespace ProjectEden.Patches
     {
         [HarmonyPostfix]
         [HarmonyPatch(typeof(GameData), nameof(GameData.Import))]
-        private static void GameData_Import() => Run("读档后");
+        private static void GameData_Import()
+        {
+            _nextWatch = 0f;
+            _worstSeen = 0;
+
+            Run("读档后");
+        }
+
+        // ── 玩的过程中也盯着，而不是只在读档时查一次 ──────────
+
+        private static float _nextWatch;
+        private static int _worstSeen;
+
+        /// <summary>
+        /// 每 30 秒扫一遍<b>机甲背包</b>，越界就夹回并报出来。
+        ///
+        /// <b>为什么要它：读档时查一次不够。</b> 读档那一次只能证明<b>存档</b>是干净的；
+        /// 漏不漏是玩的过程中的事，而那时唯一的探针是提示栏——
+        /// 那要玩家正好把鼠标停在一格胀了的货上才会响。
+        /// 「这一局没漏」和「玩家没去悬停」在日志上长得一模一样，
+        /// 于是每次都只能说「再玩一会儿看看」。
+        ///
+        /// 只扫背包：它是一个 <c>StorageComponent</c>、几十格，代价可以忽略，
+        /// 而玩家手上那一堆恰恰是最容易被污染也最容易被看见的。
+        ///
+        /// 挂在 <c>UIGame._OnUpdate</c> 上是因为它<b>在主线程</b>——
+        /// 物流站那条 tick 是跨星球并行的（约 31 个工作线程），在那上面扫共享状态
+        /// 是本仓库记过的第 4 号坑。节流用 <c>realtimeSinceStartup</c> 而不是
+        /// <c>gameTick</c>：后者换存档时会往回跳，定时就再也不会到期，而且悄无声息。
+        /// </summary>
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(UIGame), "_OnUpdate")]
+        private static void UIGame_OnUpdate()
+        {
+            if (!QualityAccess.GridWritable) return;
+
+            float now = UnityEngine.Time.realtimeSinceStartup;
+
+            if (now < _nextWatch) return;
+
+            _nextWatch = now + 30f;
+
+            StorageComponent package = GameMain.mainPlayer?.package;
+
+            if (package == null) return;
+
+            var worst = 0;
+            int fixedUp = ClampStorage(package, ref worst);
+
+            if (fixedUp <= 0 || worst <= _worstSeen) return;
+
+            _worstSeen = worst;
+
+            ProjectEdenPlugin.Log.LogError(
+                $"物品品质：**背包里的品质还在涨**——{fixedUp} 格越界，最高每件 {worst} 分" +
+                $"（上限 {QualityRefineryPatches.MaxPerItem}），已夹回。" +
+                "读档时是干净的，所以这是玩的过程中漏出来的：" +
+                "还有一条搬运路径只搬了件数没搬品质，或者顶掉了某个 preloader 改写过的方法。");
+        }
 
         internal static void Run(string why)
         {
