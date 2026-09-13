@@ -430,10 +430,19 @@ namespace ProjectEden.Preloader
         /// 真正的判据是数据流（一个参数被当实参传给了已孪生的参数，它自己也得孪生），
         /// 那一步属于改写阶段，这里先把种子数量报出来当基线。
         /// </summary>
-        private static void CountParams(ModuleDefinition module,
-            IDictionary<string, FieldDefinition> payload, Report r)
+        /// <summary>
+        /// 要长孪生参数的方法，以及各自哪几个参数位。
+        ///
+        /// <b>分析器和改写器共用这一个方法。</b> 理由同 <see cref="ResolvePayload"/>：
+        /// 两边各写一份选取规则，迟早有一边先改，而那时两边都会报「全过」。
+        /// </summary>
+        internal static Dictionary<MethodDefinition, List<int>> SelectTwinParams(
+            ModuleDefinition module, out int skipped)
         {
             var skip = new HashSet<string>(NotifySink, StringComparer.Ordinal);
+            var found = new Dictionary<MethodDefinition, List<int>>();
+
+            skipped = 0;
 
             foreach (TypeDefinition t in AllTypes(module))
             {
@@ -441,16 +450,36 @@ namespace ProjectEden.Preloader
 
                 foreach (MethodDefinition m in t.Methods)
                 {
-                    int slots = m.Parameters.Count(p => LooksLikeInc(p.Name) && IsIntegerPayload(p.ParameterType));
+                    List<int> idx = null;
 
-                    if (slots == 0) continue;
+                    for (var i = 0; i < m.Parameters.Count; i++)
+                    {
+                        ParameterDefinition p = m.Parameters[i];
 
-                    if (skip.Contains(t.FullName + "::" + m.Name)) { r.SkippedParamMethods++; continue; }
+                        if (!LooksLikeInc(p.Name) || !IsIntegerPayload(p.ParameterType)) continue;
 
-                    r.ParamMethods++;
-                    r.ParamSlots += slots;
+                        (idx ?? (idx = new List<int>())).Add(i);
+                    }
+
+                    if (idx == null) continue;
+
+                    if (skip.Contains(t.FullName + "::" + m.Name)) { skipped++; continue; }
+
+                    found[m] = idx;
                 }
             }
+
+            return found;
+        }
+
+        private static void CountParams(ModuleDefinition module,
+            IDictionary<string, FieldDefinition> payload, Report r)
+        {
+            Dictionary<MethodDefinition, List<int>> sel = SelectTwinParams(module, out int skipped);
+
+            r.SkippedParamMethods = skipped;
+            r.ParamMethods = sel.Count;
+            r.ParamSlots = sel.Values.Sum(v => v.Count);
         }
 
         /// <summary>

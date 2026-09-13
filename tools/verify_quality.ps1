@@ -192,10 +192,82 @@ Check ($broken -eq 0) "all branch targets still resolve across $checked method b
 
 $asm3.Dispose()
 
+# ============================================================================
+# Stage 1b: twin parameters + call-site fixups, on top of the 1a result.
+# ============================================================================
+
+Write-Host ""
+Write-Host "=== stage 1b: twin parameters + call sites ===" -ForegroundColor Cyan
+
+$out2 = Join-Path $work "Assembly-CSharp.quality1b.dll"
+$asm4 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out, $rp2)
+
+$paramT = $pre.GetType("ProjectEden.Preloader.QualityParamAdder")
+$papply = $paramT.GetMethod("Apply", [Reflection.BindingFlags]"NonPublic,Static")
+$pr     = $papply.Invoke($null, @($asm4.MainModule))
+
+foreach ($n in (Field $pr "Notes")) { Write-Host "  note: $n" }
+
+$pBlockers = Field $pr "Blockers"
+if ($pBlockers.Count -gt 0) {
+    Write-Host "=== 1b BLOCKERS ($($pBlockers.Count)) ===" -ForegroundColor Red
+    foreach ($b in $pBlockers) { Write-Host "  $b" -ForegroundColor Red }
+    $asm4.Dispose()
+    exit 1
+}
+
+Write-Host ("  methods {0}  slots {1} (byref {2})  call sites {3}  bodies {4}" -f `
+    (Field $pr "Methods"), (Field $pr "Slots"), (Field $pr "ByRefSlots"), `
+    (Field $pr "CallSites"), (Field $pr "TouchedBodies"))
+
+$asm4.Write($out2)
+$asm4.Dispose()
+Write-Host "  written: $out2"
+
+Write-Host ""
+Write-Host "=== 1b re-read assertions ===" -ForegroundColor Cyan
+$asm5 = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out2, $rp2)
+$mod5 = $asm5.MainModule
+
+# The decisive check: after write/re-read, EVERY call site of a widened method must be
+# immediately preceded by exactly the quality arguments we push. A missed call site
+# leaves the stack one value short, and that is reported by nothing else.
+$pverify = $paramT.GetMethod("Verify", [Reflection.BindingFlags]"NonPublic,Static")
+$vr2     = $pverify.Invoke($null, @($mod5))
+$v2Block = Field $vr2 "Blockers"
+
+foreach ($b in $v2Block) { Check $false $b }
+Check ($v2Block.Count -eq 0) "every widened call site is preceded by its quality arguments"
+Check ((Field $vr2 "CallSites") -eq (Field $pr "CallSites")) `
+    ("call site count survives write/re-read ({0} vs {1})" -f (Field $vr2 "CallSites"), (Field $pr "CallSites"))
+
+# 1a's fields must still be intact after 1b touched ~700 method bodies
+$vr3 = $verify.Invoke($null, @($mod5))
+Check ((Field $vr3 "Blockers").Count -eq 0) "1a twin fields still intact after 1b"
+
+# branch targets again - 1b DOES change body lengths, so this is no longer trivial
+$broken2 = 0; $checked2 = 0
+foreach ($t in $mod5.Types) {
+    foreach ($m in $t.Methods) {
+        if (-not $m.HasBody) { continue }
+        $checked2++
+        foreach ($i in $m.Body.Instructions) {
+            $op = $i.Operand
+            if ($op -is [Mono.Cecil.Cil.Instruction]) { if ($op.Offset -lt 0) { $broken2++ } }
+            elseif ($op -is [Mono.Cecil.Cil.Instruction[]]) {
+                foreach ($x in $op) { if ($x.Offset -lt 0) { $broken2++ } }
+            }
+        }
+    }
+}
+Check ($broken2 -eq 0) "all branch and switch targets resolve after 1b ($checked2 bodies)"
+
+$asm5.Dispose()
+
 Write-Host ""
 if ($fail -gt 0) {
     Write-Host "$fail assertion(s) FAILED" -ForegroundColor Red
     exit 1
 }
-Write-Host "stage 1a OK - fields added, assembly re-read clean" -ForegroundColor Green
+Write-Host "stages 1a + 1b OK - fields and parameters in place, re-read clean" -ForegroundColor Green
 exit 0

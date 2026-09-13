@@ -205,18 +205,47 @@ namespace ProjectEden.Patches
 
         private delegate int PickRearTrafficByte(CargoTraffic t, int beltId, int filter, int[] needs, out byte stack, out byte inc);
 
+        // ── 第三套：加宽 + 品质尾参（物品品质阶段 1b 之后的签名） ──
+        //
+        // **这三个方法正好同时在两份名单上**：它们的 inc 参数被 CargoIncWidener 加宽过，
+        // 而 QualityParamAdder 又给它们追加了一个品质尾参。两刀独立、各自可能失败，
+        // 所以绑定必须按**实际签名**三选一，而不是按「我以为装了什么」。
+        //
+        // 绑错的表现是运行时 MissingMethodException + 一条 ERROR，
+        // 然后巨型建筑的传送带收发整个停摆——功能没了，但不是静默的。
+
+        private delegate bool InsertHeadQual(CargoPath path, int itemId, short stack, short inc, int qua);
+
+        private delegate int PickRearPathQual(CargoPath path, int[] needs, out int needIdx,
+            out short stack, out short inc, out int qua);
+
+        private delegate int PickRearTrafficQual(CargoTraffic t, int beltId, int filter, int[] needs,
+            out short stack, out short inc, out int qua);
+
         private static readonly InsertHeadWide _insertWide;
         private static readonly InsertHeadByte _insertByte;
+        private static readonly InsertHeadQual _insertQual;
         private static readonly PickRearPathWide _pickPathWide;
         private static readonly PickRearPathByte _pickPathByte;
+        private static readonly PickRearPathQual _pickPathQual;
         private static readonly PickRearTrafficWide _pickTrafficWide;
         private static readonly PickRearTrafficByte _pickTrafficByte;
+        private static readonly PickRearTrafficQual _pickTrafficQual;
+
+        /// <summary>品质尾参在不在。三选一里优先级最高的那一档。</summary>
+        private static bool Qual => QualityWidening.BeltParamsPresent;
 
         static CargoWidening()
         {
             try
             {
-                if (IsActive)
+                if (IsActive && Qual)
+                {
+                    _insertQual = Bind<InsertHeadQual>(typeof(CargoPath), "TryInsertItemAtHeadAndFillBlank");
+                    _pickPathQual = Bind<PickRearPathQual>(typeof(CargoPath), "TryPickItemAtRear");
+                    _pickTrafficQual = Bind<PickRearTrafficQual>(typeof(CargoTraffic), "TryPickItemAtRear");
+                }
+                else if (IsActive)
                 {
                     _insertWide = Bind<InsertHeadWide>(typeof(CargoPath), "TryInsertItemAtHeadAndFillBlank");
                     _pickPathWide = Bind<PickRearPathWide>(typeof(CargoPath), "TryPickItemAtRear");
@@ -244,15 +273,31 @@ namespace ProjectEden.Patches
             return AccessTools.MethodDelegate<T>(m);
         }
 
-        internal static bool InsertAtHead(CargoPath path, int itemId, int stack, int inc) =>
-            IsActive
+        internal static bool InsertAtHead(CargoPath path, int itemId, int stack, int inc)
+        {
+            // 品质此刻恒为 0（阶段 1b 只接管子不通水，见 QualityWidening）。
+            // 1c 要让它真的流动时，这里会多一个品质入参。
+            if (_insertQual != null) return _insertQual(path, itemId, (short)stack, (short)inc, 0);
+
+            return IsActive
                 ? _insertWide != null && _insertWide(path, itemId, (short)stack, (short)inc)
                 : _insertByte != null && _insertByte(path, itemId, Clamp(stack), Clamp(inc));
+        }
 
         private static byte Clamp(int v) => (byte)(v > 255 ? 255 : v < 0 ? 0 : v);
 
         internal static int PickAtRear(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc)
         {
+            if (_pickPathQual != null)
+            {
+                int id = _pickPathQual(path, needs, out needIdx, out short qs, out short q, out int _);
+
+                stack = qs;
+                inc = q;
+
+                return id;
+            }
+
             if (IsActive && _pickPathWide != null)
             {
                 int id = _pickPathWide(path, needs, out needIdx, out short ws, out short w);
@@ -282,6 +327,16 @@ namespace ProjectEden.Patches
 
         internal static int PickAtRear(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack, out int inc)
         {
+            if (_pickTrafficQual != null)
+            {
+                int id = _pickTrafficQual(traffic, beltId, filter, needs, out short qs, out short q, out int _);
+
+                stack = qs;
+                inc = q;
+
+                return id;
+            }
+
             if (IsActive && _pickTrafficWide != null)
             {
                 int id = _pickTrafficWide(traffic, beltId, filter, needs, out short ws, out short w);

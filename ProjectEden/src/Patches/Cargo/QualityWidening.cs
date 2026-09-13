@@ -26,8 +26,18 @@ namespace ProjectEden.Patches
         internal static readonly bool FieldsPresent = Probe();
 
         /// <summary>
-        /// 搬运层是否已接线。<b>1a 恒为 false</b>，1c 落地后改为按实际能力探测。
-        /// 留成独立的一条，是为了让日志能把「字段在但没接线」和「字段都不在」分开。
+        /// 传送带 API 是否已经长出品质尾参（阶段 1b）。
+        ///
+        /// <b>和 <see cref="FieldsPresent"/> 分开探，不是一件事。</b> 1a 和 1b 是两刀，
+        /// 任何一刀可能单独失败；而 <see cref="CargoWidening"/> 的委托要按<b>签名</b>绑，
+        /// 绑错的表现是运行时 <c>MissingMethodException</c>、巨型建筑的传送带收发停摆。
+        /// 探的是<b>结果</b>——那个方法的最后一个参数到底是不是 <c>out int</c>。
+        /// </summary>
+        internal static readonly bool BeltParamsPresent = ProbeBeltParams();
+
+        /// <summary>
+        /// 搬运层是否已接线。<b>1a / 1b 恒为 false</b>，1c 落地后改为按实际能力探测。
+        /// 留成独立的一条，是为了让日志能把「管子接好了但还没通水」和「字段都不在」分开。
         ///
         /// 写成 <c>static readonly</c> 而不是 <c>const</c>：后者会让编译器证明下面那条
         /// 分支不可达而报 CS0162，而本仓库是 0 警告构建。这里要的是一个<b>运行时</b>的值。
@@ -49,6 +59,28 @@ namespace ProjectEden.Patches
             }
         }
 
+        private static bool ProbeBeltParams()
+        {
+            try
+            {
+                MethodInfo m = AccessTools.Method(typeof(CargoPath), "TryPickItemAtRear");
+
+                if (m == null) return false;
+
+                ParameterInfo[] ps = m.GetParameters();
+
+                if (ps.Length == 0) return false;
+
+                Type last = ps[ps.Length - 1].ParameterType;
+
+                return last.IsByRef && last.GetElementType() == typeof(int);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         internal static void Report()
         {
             if (!FieldsPresent)
@@ -64,8 +96,14 @@ namespace ProjectEden.Patches
             {
                 ProjectEdenPlugin.Log.LogInfo(
                     $"物品品质：孪生字段已就位（Cargo 现在 {CargoWidening.Stride} 字节），" +
-                    "但搬运层尚未接线，所以品质点数恒为 0——这是阶段 1a 的预期状态，不是故障。" +
+                    $"传送带 API 品质尾参{(BeltParamsPresent ? "已加上" : "**没有**")}。" +
+                    "搬运层尚未接线，品质点数恒为 0——这是阶段 1a / 1b 的预期状态，不是故障。" +
                     "游戏行为与不装 preloader 时一致。");
+
+                if (FieldsPresent && !BeltParamsPresent)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        "物品品质：字段加上了但传送带 API 没有品质尾参——" +
+                        "说明 preloader 的 1b 那一刀失败了。看它自己那几行 ERROR。");
 
                 return;
             }
