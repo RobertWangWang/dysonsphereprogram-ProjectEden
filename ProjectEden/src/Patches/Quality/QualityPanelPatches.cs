@@ -33,10 +33,17 @@ namespace ProjectEden.Patches
     internal static class QualityPanelPatches
     {
         private const string LabelName = "projecteden-qua";
+        private const string PlateName = "projecteden-qua-bg";
 
-        /// <summary>每个槽位行一个标签。UI 只在主线程跑，用普通字典就够。</summary>
+        /// <summary>标签左右各留多少边距，底板按文字实际宽度加这个值。</summary>
+        private const float Pad = 6f;
+
+        /// <summary>每个槽位行一个标签 + 一块底板。UI 只在主线程跑，用普通字典就够。</summary>
         private static readonly Dictionary<UIStationStorage, Text> Labels =
             new Dictionary<UIStationStorage, Text>();
+
+        private static readonly Dictionary<UIStationStorage, Image> Plates =
+            new Dictionary<UIStationStorage, Image>();
 
         private static bool _reported;
 
@@ -65,9 +72,13 @@ namespace ProjectEden.Patches
 
             // **空了就要关掉。** 不关的话上一格的品质会留在屏幕上，而那正是本仓库
             // 在建造栏、产物槽上反复踩过的「腾空的位置从来没人清理」。
+            Image plate = Plate(__instance, label);
+
             if (qua <= 0 || count <= 0)
             {
                 label.enabled = false;
+
+                if (plate != null) plate.enabled = false;
 
                 return;
             }
@@ -79,6 +90,25 @@ namespace ProjectEden.Patches
             // 所以键要写成带占位符的完整句子，而不是「品质标签」这种描述性名字——
             // 后者在中文客户端上会原样显示成「品质标签」。
             label.text = string.Format("品质 {0}".Translate(), qua / count);
+
+            // 底板按**文字的实际宽度**贴着文字，而不是铺满整条——铺满会把进度条盖掉一半,
+            // 那条本身是要看的。宽度每次刷新重算：位数变了（品质 9 → 品质 10）宽度就变。
+            if (plate != null)
+            {
+                plate.enabled = true;
+
+                RectTransform pr = plate.rectTransform;
+                RectTransform lr = label.rectTransform;
+                float w = label.preferredWidth + Pad * 2f;
+
+                pr.anchorMin = lr.anchorMin;
+                pr.anchorMax = lr.anchorMax;
+                pr.pivot = lr.pivot;
+                pr.offsetMin = lr.offsetMin;
+                pr.offsetMax = lr.offsetMax;
+                pr.offsetMin = new Vector2(pr.offsetMax.x - w, pr.offsetMin.y + 4f);
+                pr.offsetMax = new Vector2(pr.offsetMax.x + Pad, pr.offsetMax.y - 4f);
+            }
         }
 
         private static Text Label(UIStationStorage ui)
@@ -109,6 +139,51 @@ namespace ProjectEden.Patches
             Labels[ui] = label;
 
             return label;
+        }
+
+        /// <summary>
+        /// 半透明深色底板。
+        ///
+        /// <b>它必须是标签的前一个兄弟节点，不能是标签的子物体。</b> UI 的渲染顺序是层级顺序,
+        /// 而子物体画在父物体的图形<b>之上</b>——做成子物体的话，底板会把字盖掉。
+        /// 排在标签前面、进度条后面，正好夹在中间。
+        /// </summary>
+        private static Image Plate(UIStationStorage ui, Text label)
+        {
+            if (Plates.TryGetValue(ui, out Image cached) && cached != null) return cached;
+
+            Transform host = label.transform.parent;
+
+            if (host == null) return null;
+
+            Transform had = host.Find(PlateName);
+            Image plate;
+
+            if (had != null)
+            {
+                plate = had.GetComponent<Image>();
+            }
+            else
+            {
+                var go = new GameObject(PlateName, typeof(RectTransform), typeof(CanvasRenderer),
+                    typeof(Image));
+
+                go.transform.SetParent(host, false);
+
+                plate = go.GetComponent<Image>();
+                plate.color = new Color(0.03f, 0.04f, 0.06f, 0.72f);
+                plate.raycastTarget = false;
+                plate.enabled = false;
+            }
+
+            if (plate == null) return null;
+
+            // 紧挨在标签前面：标签始终是最后一个，底板就是倒数第二个。
+            plate.transform.SetSiblingIndex(Mathf.Max(0, label.transform.GetSiblingIndex()));
+
+            Plates[ui] = plate;
+
+            return plate;
         }
 
         private static Text Build(Text src, Transform host, RectTransform bar)
@@ -164,12 +239,15 @@ namespace ProjectEden.Patches
             //
             // 办法是让**轮廓去定义字形**：浅色字 + 实心黑描边。白底上看到的是黑描边勾出的字，
             // 深底上看到的是浅色的字身，两边都成立。游戏 HUD 普遍是这么做的。
-            label.color = new Color(1f, 0.94f, 0.80f);
+            // 有了底板，底色就由我们自己控制，字色可以随便挑——**这才是解决办法**，
+            // 之前在「深灰还是白」之间挑颜色是在解一个无解的题。
+            // 描边留一层薄的：底板是半透明的，重叠到白色填充上时仍会偏亮。
+            label.color = new Color(1f, 0.95f, 0.85f);
 
             var outline = go.GetComponent<Outline>() ?? go.AddComponent<Outline>();
 
-            outline.effectColor = new Color(0f, 0f, 0f, 1f);
-            outline.effectDistance = new Vector2(1.8f, -1.8f);
+            outline.effectColor = new Color(0f, 0f, 0f, 0.85f);
+            outline.effectDistance = new Vector2(1f, -1f);
 
             if (!_reported)
             {
