@@ -462,6 +462,7 @@
     "//-- 同位提纯厂与提纯线 --": "",
     "同位提纯　选料与产出": "Isotopic Refining - Feed and Output",
     "提纯金属": "Metal",
+    "只能选可提纯的金属": "Refinable metals only",
     "{0} ×{1}  →  {0} ×{2}　品质 {3}/件　{4:0.##}s": "{0} x{1}  ->  {0} x{2}   quality {3}/item   {4:0.##}s",
     "同位提纯厂": "Isotopic Refinery",
     "把「够用」和「极纯」之间那道坎工业化的地方。三条工艺各走各的路——电解精炼靠电流一个原子一个原子地搬，区域熔炼靠一圈熔区把杂质赶到锭子尾巴上，羰基提纯靠一氧化碳只牵得动铁这一件事。共同点是都要扔掉大半的料：纯度从来不是省出来的，是挑出来的。": "Where the gap between good enough and truly pure is put on an industrial footing. Its three processes have nothing in common but their cost: electrorefining moves the metal one atom at a time on a current, zone melting drives the impurities down the ingot ahead of a travelling melt, and carbonyl refining relies on carbon monoxide being able to pick up iron and almost nothing else. All three throw most of the feed away - purity is never saved, it is selected.",

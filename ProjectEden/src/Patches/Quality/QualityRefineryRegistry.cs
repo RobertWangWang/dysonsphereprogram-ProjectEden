@@ -113,15 +113,6 @@ namespace ProjectEden.Patches
             return null;
         }
 
-        internal static int IndexOfFeed(int itemId)
-        {
-            for (var i = 0; i < Feeds.Count; i++)
-                if (Feeds[i].ItemId == itemId)
-                    return i;
-
-            return 0;
-        }
-
         /// <summary>这一级每炉出几件。至少 1 件——0 件的配方是死配方。</summary>
         internal static int OutputOf(Tier tier)
         {
@@ -255,6 +246,15 @@ namespace ProjectEden.Patches
 
                 if (ore == null) continue;
 
+                // **流体不算矿。** 原油涌泉也是一种矿脉，它的 MiningItem 是原油；
+                // 提纯是固体冶金工序，液体和气体没有「锭」可言。
+                if (ore.IsFluid)
+                {
+                    Skipped.Add(ore.name + "（流体）");
+
+                    continue;
+                }
+
                 int product = DeriveProduct(v.MiningItem);
 
                 if (product <= 0 || product == v.MiningItem)
@@ -266,7 +266,7 @@ namespace ProjectEden.Patches
 
                 ItemProto made = LDB.items.Select(product);
 
-                if (made == null)
+                if (made == null || made.IsFluid)
                 {
                     Skipped.Add(ore.name);
 
@@ -288,6 +288,11 @@ namespace ProjectEden.Patches
         ///
         /// 先找<b>只吃这一种矿</b>的原版配方；同时有几条就按「每炉吃得最少」再按
         /// 「产物 ID 最小」定下来（理由见类注释）。一条都没有再退到本 mod 自己声明的锭。
+        ///
+        /// <b>取的是第一个<i>固体</i>产物，不是 <c>Results[0]</c>。</b> 这一条是被实测逼出来的：
+        /// 可燃冰那条配方的第一个产物是<b>氢</b>，于是选料表里冒出来一格「氢 ×100 → 氢 ×80」——
+        /// 提纯一种气体，既讲不通，也没有锭可言。原版把副产物排在前面是常事，
+        /// 所以「第一个」不等于「主产物」，而「是不是流体」才是这里真正要问的问题。
         /// </summary>
         private static int DeriveProduct(int oreId)
         {
@@ -303,20 +308,23 @@ namespace ProjectEden.Patches
                 if (r?.Items == null || r.Results == null || r.ItemCounts == null) continue;
 
                 if (r.Items.Length != 1 || r.Items[0] != oreId) continue;
-                if (r.Results.Length < 1 || r.Results[0] == oreId) continue;
                 if (r.ItemCounts.Length < 1 || r.ItemCounts[0] <= 0) continue;
 
                 // 提纯配方自己不能当推导依据——它现在的原料就是金属块，
                 // 万一哪天某一级的试剂被去掉，这一句挡住自指
                 if (FindTier(r.ID) != null) continue;
 
+                int solid = FirstSolid(r.Results, oreId);
+
+                if (solid <= 0) continue;
+
                 var better = product == 0
                              || r.ItemCounts[0] < orePer
-                             || (r.ItemCounts[0] == orePer && r.Results[0] < product);
+                             || (r.ItemCounts[0] == orePer && solid < product);
 
                 if (!better) continue;
 
-                product = r.Results[0];
+                product = solid;
                 orePer = r.ItemCounts[0];
             }
 
@@ -330,6 +338,23 @@ namespace ProjectEden.Patches
 
                 if (owner.OreItemId == oreId && owner.HasIngot && owner.IngotItemId > 0)
                     return owner.IngotItemId;
+            }
+
+            return 0;
+        }
+
+        /// <summary>这一串产物里第一个不是流体、也不是矿石本身的。都不合格就返回 0。</summary>
+        private static int FirstSolid(int[] results, int oreId)
+        {
+            if (results == null) return 0;
+
+            for (var i = 0; i < results.Length; i++)
+            {
+                if (results[i] <= 0 || results[i] == oreId) continue;
+
+                ItemProto p = LDB.items.Select(results[i]);
+
+                if (p != null && !p.IsFluid) return results[i];
             }
 
             return 0;

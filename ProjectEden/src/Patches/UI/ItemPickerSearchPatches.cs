@@ -57,7 +57,34 @@ namespace ProjectEden.Patches
         private static bool _reported;
 
         /// <summary>搜索框里有东西。<see cref="ItemPickerExpandPatches"/> 会据此让出横向翻页。</summary>
-        public static bool IsFiltering => _query.Length > 0;
+        /// <summary>
+        /// 「只让选这几样」的白名单。设了之后这个物品选择器就变成一张<b>限定清单</b>：
+        /// 只画名单里的东西，从第 0 格起顺序排，搜索框照常在名单内过滤。
+        ///
+        /// <b>为什么加在这里而不是另画一个下拉框。</b> 搜索模式本来就<b>放弃了格位坐标</b>
+        /// （前缀自己填 <c>protoArray</c>，从第 0 格顺序码进去，<c>GridIndex</c> 彻底不参与），
+        /// 所以「只填名单里的」是同一条路上的一个 <c>continue</c>。而手绘一个带滚动条的下拉框
+        /// 要重做命中测试、滚动、悬停提示和翻页——原版这个窗口这四样全有，
+        /// 本仓库还给它补过搜索框。<b>能用引擎自己的实现就别再写一个</b>。
+        ///
+        /// 关窗即清空，所以不会泄漏到下一次别人打开这个选择器。
+        /// </summary>
+        private static HashSet<int> _allowed;
+
+        private static string _hint;
+
+        /// <summary>
+        /// 下一次（也只有下一次）打开物品选择器时，只许在 <paramref name="items"/> 里选。
+        /// <paramref name="hint"/> 是搜索框的占位提示，写成一句给玩家看的中文。
+        /// </summary>
+        internal static void Restrict(IEnumerable<int> items, string hint)
+        {
+            _allowed = items == null ? null : new HashSet<int>(items);
+            _hint = hint;
+        }
+
+        /// <summary>白名单模式下不必解锁也能选：名单是调用方给的，它自己保证合理性。</summary>
+        public static bool IsFiltering => _query.Length > 0 || _allowed != null;
 
         private static readonly List<ItemProto> Matched = new List<ItemProto>();
 
@@ -106,12 +133,25 @@ namespace ProjectEden.Patches
             {
                 ItemProto item = all[i];
 
-                // 原版就是从 1101 起算的：格位比这个小的是不打算让人选的内部道具
-                if (item == null || item.GridIndex < 1101) continue;
+                if (item == null) continue;
 
-                if (!UIItemPicker.showAll && (history == null || !history.ItemUnlocked(item.ID))) continue;
+                if (_allowed != null)
+                {
+                    // 白名单模式：名单说了算。**不查解锁、不查格位** ——
+                    // 名单是调用方按游戏内的事实推出来的（比如「这种矿真的能炼出锭」），
+                    // 再套一层原版的解锁判定只会让一部分合法选项凭空消失。
+                    if (!_allowed.Contains(item.ID)) continue;
+                }
+                else
+                {
+                    // 原版就是从 1101 起算的：格位比这个小的是不打算让人选的内部道具
+                    if (item.GridIndex < 1101) continue;
 
-                if (!Matches(item, _query)) continue;
+                    if (!UIItemPicker.showAll && (history == null || !history.ItemUnlocked(item.ID)))
+                        continue;
+                }
+
+                if (_query.Length > 0 && !Matches(item, _query)) continue;
 
                 Matched.Add(item);
             }
@@ -175,8 +215,13 @@ namespace ProjectEden.Patches
 
             if (_input == null) return;
 
-            // 占位符是建控件时贴上去的，而语言可以在两次开窗之间切换，所以每次开窗重贴
-            if (_placeholder != null) _placeholder.text = "搜索物品名或 ID".Translate();
+            // 占位符是建控件时贴上去的，而语言可以在两次开窗之间切换，所以每次开窗重贴。
+            // 白名单模式下换成调用方给的提示——否则玩家看到一张只有十几样东西的表，
+            // 会以为是选择器坏了而不是「这里只能选这些」。
+            if (_placeholder != null)
+                _placeholder.text = _allowed != null && !string.IsNullOrEmpty(_hint)
+                    ? _hint.Translate()
+                    : "搜索物品名或 ID".Translate();
 
             // 弹出来就聚焦：这是个模态小窗，打开它就是为了找东西。
             // 聚焦之后 VFInput.inputing 自动为 true，游戏热键不会被打字触发。
@@ -188,6 +233,13 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(UIItemPicker), "_OnClose")]
         private static void UIItemPicker_OnClose()
         {
+            // **白名单只活一次开窗。** 不清的话下一次谁打开这个选择器
+            // （分拣器过滤、储物箱过滤、物流站槽位）都会看到一张残留的短名单，
+            // 而那看起来就是「选择器坏了」——本仓库在 UIStationStorage 的共享控件上
+            // 已经为「谁写的谁负责还原」付过一次学费。
+            _allowed = null;
+            _hint = null;
+
             ClearQuery();
 
             if (_input != null) _input.DeactivateInputField();

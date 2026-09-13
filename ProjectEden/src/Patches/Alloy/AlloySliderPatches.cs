@@ -618,7 +618,24 @@ namespace ProjectEden.Patches
 
         private static bool _refineClickLatch;
 
-        /// <summary>同位提纯的输入：一行选择器，点左右半边换金属。</summary>
+        /// <summary>点开选择器的那一刻是哪台建筑——回调里拿不到别的上下文。</summary>
+        private static PlanetFactory _refineFactory;
+        private static int _refineEntity;
+        private static int _refineRecipe;
+
+        /// <summary>
+        /// 同位提纯的输入：点这一行<b>打开原版的物品选择器</b>，限定在可提纯的金属里。
+        ///
+        /// <b>为什么不是 ◀ ▶ 那种循环。</b> 第一版是循环的，实测难用：候选表是推导出来的，
+        /// 一局能有十几种金属，想选最后一种就得点十几下，而且中途看不到还有什么。
+        /// 所有者的原话是「有没有更 human 的交互方式？比如带滑动条的下拉框之类的」。
+        ///
+        /// <b>而那个下拉框游戏里已经有了</b>：<c>UIItemPicker</c> 是一张带图标的网格，
+        /// 有悬停提示、有翻页，本仓库还给它补过搜索框。手绘一个带滚动条的下拉框
+        /// 意味着把命中测试、滚动、提示、翻页重写一遍，且只服务这一个面板。
+        /// <see cref="ItemPickerSearchPatches.Restrict"/> 把它限定成一张短名单，
+        /// 这一行就成了真正的下拉框。
+        /// </summary>
         private static void HandleRefineInput(PlanetFactory factory, int entityId,
             QualityRefineryRegistry.Tier tier, int[] state)
         {
@@ -633,20 +650,94 @@ namespace ProjectEden.Patches
 
             List<QualityRefineryRegistry.Feed> pool = QualityRefineryRegistry.Feeds;
 
-            if (pool.Count < 2 || !InRow(0, out Vector2 hit)) return;
+            if (pool.Count < 1 || !InRow(0, out Vector2 _)) return;
+            if (UIItemPicker.isOpened) return;
 
             _refineClickLatch = true;
 
-            Rect rect = Rows[0].Track.rect;
-            int step = hit.x < rect.center.x ? -1 : 1;
+            _refineFactory = factory;
+            _refineEntity = entityId;
+            _refineRecipe = tier.RecipeId;
 
-            int at = QualityRefineryRegistry.IndexOfFeed(state[0]);
+            var ids = new int[pool.Count];
 
-            var next = new[] { pool[((at + step) % pool.Count + pool.Count) % pool.Count].ItemId };
+            for (var i = 0; i < pool.Count; i++) ids[i] = pool[i].ItemId;
+
+            ItemPickerSearchPatches.Restrict(ids, "只能选可提纯的金属");
+
+            UIItemPicker.Popup(Vector2.zero, OnRefinePicked);
+
+            // **没开起来就当场把白名单撤掉。** `Popup` 在 UIRoot 还没就绪或窗口已激活时
+            // 直接 return（IL 000B / 002E），那时 `_OnClose` 永远不会来，
+            // 名单就会一直挂在那儿，下一个打开物品选择器的人看到的是一张残留的短清单。
+            if (!UIItemPicker.isOpened)
+            {
+                ItemPickerSearchPatches.Restrict(null, null);
+
+                return;
+            }
+
+            PlacePickerNearRow();
+        }
+
+        /// <summary>
+        /// <c>Popup</c> 只是把 <c>pickerTrans.anchoredPosition</c> 设成传进去的值（IL 0050~0057），
+        /// 而那是<b>它自己父级里的锚定坐标</b>，和这块面板的父级未必是同一个。
+        /// 所以传 0 让它先开，再用<b>世界坐标</b>把它挪到这一行旁边——世界坐标与锚点、pivot
+        /// 无关，是本仓库在多产物面板上已经验证过的写法。
+        /// </summary>
+        private static void PlacePickerNearRow()
+        {
+            UIItemPicker picker = UIRoot.instance?.uiGame?.itemPicker;
+
+            if (picker?.pickerTrans == null || Rows[0]?.Track == null) return;
+
+            RectTransform row = Rows[0].Track;
+            RectTransform p = picker.pickerTrans;
+
+            // 挪到这一行的正上方一点：面板本身贴在装配器窗口下沿，往上开不会出屏。
+            Vector3 at = row.position;
+
+            p.position = at;
+
+            // 再把整块拉回屏幕内。选择器是个模态小窗，飘出屏幕就等于点不到。
+            var corners = new Vector3[4];
+
+            p.GetWorldCorners(corners);
+
+            float dx = 0f, dy = 0f;
+
+            if (corners[0].x < 0f) dx = -corners[0].x;
+            else if (corners[2].x > Screen.width) dx = Screen.width - corners[2].x;
+
+            if (corners[0].y < 0f) dy = -corners[0].y;
+            else if (corners[1].y > Screen.height) dy = Screen.height - corners[1].y;
+
+            if (dx != 0f || dy != 0f) p.position += new Vector3(dx, dy, 0f);
+        }
+
+        /// <summary>
+        /// 选择器回调。<b>要重新核对一遍</b>：白名单是显示层的过滤，不是保证——
+        /// 玩家可能在选择器开着的时候关掉了面板，或者这台建筑已经换了配方。
+        /// </summary>
+        private static void OnRefinePicked(ItemProto proto)
+        {
+            PlanetFactory factory = _refineFactory;
+            int entityId = _refineEntity;
+            int recipeId = _refineRecipe;
+
+            _refineFactory = null;
+            _refineEntity = 0;
+            _refineRecipe = 0;
+
+            if (proto == null || factory == null || entityId <= 0) return;
+            if (QualityRefineryRegistry.FindFeed(proto.ID) == null) return;
+
+            var next = new[] { proto.ID };
 
             if (!QualityRefinerySelectPatches.Apply(factory, entityId, next)) return;
 
-            AlloyRatioStore.SetPlayerDefault(tier.RecipeId, next);
+            AlloyRatioStore.SetPlayerDefault(recipeId, next);
         }
 
         /// <summary>
@@ -675,7 +766,9 @@ namespace ProjectEden.Patches
 
             QualityRefineryRegistry.Feed feed = QualityRefineryRegistry.FindFeed(state[0]);
 
-            PickerRow(Rows[0], "提纯金属".Translate(), feed?.Name);
+            // **画成下拉框而不是 ◀ ▶。** 这一行点开的是原版的物品选择器（限定名单 + 搜索框），
+            // 不是左右循环，所以箭头会骗人——玩家会去点两端，然后发现两端和中间一个样。
+            DropdownRow(Rows[0], "提纯金属".Translate(), feed?.Name);
 
             _resultText.rectTransform.anchoredPosition =
                 new Vector2(SidePad, -(HeadHeight + RowHeight + 4f));
@@ -882,6 +975,25 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>选料行的通用摆法：轨道拉满、名字居中、◀ ▶ 落在左右两半。</summary>
+        /// <summary>
+        /// 点开一张清单的行。和 <see cref="PickerRow"/> 的区别只在<b>它长什么样</b>：
+        /// <c>◀ 名字 ▶</c> 承诺的是「点两端会左右切换」，而这一行点哪里都是打开选择器，
+        /// 所以写成 <c>名字 ▼</c>。控件形状要和它真实的交互对得上，否则玩家会先试错一轮。
+        /// </summary>
+        private static void DropdownRow(Row row, string label, string value)
+        {
+            row.Label.text = label;
+
+            LayoutRow(row, true);
+
+            row.Value.text = (value ?? "?") + "   ▼";
+            row.Fill.anchorMin = Vector2.zero;
+            row.Fill.anchorMax = new Vector2(0f, 1f);
+            row.Fill.offsetMin = Vector2.zero;
+            row.Fill.offsetMax = Vector2.zero;
+            row.TrackImage.color = new Color(1f, 1f, 1f, 0.16f);
+        }
+
         private static void PickerRow(Row row, string label, string value)
         {
             row.Label.text = label;
