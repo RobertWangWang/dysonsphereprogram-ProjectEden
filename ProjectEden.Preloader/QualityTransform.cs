@@ -90,7 +90,29 @@ namespace ProjectEden.Preloader
         {
             Report check = Run(module, false);
 
-            if (check.Blockers.Count > 0 || check.Unhandled.Count > 0) return check;
+            if (check.Blockers.Count > 0 || check.Unhandled.Count > 0 || check.Pending.Count > 0)
+                return check;
+
+            return Run(module, true);
+        }
+
+        /// <summary>
+        /// <b>只给离线校验用：把已经写好发射器的那些形状真的发射出去</b>，
+        /// 哪怕还有别的形状没实现。
+        ///
+        /// <b>为什么需要它。</b> <see cref="Apply"/> 在形状表补齐之前拒绝改写——这是对的，
+        /// 但副作用是<b>发射代码一次都不会被执行</b>。写完四十几个发射器再一起发现
+        /// 全都产出非法 IL，代价太大；每写一个就让它真的跑一遍、写盘、重读、断言，
+        /// 错误才会在写下它的那一刻被抓住。
+        ///
+        /// <b>Patcher 永远不调它。</b> 部分发射出来的程序集在语义上是半截的
+        /// （品质只在一部分路径上流动），只配拿来验证 IL 合不合法。
+        /// </summary>
+        internal static Report ApplyPartial(ModuleDefinition module)
+        {
+            Report check = Run(module, false);
+
+            if (check.Blockers.Count > 0) return check;
 
             return Run(module, true);
         }
@@ -287,6 +309,7 @@ namespace ProjectEden.Preloader
             Report r, bool mutate)
         {
             var code = m.Body.Instructions.ToList();
+            var work = new List<Job>();
 
             // 1) 局部变量不动点：装过载荷值的局部
             HashSet<int> carriers = PayloadLocals(m, code, twin);
@@ -330,7 +353,15 @@ namespace ProjectEden.Preloader
                 // 那会让变换报成功却什么都不做，品质恒为 0 而日志说一切正常。
                 if (TwinShapes.Contains(core))
                 {
-                    if (Emitted.Contains(core)) { r.Twinned++; continue; }
+                    if (Emitted.Contains(core))
+                    {
+                        // 记下来，等这一遍扫完再统一插入——边扫边插会让后面的下标全错位
+                        work.Add(new Job { Core = core, From = from, To = to });
+
+                        r.Twinned++;
+
+                        continue;
+                    }
 
                     r.Recognized++;
 
@@ -362,6 +393,104 @@ namespace ProjectEden.Preloader
             if (touched) r.Methods++;
 
             r.TwinLocals += carriers.Count;
+
+            if (mutate && work.Count > 0) Emit(m, twin, work, r);
+        }
+
+        /// <summary>一条待发射的孪生语句：原语句在方法体里的区间，以及它的核心形状。</summary>
+        private sealed class Job
+        {
+            internal string Core;
+            internal int From;
+            internal int To;
+        }
+
+        /// <summary>
+        /// 把记下来的孪生语句发射进方法体。
+        ///
+        /// <b>倒着插。</b> 正着插会让后面每一条 Job 的下标全部错位；倒着插时，
+        /// 还没处理的那些都在前面，下标不受影响。
+        ///
+        /// <b>插在原语句之后，而不是之前。</b> 于是原语句上挂的跳转标签、异常块边界
+        /// 一个都不用动——跳到这条语句的分支照样落在它自己头上，执行完再自然流进孪生语句。
+        /// 换成插在前面就得把标签搬过去，而搬漏一个是静默的。
+        ///
+        /// <b>方法体长度会变，所以进来先 SimplifyMacros、改完 OptimizeMacros。</b>
+        /// 不这么做的话，被撑开的短分支位移会被 Cecil 截断写进去，产出一条跳到半条指令
+        /// 中间的分支——不在改写时报、不在写盘时报，等 Harmony 读它时才炸。实测过一次。
+        /// </summary>
+        private static void Emit(MethodDefinition m, IDictionary<string, FieldDefinition> twin,
+            List<Job> work, Report r)
+        {
+            m.Body.SimplifyMacros();
+
+            // SimplifyMacros 会改写方法体，下标要按新的指令表重算
+            var code = m.Body.Instructions;
+            ILProcessor il = m.Body.GetILProcessor();
+
+            foreach (Job job in work.OrderByDescending(j => j.To))
+            {
+                if (job.To >= code.Count) continue;
+
+                Instruction store = code[job.To];
+
+                var sf = store.Operand as FieldReference;
+
+                if (sf == null) continue;
+
+                if (!twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out FieldDefinition tf)) continue;
+
+                // 「ldc stfld:PAY」：前缀 = [from, to-2]，值 = to-1（那个常数），存 = to。
+                // **前缀里不可能有调用**——核心形状是「去掉寻址之后剩下的 token」，
+                // 里面没有 call: 就意味着前缀是纯载入，重放一遍无副作用。这是可证的，不是假设。
+                var emit = new List<Instruction>();
+
+                for (int k = job.From; k <= job.To - 2; k++) emit.Add(Clone(code[k]));
+
+                emit.Add(il.Create(OpCodes.Ldc_I4_0));
+                emit.Add(il.Create(OpCodes.Stfld, tf));
+
+                Instruction at = store;
+
+                foreach (Instruction ins in emit)
+                {
+                    il.InsertAfter(at, ins);
+
+                    at = ins;
+                }
+            }
+
+            m.Body.OptimizeMacros();
+        }
+
+        /// <summary>
+        /// 复制一条指令。<b>不能直接复用原对象</b>——同一个 <c>Instruction</c> 出现在两个位置，
+        /// Cecil 的偏移计算和分支目标都会错乱。操作数原样带过去（局部变量、参数、字段
+        /// 都是引用，指向同一个东西正是我们要的）。
+        /// </summary>
+        private static Instruction Clone(Instruction i) =>
+            i.Operand == null
+                ? Instruction.Create(i.OpCode)
+                : CloneWithOperand(i);
+
+        private static Instruction CloneWithOperand(Instruction i)
+        {
+            switch (i.Operand)
+            {
+                case FieldReference f: return Instruction.Create(i.OpCode, f);
+                case MethodReference me: return Instruction.Create(i.OpCode, me);
+                case TypeReference t: return Instruction.Create(i.OpCode, t);
+                case VariableDefinition v: return Instruction.Create(i.OpCode, v);
+                case ParameterDefinition p: return Instruction.Create(i.OpCode, p);
+                case string s: return Instruction.Create(i.OpCode, s);
+                case int n: return Instruction.Create(i.OpCode, n);
+                case sbyte sb: return Instruction.Create(i.OpCode, sb);
+                case byte b: return Instruction.Create(i.OpCode, b);
+                case long l: return Instruction.Create(i.OpCode, l);
+                case float fl: return Instruction.Create(i.OpCode, fl);
+                case double d: return Instruction.Create(i.OpCode, d);
+                default: return Instruction.Create(i.OpCode);
+            }
         }
 
         /// <summary>
@@ -405,11 +534,14 @@ namespace ProjectEden.Preloader
         /// 这正是这个仓库最怕的失败形态（每一步都成功、功能却不在），
         /// 所以「认得」必须等于「有发射器」，由 <see cref="CheckEmitters"/> 每次核对。
         /// </summary>
-        private static readonly HashSet<string> Emitted = new HashSet<string>(new string[]
+        private static readonly HashSet<string> Emitted = new HashSet<string>(new[]
         {
-            // 还没有任何一条：发射代码是下一步。
-            // 在它们被实现之前，这些形状会被报成未处理，于是变换整个不生效——
-            // 这是对的，也是刻意的。
+            // X.inc = <常数>  →  X.qua = 0
+            //
+            // 第一个落地的发射器，挑它是因为它**自包含**：不依赖参数到寄存器的映射、
+            // 也不依赖局部变量孪生，而那两样是后面绝大多数形状都要用的。
+            // 先用它把发射机制本身（前缀提取、插入位置、标签处理）跑通并验证。
+            "ldc stfld:PAY",
         }, StringComparer.Ordinal);
 
         /// <summary>

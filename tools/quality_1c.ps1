@@ -103,6 +103,67 @@ if ($un.Count -gt 0) {
     }
     Write-Host ""
     Write-Host "transform does NOT apply while any shape is missing - the game is unchanged." -ForegroundColor Yellow
+}
+
+# ============================================================================
+# Exercise the emitters that ARE written, on a scratch copy, and assert the result is
+# loadable IL. Apply() refuses to mutate until every shape is implemented, which is
+# correct - but it also means emitter code would never run until the very end. Writing
+# forty-odd emitters and only then discovering they all produce invalid IL is not a
+# risk worth taking, so every emitter gets exercised the moment it is written.
+# ============================================================================
+
+Write-Host ""
+Write-Host "=== exercising the emitters that exist (offline only) ===" -ForegroundColor Cyan
+
+$out = Join-Path $work "ac-1c-emitted.dll"
+$asmE = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($copy, $rp)
+$modE = $asmE.MainModule
+[void](Invoke1 "QualityFieldAdder"     "Apply" $modE)
+[void](Invoke1 "QualityChannelBuilder" "Apply" $modE)
+
+$tq = $pre.GetType("ProjectEden.Preloader.QualityTransform")
+$partial = $tq.GetMethod("ApplyPartial", [Reflection.BindingFlags]"NonPublic,Static")
+$er = $partial.Invoke($null, @($modE))
+
+$eBlock = Field $er "Blockers"
+if ($eBlock.Count -gt 0) {
+    foreach ($b3 in $eBlock) { Write-Host "  BLOCKER: $b3" -ForegroundColor Red }
+    $asmE.Dispose(); $asm.Dispose(); exit 1
+}
+Write-Host ("  emitted {0} twin statements into the scratch copy" -f (Field $er "Twinned"))
+
+try {
+    $asmE.Write($out)
+} catch {
+    Write-Host "  FAIL  Cecil refused to write the emitted assembly: $($_.Exception.Message)" -ForegroundColor Red
+    $asmE.Dispose(); $asm.Dispose(); exit 1
+}
+$asmE.Dispose()
+
+$asmV = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($out, $rp)
+$bad = 0; $bodies = 0
+foreach ($t in $asmV.MainModule.Types) {
+    foreach ($m in $t.Methods) {
+        if (-not $m.HasBody) { continue }
+        $bodies++
+        foreach ($i in $m.Body.Instructions) {
+            $op = $i.Operand
+            if ($op -is [Mono.Cecil.Cil.Instruction]) { if ($op.Offset -lt 0) { $bad++ } }
+            elseif ($op -is [Mono.Cecil.Cil.Instruction[]]) { foreach ($x in $op) { if ($x.Offset -lt 0) { $bad++ } } }
+            elseif ($op -eq $null -and $i.OpCode.OperandType -ne [System.Reflection.Emit.OperandType]::InlineNone) { $bad++ }
+        }
+    }
+}
+$asmV.Dispose()
+
+if ($bad -ne 0) {
+    Write-Host "  FAIL  $bad broken branch targets / null operands after write+re-read" -ForegroundColor Red
+    $asm.Dispose(); exit 1
+}
+Write-Host "  PASS  emitted assembly writes and re-reads clean ($bodies bodies)" -ForegroundColor Green
+
+if ($un.Count -gt 0 -or $pending.Count -gt 0) {
     $asm.Dispose()
     exit 0
 }
@@ -111,3 +172,4 @@ Write-Host ""
 Write-Host "every shape is handled - transform would apply" -ForegroundColor Green
 $asm.Dispose()
 exit 0
+
