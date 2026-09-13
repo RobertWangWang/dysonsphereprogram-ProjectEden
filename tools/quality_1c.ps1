@@ -131,7 +131,7 @@ if ($eBlock.Count -gt 0) {
     foreach ($b3 in $eBlock) { Write-Host "  BLOCKER: $b3" -ForegroundColor Red }
     $asmE.Dispose(); $asm.Dispose(); exit 1
 }
-Write-Host ("  emitted {0} twin statements into the scratch copy" -f (Field $er "Twinned"))
+Write-Host ("  emitted {0} twin statements, {1} of them read a side-channel register, {2} twin locals" -f (Field $er "Twinned"), (Field $er "ChannelUses"), (Field $er "TwinLocals"))
 
 try {
     $asmE.Write($out)

@@ -70,14 +70,12 @@ namespace ProjectEden.Preloader
             internal int TwinLocals;
 
             /// <summary>
-            /// 用到侧信道寄存器的次数。<b>目前恒为 0</b>：走侧信道的那几种形状
-            /// （<c>stind.i1/i4</c> 写 out 参数、<c>call:split_inc</c>）还没进形状表。
-            /// 留着它是为了让「表补齐了但一次都没走侧信道」能被看出来——
-            /// 那会说明边界识别错了，而那是静默的。
+            /// 用到侧信道寄存器的次数，也就是「载荷参数 → <c>Q&lt;槽位&gt;</c>」那条路走了几次。
+            ///
+            /// <b>它必须会动。</b> 恒为 0 就说明跨方法边界那条路一次都没走通，
+            /// 而那是静默的：品质照样是 0，报告照样说孪生成功。
             /// </summary>
-#pragma warning disable 649 // 形状表补齐之前没有赋值点，这是预期的
             internal int ChannelUses;
-#pragma warning restore 649
 
             /// <summary>形状表里没有的东西：签名 → 次数</summary>
             internal readonly Dictionary<string, int> Unhandled = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -311,7 +309,18 @@ namespace ProjectEden.Preloader
             var code = m.Body.Instructions.ToList();
             var work = new List<Job>();
 
-            // 1) 局部变量不动点：装过载荷值的局部
+            // **两遍用同一个上下文。** 分类要调发射器判断「拼不拼得出来」，
+            // 所以局部变量映射和参数槽位在分析遍就得建好；
+            // 真正往方法体里加孪生局部只在 mutate 那一遍做。
+            var ctx = new Ctx { Method = m, Twin = twin, Regs = regs };
+
+            if (paramSlots.TryGetValue(m, out List<int> slots))
+                for (var s = 0; s < slots.Count && s < regs.Count; s++)
+                    ctx.ParamSlot[m.Parameters[slots[s]]] = s;
+
+            foreach (VariableDefinition v in PayloadCarriers(m, code, twin))
+                ctx.Locals[v] = null; // 占位：分类只关心「是不是载荷局部」
+
             HashSet<int> carriers = PayloadLocals(m, code, twin);
 
             // 2) 逐语句匹配
@@ -327,10 +336,14 @@ namespace ProjectEden.Preloader
             var depth = 0;
             var start = 0;
             var touched = false;
+            var merge = false;
 
             for (var i = 0; i < code.Count; i++)
             {
-                if (targets.Contains(code[i].Offset) && depth != 0) { depth = 0; start = i; }
+                // 在分支目标处栈还没归零 = 有值从别的路径流过来，这是控制流汇合。
+                // 重置切分点的同时**把这件事记住**——被切出来的那条语句是个 phi 汇合，
+                // 它的值不是一条线性表达式，后向栈回溯拼不出来。
+                if (targets.Contains(code[i].Offset) && depth != 0) { depth = 0; start = i; merge = true; }
 
                 depth += Push(code[i]) - Pop(code[i]);
 
@@ -340,8 +353,10 @@ namespace ProjectEden.Preloader
 
                 int from = start;
                 int to = i;
+                bool isMerge = merge;
 
                 start = i + 1;
+                merge = false;
 
                 if (!HasMainline(code, from, to, twin)) continue;
 
@@ -349,14 +364,41 @@ namespace ProjectEden.Preloader
 
                 string core = CoreShape(code, from, to, twin);
 
+                // **控制流汇合（phi）单独成一类。** 典型是三元：
+                //   inc = 条件 ? <长表达式> : 0
+                // 两条值路径汇进同一条 stfld，后向栈回溯拼不出它，也不该拼——
+                // 那需要一个孪生局部加上两条路径各存一次，是另一种形状。
+                // **在分类阶段就分出去**，而不是等发射时变成 Blocker：
+                // 形状表反映的应该是真实情况，不是「先当成简单形状、到时候再说」。
+                if (isMerge || Merges(code, targets, from, to)) core += " [merge]";
+
                 // **只有写好发射代码的形状才算认得。** 光在 TwinShapes 里不算——
                 // 那会让变换报成功却什么都不做，品质恒为 0 而日志说一切正常。
                 if (TwinShapes.Contains(core))
                 {
                     if (Emitted.Contains(core))
                     {
+                        // **分类直接问发射器能不能拼**，而不是先假定能、发射时再发现不能。
+                        // 这样「认得」就字面等于「拼得出来」，两者之间不再有缝——
+                        // 而那条缝正是这一期开头修掉的那种自欺的来源。
+                        var job = new Job { Core = core, From = from, To = to };
+
+                        if (Build(ctx, code, job) == null)
+                        {
+                            // 拼不出来的最常见原因是值不由载荷推导（比如机甲自己变出来的弹药）。
+                            // 那是个**语义问题**而不是形状问题，所以单独标出来等人决定，
+                            // 绝不悄悄按 0 处理——那等于静默丢品质。
+                            r.Recognized++;
+
+                            string tag = core + " [opaque]";
+
+                            r.Pending[tag] = r.Pending.TryGetValue(tag, out int q) ? q + 1 : 1;
+
+                            continue;
+                        }
+
                         // 记下来，等这一遍扫完再统一插入——边扫边插会让后面的下标全错位
-                        work.Add(new Job { Core = core, From = from, To = to });
+                        work.Add(job);
 
                         r.Twinned++;
 
@@ -394,7 +436,7 @@ namespace ProjectEden.Preloader
 
             r.TwinLocals += carriers.Count;
 
-            if (mutate && work.Count > 0) Emit(m, twin, work, r);
+            if (mutate && work.Count > 0) Emit(m, ctx, work, r);
         }
 
         /// <summary>一条待发射的孪生语句：原语句在方法体里的区间，以及它的核心形状。</summary>
@@ -419,8 +461,7 @@ namespace ProjectEden.Preloader
         /// 不这么做的话，被撑开的短分支位移会被 Cecil 截断写进去，产出一条跳到半条指令
         /// 中间的分支——不在改写时报、不在写盘时报，等 Harmony 读它时才炸。实测过一次。
         /// </summary>
-        private static void Emit(MethodDefinition m, IDictionary<string, FieldDefinition> twin,
-            List<Job> work, Report r)
+        private static void Emit(MethodDefinition m, Ctx ctx, List<Job> work, Report r)
         {
             m.Body.SimplifyMacros();
 
@@ -428,32 +469,46 @@ namespace ProjectEden.Preloader
             var code = m.Body.Instructions;
             ILProcessor il = m.Body.GetILProcessor();
 
+            // 分类遍放的是占位 null，这里把真正的孪生局部建出来并回填
+            foreach (VariableDefinition v in ctx.Locals.Keys.ToList())
+            {
+                var tv = new VariableDefinition(m.Module.TypeSystem.Int32);
+
+                m.Body.Variables.Add(tv);
+                m.Body.InitLocals = true;
+
+                ctx.Locals[v] = tv;
+
+                r.TwinLocals++;
+            }
+
             foreach (Job job in work.OrderByDescending(j => j.To))
             {
                 if (job.To >= code.Count) continue;
 
-                Instruction store = code[job.To];
+                List<Instruction> emit = Build(ctx, code, job);
 
-                var sf = store.Operand as FieldReference;
+                if (emit == null)
+                {
+                    // 分析遍认得、发射遍却拼不出来——这必须是 Blocker 而不是静默跳过，
+                    // 否则会得到「报告说孪生了 N 条、实际只写进去 M 条」，
+                    // 而那正是这一期开头修掉的那种自欺。
+                    r.Blockers.Add(
+                        $"{m.DeclaringType.Name}::{m.Name} 里形状「{job.Core}」认得但拼不出孪生语句" +
+                        $"（IL_{code[job.From].Offset:X4}）");
 
-                if (sf == null) continue;
+                    continue;
+                }
 
-                if (!twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out FieldDefinition tf)) continue;
-
-                // 「ldc stfld:PAY」：前缀 = [from, to-2]，值 = to-1（那个常数），存 = to。
-                // **前缀里不可能有调用**——核心形状是「去掉寻址之后剩下的 token」，
-                // 里面没有 call: 就意味着前缀是纯载入，重放一遍无副作用。这是可证的，不是假设。
-                var emit = new List<Instruction>();
-
-                for (int k = job.From; k <= job.To - 2; k++) emit.Add(Clone(code[k]));
-
-                emit.Add(il.Create(OpCodes.Ldc_I4_0));
-                emit.Add(il.Create(OpCodes.Stfld, tf));
-
-                Instruction at = store;
+                Instruction at = code[job.To];
 
                 foreach (Instruction ins in emit)
                 {
+                    // 数一下真的走了侧信道的次数。**这个计数器必须会动**——
+                    // 它恒为 0 就说明「载荷参数 → 寄存器」那条路一次都没走通，
+                    // 而那是静默的：品质照样是 0，报告照样说孪生成功。
+                    if (ins.Operand is FieldDefinition fd && ctx.Regs.Contains(fd)) r.ChannelUses++;
+
                     il.InsertAfter(at, ins);
 
                     at = ins;
@@ -461,6 +516,289 @@ namespace ProjectEden.Preloader
             }
 
             m.Body.OptimizeMacros();
+        }
+
+        /// <summary>语句内部（第一条之后）有没有分支目标——有就是控制流汇合。</summary>
+        private static bool Merges(IList<Instruction> code, HashSet<int> targets, int from, int to)
+        {
+            for (int k = from + 1; k <= to; k++)
+                if (targets.Contains(code[k].Offset))
+                    return true;
+
+            return false;
+        }
+
+        /// <summary>按形状拼出孪生语句。拼不出来返回 null。</summary>
+        private static List<Instruction> Build(Ctx ctx, IList<Instruction> code, Job job)
+        {
+            Instruction store = code[job.To];
+
+            if (!(store.Operand is FieldReference sf)) return null;
+
+            if (!ctx.Twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out FieldDefinition tf))
+                return null;
+
+            switch (job.Core)
+            {
+                // X.inc = 常数  →  X.qua = 0
+                case "ldc stfld:PAY":
+                {
+                    var outp = new List<Instruction>();
+
+                    for (int k = job.From; k <= job.To - 2; k++)
+                    {
+                        if (!IsPureLoad(code[k])) return null;
+
+                        outp.Add(Clone(code[k]));
+                    }
+
+                    outp.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+                    outp.Add(Instruction.Create(OpCodes.Stfld, tf));
+
+                    return outp;
+                }
+
+                // X.inc = <栈上的值>  →  X.qua = <那个值的品质版>
+                case "stfld:PAY":
+                {
+                    int[] a = ArgStarts(code, job.To, 2);
+
+                    if (a == null) return null;
+
+                    int objFrom = a[0], valFrom = a[1];
+
+                    var outp = new List<Instruction>();
+
+                    // 对象表达式原样重放
+                    for (int k = objFrom; k < valFrom; k++)
+                    {
+                        if (!IsPureLoad(code[k])) return null;
+
+                        outp.Add(Clone(code[k]));
+                    }
+
+                    List<Instruction> val = TwinValue(ctx, code, valFrom, job.To - 1);
+
+                    if (val == null) return null;
+
+                    outp.AddRange(val);
+                    outp.Add(Instruction.Create(OpCodes.Stfld, tf));
+
+                    return outp;
+                }
+
+                default: return null;
+            }
+        }
+
+        /// <summary>
+        /// 装过载荷值的局部变量。种子是 <c>&lt;载荷载入&gt; stloc L</c>，
+        /// 然后沿 <c>ldloc A ; stloc B</c> 传播到不动点——A 装过载荷，B 也就装过。
+        /// </summary>
+        private static IEnumerable<VariableDefinition> PayloadCarriers(MethodDefinition m,
+            IList<Instruction> code, IDictionary<string, FieldDefinition> twin)
+        {
+            var set = new HashSet<VariableDefinition>();
+            bool grew = true;
+
+            while (grew)
+            {
+                grew = false;
+
+                for (var i = 1; i < code.Count; i++)
+                {
+                    if (!IsStloc(code[i])) continue;
+
+                    VariableDefinition dst = VarOf(m, code[i]);
+
+                    if (dst == null || set.Contains(dst)) continue;
+
+                    Instruction src = code[i - 1];
+
+                    bool carries = IsMainline(src, twin);
+
+                    if (!carries)
+                    {
+                        VariableDefinition sv = VarOf(m, src);
+
+                        carries = sv != null && set.Contains(sv);
+                    }
+
+                    if (!carries) continue;
+
+                    set.Add(dst);
+                    grew = true;
+                }
+            }
+
+            return set;
+        }
+
+        // ── 基础设施一：后向栈深度找实参边界 ──────────────────
+        //
+        // 要把「对象」和「值」分开，只能靠栈。`stfld` 弹两个：对象和值，
+        // 但它们各自是**表达式**而不是单条指令（`ldarg.0 ldfld foo` 是一个值），
+        // 所以往回数固定条数是错的——CargoIncWidener 当初就是在
+        // StorageComponent.AddCargo 上被这一点绊住的。
+
+        /// <summary>
+        /// <paramref name="at"/> 这条指令弹掉的 <paramref name="argc"/> 个值，
+        /// 各自的表达式从哪条指令开始。返回值按<b>压栈顺序</b>排（第一个实参在前）。
+        /// 认不出来（遇到分支目标、栈没归零）就返回 null——<b>宁可不改</b>。
+        /// </summary>
+        private static int[] ArgStarts(IList<Instruction> code, int at, int argc)
+        {
+            var starts = new int[argc];
+            var depth = 0;
+            int need = argc;
+            int i = at - 1;
+
+            for (; i >= 0 && need > 0; i--)
+            {
+                depth += Push(code[i]) - Pop(code[i]);
+
+                if (depth <= 0) continue;
+
+                // 这条指令把第 need 个实参的净值推了上来，它就是那个表达式的开头
+                starts[--need] = i;
+                depth = 0;
+            }
+
+            return need == 0 ? starts : null;
+        }
+
+        // ── 基础设施二：载荷值的四个来源 ──────────────────────
+
+        /// <summary>一个方法体内的孪生上下文：局部变量映射、参数槽位、孪生字段表。</summary>
+        private sealed class Ctx
+        {
+            internal MethodDefinition Method;
+            internal IDictionary<string, FieldDefinition> Twin;
+            internal IList<FieldDefinition> Regs;
+            internal Dictionary<VariableDefinition, VariableDefinition> Locals =
+                new Dictionary<VariableDefinition, VariableDefinition>();
+            internal Dictionary<ParameterDefinition, int> ParamSlot =
+                new Dictionary<ParameterDefinition, int>();
+        }
+
+        /// <summary>
+        /// 发射一个载荷值表达式 <c>[from, to]</c> 的<b>品质版本</b>。
+        /// 认不出来返回 null，调用方据此放弃整条语句。
+        ///
+        /// 四个来源各对应一种发射，见类注释的概念模型。<b>第三条（载荷参数 → 侧信道寄存器）
+        /// 是「给方法加品质参数」那条被推翻的路的替身</b>：值照样跨过方法边界，签名一个不动。
+        /// </summary>
+        private static List<Instruction> TwinValue(Ctx ctx, IList<Instruction> code, int from, int to)
+        {
+            var outp = new List<Instruction>();
+
+            Instruction last = code[to];
+
+            // (a) 载荷字段：重放寻址前缀，换成孪生字段
+            if (last.Operand is FieldReference fr &&
+                ctx.Twin.TryGetValue(fr.DeclaringType.FullName + "::" + fr.Name, out FieldDefinition tf) &&
+                (last.OpCode == OpCodes.Ldfld || last.OpCode == OpCodes.Ldsfld))
+            {
+                for (int k = from; k < to; k++)
+                {
+                    if (!IsPureLoad(code[k])) return null;
+
+                    outp.Add(Clone(code[k]));
+                }
+
+                outp.Add(Instruction.Create(last.OpCode, tf));
+
+                return outp;
+            }
+
+            // 其余三种都只认单条指令的表达式——多条的先不碰，报成未实现比猜着改安全
+            if (from != to) return null;
+
+            // (b) 装过载荷的局部变量 → 它的孪生
+            VariableDefinition v = VarOf(ctx.Method, last);
+
+            if (v != null && ctx.Locals.TryGetValue(v, out VariableDefinition tv))
+            {
+                // 分类遍里孪生局部还没建（占位是 null）。这时只要能走到这一步，
+                // 就说明「拼得出来」——真正的指令由 mutate 那一遍发射。
+                if (tv == null) return outp;
+
+                outp.Add(Instruction.Create(OpCodes.Ldloc, tv));
+
+                return outp;
+            }
+
+            // (c) 载荷参数 → 侧信道寄存器
+            ParameterDefinition p = ParamOf(ctx.Method, last);
+
+            if (p != null && ctx.ParamSlot.TryGetValue(p, out int slot) && slot < ctx.Regs.Count)
+            {
+                outp.Add(Instruction.Create(OpCodes.Ldsfld, ctx.Regs[slot]));
+
+                return outp;
+            }
+
+            // (d) 常数 → 0
+            if (last.OpCode.Name.StartsWith("ldc", StringComparison.Ordinal))
+            {
+                outp.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+
+                return outp;
+            }
+
+            return null;
+        }
+
+        /// <summary>纯载入：可以原样重放而没有副作用。</summary>
+        private static bool IsPureLoad(Instruction i)
+        {
+            string n = i.OpCode.Name;
+
+            return n.StartsWith("ldarg", StringComparison.Ordinal)
+                   || n.StartsWith("ldloc", StringComparison.Ordinal)
+                   || n.StartsWith("ldfld", StringComparison.Ordinal)
+                   || n.StartsWith("ldsfld", StringComparison.Ordinal)
+                   || n.StartsWith("ldelem", StringComparison.Ordinal)
+                   || n.StartsWith("ldc", StringComparison.Ordinal)
+                   || n == "dup" || n == "conv.i4" || n == "conv.u1" || n == "conv.i2";
+        }
+
+        private static VariableDefinition VarOf(MethodDefinition m, Instruction i)
+        {
+            if (i.Operand is VariableDefinition v) return v;
+
+            if (i.OpCode == OpCodes.Ldloc_0 || i.OpCode == OpCodes.Stloc_0) return At(m, 0);
+            if (i.OpCode == OpCodes.Ldloc_1 || i.OpCode == OpCodes.Stloc_1) return At(m, 1);
+            if (i.OpCode == OpCodes.Ldloc_2 || i.OpCode == OpCodes.Stloc_2) return At(m, 2);
+            if (i.OpCode == OpCodes.Ldloc_3 || i.OpCode == OpCodes.Stloc_3) return At(m, 3);
+
+            return null;
+        }
+
+        private static VariableDefinition At(MethodDefinition m, int i) =>
+            i < m.Body.Variables.Count ? m.Body.Variables[i] : null;
+
+        private static ParameterDefinition ParamOf(MethodDefinition m, Instruction i)
+        {
+            if (i.Operand is ParameterDefinition p) return p;
+
+            int idx = i.OpCode == OpCodes.Ldarg_0 ? 0
+                : i.OpCode == OpCodes.Ldarg_1 ? 1
+                : i.OpCode == OpCodes.Ldarg_2 ? 2
+                : i.OpCode == OpCodes.Ldarg_3 ? 3
+                : -1;
+
+            if (idx < 0) return null;
+
+            // 实例方法的 ldarg.0 是 this，不是形参
+            if (m.HasThis)
+            {
+                if (idx == 0) return null;
+
+                idx--;
+            }
+
+            return idx < m.Parameters.Count ? m.Parameters[idx] : null;
         }
 
         /// <summary>
@@ -542,6 +880,14 @@ namespace ProjectEden.Preloader
             // 也不依赖局部变量孪生，而那两样是后面绝大多数形状都要用的。
             // 先用它把发射机制本身（前缀提取、插入位置、标签处理）跑通并验证。
             "ldc stfld:PAY",
+
+            // X.inc = <栈上的值>  →  X.qua = <那个值的品质版>
+            //
+            // 第二个。它是两块基础设施的第一个用户：要靠**后向栈深度**把「对象」和「值」
+            // 分开（往回数固定条数是错的，值本身是个表达式），
+            // 再靠**四个来源**把那个值翻译成品质版——其中「载荷参数 → 侧信道寄存器」
+            // 就是被推翻的「加参数」那条路的替身。
+            "stfld:PAY",
         }, StringComparer.Ordinal);
 
         /// <summary>
