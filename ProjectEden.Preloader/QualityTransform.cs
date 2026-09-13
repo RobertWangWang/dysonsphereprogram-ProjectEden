@@ -371,6 +371,19 @@ namespace ProjectEden.Preloader
             // 解法是**从乐观集合出发跑不动点**：每轮拿当前集合分类，把定义语句拼不出来的
             // 局部剔掉再来一轮。集合只减不增，所以一定收敛，最多跑 |集合| 轮。
             var cand = new HashSet<VariableDefinition>(SafeCarriers(m, code, stmts));
+
+            // 「每件品质分」只看定义式的形状，和哪些局部最终可用无关，所以在不动点之前就能定。
+            // 放在之后定就太晚了：乘法的决胜正发生在不动点里面。
+            ctx.PerItem.Clear();
+
+            foreach (Stmt st in stmts)
+            {
+                if (st.Core.IndexOf("div", StringComparison.Ordinal) < 0) continue;
+
+                VariableDefinition pv = VarOf(m, code[st.To]);
+
+                if (pv != null) ctx.PerItem.Add(pv);
+            }
             var carriers = new HashSet<VariableDefinition>(cand);
             var dead = new HashSet<VariableDefinition>();
 
@@ -395,7 +408,7 @@ namespace ProjectEden.Preloader
                 {
                     if (!DefinesCarrier.Contains(st.Core)) continue;
 
-                    VariableDefinition dv = VarOf(m, code[st.To]);
+                    VariableDefinition dv = DefOf(m, code, st);
 
                     if (dv == null || !cand.Contains(dv)) continue;
 
@@ -410,7 +423,8 @@ namespace ProjectEden.Preloader
                     bool fail = !Emitted.Contains(st.Core)
                                 || Build(ctx, code, new Job
                                 {
-                                    Core = st.Core, From = st.From, To = st.To, TrueFrom = st.TrueFrom,
+                                    Core = st.Core, From = st.From, To = st.To,
+                                    TrueFrom = st.TrueFrom, Dst = st.Dst,
                                 }) == null;
 
                     if (!had) ctx.Locals.Remove(dv);
@@ -479,7 +493,10 @@ namespace ProjectEden.Preloader
                         // **分类直接问发射器能不能拼**，而不是先假定能、发射时再发现不能。
                         // 这样「认得」就字面等于「拼得出来」，两者之间不再有缝——
                         // 而那条缝正是这一期开头修掉的那种自欺的来源。
-                        var job = new Job { Core = core, From = from, To = to, TrueFrom = st.TrueFrom };
+                        var job = new Job
+                        {
+                            Core = core, From = from, To = to, TrueFrom = st.TrueFrom, Dst = st.Dst,
+                        };
 
                         if (Build(ctx, code, job) == null)
                         {
@@ -562,6 +579,17 @@ namespace ProjectEden.Preloader
             /// <summary>见 <see cref="Stmt.TrueFrom"/>。</summary>
             internal int TrueFrom;
 
+            /// <summary>见 <see cref="Stmt.Dst"/>。</summary>
+            internal VariableDefinition Dst;
+
+            /// <summary>
+            /// 插入点的<b>指令对象</b>，由发射器在拼的时候记下来。
+            ///
+            /// 下标会过期：同一条语句上可能挂着两个 Job（往被调方传进去、从出参接回来）,
+            /// 先处理的那个一插入，后处理的那个手里的下标就错位了。指令对象不会。
+            /// </summary>
+            internal Instruction Anchor;
+
             /// <summary>
             /// 孪生语句插在哪条指令<b>之后</b>。<c>-1</c> 表示默认的「整条语句之后」。
             ///
@@ -625,8 +653,8 @@ namespace ProjectEden.Preloader
                     continue;
                 }
 
-                // Build 可能把插入点挪到 call 之前（见 Job.Insert）
-                Instruction at = code[job.Insert < 0 ? job.To : job.Insert];
+                // Build 可能把插入点挪到 call 前后（见 Job.Insert / Job.Anchor）
+                Instruction at = job.Anchor ?? code[job.Insert < 0 ? job.To : job.Insert];
 
                 foreach (Instruction ins in emit)
                 {
@@ -667,6 +695,13 @@ namespace ProjectEden.Preloader
             /// 撞上分支目标而认不出来。要重放那个对象表达式，就得从这里开始往前找。
             /// </summary>
             internal int TrueFrom;
+
+            /// <summary>
+            /// 这条语句定义的局部，当它<b>不是</b>由末尾的 stloc 定义时。
+            /// 目前只有一种：被调方通过 <c>out</c> 形参写回来的那个局部——
+            /// 它的名字在 <c>ldloca</c> 上，语句末尾是 call，不是 stloc。
+            /// </summary>
+            internal VariableDefinition Dst;
         }
 
         /// <summary>
@@ -743,6 +778,7 @@ namespace ProjectEden.Preloader
             "calc stloc",           // local = 纯算术（件数 × 每件品质分）
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
+            "call:out",             // local 由被调方通过 out 形参写回
             "call:get_Value ldfld:PAY stloc",
             "ldfld:PAY mul sub stloc",
             "ldfld:PAY div mul ldc add stloc",
@@ -770,7 +806,7 @@ namespace ProjectEden.Preloader
             {
                 if (!DefinesCarrier.Contains(st.Core)) continue;
 
-                VariableDefinition v = VarOf(m, code[st.To]);
+                VariableDefinition v = DefOf(m, code, st);
 
                 if (v != null) cand.Add(v);
             }
@@ -873,6 +909,52 @@ namespace ProjectEden.Preloader
                     extra.Add(new Stmt { From = va[0], To = i, Core = "calc stloc", Synth = true });
 
                     if (cand.Add(cdst)) grew = true;
+                }
+
+                // 被调方通过 `out` 形参写回来的品质：`TakeItem(id, n, out inc)`。
+                //
+                // **这是侧信道的第三条路**，前两条是「调用方写进去」和「载荷参数读出来」。
+                // 缺了它，被调方明明把品质写进了寄存器，调用方却没人去接——
+                // 那个局部于是不算载荷，下游 `X.inc = 它` 一族全断。
+                // 孪生语句插在 call **之后**：那时寄存器已经被被调方写好了。
+                for (var i = 0; i < code.Count; i++)
+                {
+                    if (code[i].OpCode != OpCodes.Call && code[i].OpCode != OpCodes.Callvirt) continue;
+                    if (!(code[i].Operand is MethodReference cmr)) continue;
+
+                    MethodDefinition cd;
+
+                    try { cd = cmr.Resolve(); }
+                    catch { continue; }
+
+                    if (cd == null || ctx.AllParamSlots == null
+                        || !ctx.AllParamSlots.TryGetValue(cd, out List<int> cs)) continue;
+
+                    int cargc = cd.Parameters.Count + (cd.HasThis ? 1 : 0);
+                    int[] ca = ArgStarts(code, i, cargc);
+
+                    if (ca == null) continue;
+
+                    foreach (int pi in cs)
+                    {
+                        if (!cd.Parameters[pi].ParameterType.IsByReference) continue;
+
+                        int ai = pi + (cd.HasThis ? 1 : 0);
+                        int aEnd = ai + 1 < cargc ? ca[ai + 1] - 1 : i - 1;
+
+                        if (ca[ai] != aEnd) continue;
+                        if (code[aEnd].OpCode != OpCodes.Ldloca && code[aEnd].OpCode != OpCodes.Ldloca_S)
+                            continue;
+                        if (!(code[aEnd].Operand is VariableDefinition ov)) continue;
+
+                        extra.Add(new Stmt
+                        {
+                            From = ca[0], To = i, TrueFrom = ca[0],
+                            Core = "call:out", Dst = ov, Synth = true,
+                        });
+
+                        if (cand.Add(ov)) grew = true;
+                    }
                 }
 
                 for (var i = 1; i < code.Count; i++)
@@ -1238,35 +1320,61 @@ namespace ProjectEden.Preloader
         /// </summary>
         private static List<Instruction> BuildForwardToCallee(Ctx ctx, IList<Instruction> code, Job job)
         {
+            // **往前扫，不靠 job.To。** 同一条语句上可能还挂着一个「从出参接回来」的 Job,
+            // 它先插入的话这里的 To 就过期了——而 call 本身还在，往前扫找得到。
+            // **要找的是「有载荷形参的那个 call」，不是第一个 call。**
+            // 一条语句里常常先有个取值器（`player.package.AddItemStacked(...)` 里的 get_package）,
+            // 拿第一个 call 会解析到它，然后因为「它没有载荷形参」整条放弃——
+            // 表现是这一族全部拼不出来，而真正的调用就在后面两条。
             var callAt = -1;
+            MethodDefinition callee = null;
+            List<int> slots = null;
 
-            for (int k = job.From; k <= job.To; k++)
-                if ((code[k].OpCode == OpCodes.Call || code[k].OpCode == OpCodes.Callvirt)
-                    && code[k].Operand is MethodReference)
-                {
-                    callAt = k;
+            for (int k = job.From; k < code.Count && callAt < 0; k++)
+            {
+                if (code[k].OpCode != OpCodes.Call && code[k].OpCode != OpCodes.Callvirt) continue;
+                if (!(code[k].Operand is MethodReference cmr)) continue;
 
-                    break;
-                }
+                MethodDefinition cd;
 
-            if (callAt <= job.From) return null;
+                try { cd = cmr.Resolve(); }
+                catch { continue; }
 
-            MethodDefinition callee;
+                if (cd == null || ctx.AllParamSlots == null
+                    || !ctx.AllParamSlots.TryGetValue(cd, out List<int> cs)) continue;
 
-            try { callee = ((MethodReference)code[callAt].Operand).Resolve(); }
-            catch { return null; }
+                callAt = k;
+                callee = cd;
+                slots = cs;
+            }
 
-            if (callee == null || ctx.AllParamSlots == null
-                || !ctx.AllParamSlots.TryGetValue(callee, out List<int> slots)) return null;
+            bool dbg0 = Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG") == ctx.Method.Name;
+
+            if (callAt <= job.From || callee == null || slots == null)
+            {
+                if (dbg0) Console.Error.WriteLine($"[fwd] 找不到带载荷形参的 call from={job.From} callAt={callAt}");
+
+                return null;
+            }
 
             // call 是跳转目标的话，插在它前面的代码会被跳过去——寄存器没写而调用照常发生，
             // 表现是那条路径上的品质凭空变成上一次残留的值。宁可认不出来。
-            if (IsBranchTarget(code, code[callAt])) return null;
+            if (IsBranchTarget(code, code[callAt]))
+            {
+                if (dbg0) Console.Error.WriteLine("[fwd] call 是跳转目标");
+
+                return null;
+            }
 
             int argc = callee.Parameters.Count + (callee.HasThis ? 1 : 0);
             int[] a = ArgStarts(code, callAt, argc);
 
-            if (a == null) return null;
+            if (a == null)
+            {
+                if (dbg0) Console.Error.WriteLine($"[fwd] 实参边界数不出来 argc={argc} callAt={callAt}");
+
+                return null;
+            }
 
             var outp = new List<Instruction>();
 
@@ -1281,13 +1389,26 @@ namespace ProjectEden.Preloader
 
                 int ai = slots[si] + (callee.HasThis ? 1 : 0);
 
-                if (ai >= argc || a[ai] < job.TrueFrom) return null;
+                bool dbgf = Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG") == ctx.Method.Name;
+
+                if (ai >= argc || a[ai] < job.TrueFrom)
+                {
+                    if (dbgf) Console.Error.WriteLine($"[fwd] 越界 ai={ai} argc={argc} trueFrom={job.TrueFrom}");
+
+                    return null;
+                }
 
                 int end = ai + 1 < argc ? a[ai + 1] - 1 : callAt - 1;
 
                 List<Instruction> v = TwinValue(ctx, code, a[ai], end);
 
-                if (v == null) return null;
+                if (v == null)
+                {
+                    if (dbgf) Console.Error.WriteLine($"[fwd] 实参{ai} 拼不出来 [{a[ai]}..{end}] "
+                                                      + $"末指令 {code[end].OpCode.Name}");
+
+                    return null;
+                }
 
                 outp.AddRange(v);
                 outp.Add(Instruction.Create(OpCodes.Stsfld, ctx.Regs[si]));
@@ -1296,6 +1417,7 @@ namespace ProjectEden.Preloader
             if (outp.Count == 0) return null;
 
             job.Insert = callAt - 1;
+            job.Anchor = code[callAt - 1];
 
             return outp;
         }
@@ -1342,11 +1464,23 @@ namespace ProjectEden.Preloader
 
             if (code[to].OpCode == OpCodes.Mul || code[to].OpCode == OpCodes.Div)
             {
-                // 两侧都能带品质就不是缩放，含义不明；除法的品质只能在左边
-                // （品质分 ÷ 件数 = 单件品质分；件数 ÷ 品质分 没有含义）。
-                if (lv != null && rv != null) return null;
-                if (lv == null && code[to].OpCode == OpCodes.Div) return null;
+                // 两侧都能带品质时，靠「谁是每件品质分」决胜：每件品质分 × 件数 = 品质。
+                // 原版在这里同一个局部既当件数又当点数（`rem` 既是余下的点数又是件数），
+                // 所以光看类型分不开，只能看它是**怎么来的**——带除法出身的那个才是每件量。
+                if (lv != null && rv != null)
+                {
+                    bool lp = lt == lf && IsLdloc(code[lf])
+                              && ctx.PerItem.Contains(VarOf(ctx.Method, code[lf]));
+                    bool rp = rt == rf && IsLdloc(code[rf])
+                              && ctx.PerItem.Contains(VarOf(ctx.Method, code[rf]));
 
+                    if (lp == rp) return null;
+
+                    if (lp) rv = null;
+                    else lv = null;
+                }
+
+                if (code[to].OpCode == OpCodes.Div && lv == null) return null;
                 var outp = new List<Instruction>();
 
                 if (lv != null) outp.AddRange(lv);
@@ -1377,6 +1511,20 @@ namespace ProjectEden.Preloader
 
             if (lv == null && lc && rv != null) lv = new List<Instruction> { Clone(code[lf]) };
             if (rv == null && rc && lv != null) rv = new List<Instruction> { Clone(code[rf]) };
+
+            // **加法可以把认不出来的一侧当 0，减法不行。** 这不是对称的：
+            //   `a + b`，b 的品质不明 → 取 0 是**少算**，品质只会丢不会凭空出现。
+            //   `a - b`，b 的品质不明 → 取 0 是**少减**，等于凭空多出品质。
+            // 原版在这一带本来就混用件数和点数（`rem -= count`），所以「不明」是常态,
+            // 方向选保守的那一边。减法照旧两侧都要有品质，`件数 - 点数` 仍然被挡住。
+            if (code[to].OpCode == OpCodes.Add)
+            {
+                if (lv == null && rv != null && PureRange(code, lf, lt))
+                    lv = new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_0) };
+
+                if (rv == null && lv != null && PureRange(code, rf, rt))
+                    rv = new List<Instruction> { Instruction.Create(OpCodes.Ldc_I4_0) };
+            }
 
             if (lv == null || rv == null) return null;
 
@@ -1489,6 +1637,10 @@ namespace ProjectEden.Preloader
             return false;
         }
 
+        /// <summary>这条语句定义了哪个局部。绝大多数看末尾的 stloc，出参那种看 Dst。</summary>
+        private static VariableDefinition DefOf(MethodDefinition m, IList<Instruction> code, Stmt st) =>
+            st.Dst ?? VarOf(m, code[st.To]);
+
         private static bool IsLdarg(Instruction i) =>
             i.OpCode == OpCodes.Ldarg || i.OpCode == OpCodes.Ldarg_S ||
             i.OpCode == OpCodes.Ldarg_0 || i.OpCode == OpCodes.Ldarg_1 ||
@@ -1521,7 +1673,7 @@ namespace ProjectEden.Preloader
             {
                 if (!DefinesCarrier.Contains(st.Core) || !Emitted.Contains(st.Core)) continue;
 
-                VariableDefinition v = VarOf(m, code[st.To]);
+                VariableDefinition v = DefOf(m, code, st);
 
                 if (v != null) good.Add(v);
             }
@@ -1562,11 +1714,17 @@ namespace ProjectEden.Preloader
             // 于是 `ldfld:PAY stloc`（末指令是 stloc）和读-改-写（末指令是 stind.i4）
             // 一律在这里就返回 null —— 表现是新写的五个发射器全部落成 [opaque]，
             // 看起来像「这些形状拼不出来」，其实是取字段那一步就错了。
+            // **而且只在末指令真的是「写字段」时才取。** 不加这个限制的话，末指令下标一旦过期
+            // （同一条语句上挂着两个 Job，先插入的那个会把后面的下标顶走），
+            // 这里会读到刚插进去的 `ldsfld Q0`——它也带着一个 FieldReference，只是不在孪生表里,
+            // 于是整条语句在进 switch 之前就返回 null。表现是「分析遍认得、发射遍拼不出来」,
+            // 而两遍的代码完全一样。
             FieldDefinition tf = null;
 
-            if (store.Operand is FieldReference sf &&
-                !ctx.Twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out tf))
-                return null;
+            if (store.OpCode == OpCodes.Stfld || store.OpCode == OpCodes.Stsfld)
+                if (store.Operand is FieldReference sf
+                    && !ctx.Twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out tf))
+                    return null;
 
             switch (job.Core)
             {
@@ -1846,6 +2004,67 @@ namespace ProjectEden.Preloader
             case "ldfld:PAY call:AddItemStacked bge.s":
             case "ldfld:PAY call:AddItemStacked stloc":
                 return BuildForwardToCallee(ctx, code, job);
+
+            // 被调方通过 out 形参写回来：twinLocal = Q<槽位>，插在 call 之后。
+            case "call:out":
+            {
+                if (job.Dst == null || !ctx.Locals.TryGetValue(job.Dst, out VariableDefinition otv))
+                    return null;
+
+                // 同样：要找有载荷形参的那个 call，不是第一个
+                var ocall = -1;
+
+                for (int k = job.From; k < code.Count && ocall < 0; k++)
+                {
+                    if (code[k].OpCode != OpCodes.Call && code[k].OpCode != OpCodes.Callvirt) continue;
+                    if (!(code[k].Operand is MethodReference kmr)) continue;
+
+                    MethodDefinition kd;
+
+                    try { kd = kmr.Resolve(); }
+                    catch { continue; }
+
+                    if (kd != null && ctx.AllParamSlots != null && ctx.AllParamSlots.ContainsKey(kd))
+                        ocall = k;
+                }
+
+                if (ocall < 0 || !(code[ocall].Operand is MethodReference omr)) return null;
+
+                MethodDefinition ocd;
+
+                try { ocd = omr.Resolve(); }
+                catch { return null; }
+
+                if (ocd == null || ctx.AllParamSlots == null
+                    || !ctx.AllParamSlots.TryGetValue(ocd, out List<int> oslots)) return null;
+
+                int oargc = ocd.Parameters.Count + (ocd.HasThis ? 1 : 0);
+                int[] oa = ArgStarts(code, ocall, oargc);
+
+                if (oa == null) return null;
+
+                for (var si2 = 0; si2 < oslots.Count && si2 < ctx.Regs.Count; si2++)
+                {
+                    int ai2 = oslots[si2] + (ocd.HasThis ? 1 : 0);
+
+                    if (ai2 >= oargc) continue;
+                    if (!(code[oa[ai2]].Operand is VariableDefinition av)
+                        || !ReferenceEquals(av, job.Dst)) continue;
+
+                    job.Insert = ocall;
+                    job.Anchor = code[ocall];
+
+                    return otv == null
+                        ? new List<Instruction>()
+                        : new List<Instruction>
+                        {
+                            Instruction.Create(OpCodes.Ldsfld, ctx.Regs[si2]),
+                            Instruction.Create(OpCodes.Stloc, otv),
+                        };
+                }
+
+                return null;
+            }
 
             // local = <载荷参数>  →  twinLocal = Q<槽位>
             case "ldarg:PAY stloc":
@@ -2165,6 +2384,16 @@ namespace ProjectEden.Preloader
             internal IDictionary<MethodDefinition, List<int>> AllParamSlots;
             internal Dictionary<VariableDefinition, VariableDefinition> Locals =
                 new Dictionary<VariableDefinition, VariableDefinition>();
+            /// <summary>
+            /// 「每件品质分」那一类局部：定义式里带除法（<c>X.inc / 件数</c>）。
+            ///
+            /// 乘法里两侧都能带品质时靠它决胜：**每件品质分 × 件数 = 品质**，
+            /// 所以带除法出身的那一侧才是品质，另一侧是件数、原样重放。
+            /// 没有它就只能判「含义不明」而放弃，那会把
+            /// `X.inc -= 件数 × 每件点数` 这一族卡住——原版在那里同一个局部既当件数又当点数。
+            /// </summary>
+            internal readonly HashSet<VariableDefinition> PerItem = new HashSet<VariableDefinition>();
+
             internal Dictionary<ParameterDefinition, int> ParamSlot =
                 new Dictionary<ParameterDefinition, int>();
         }
@@ -2499,6 +2728,7 @@ namespace ProjectEden.Preloader
             // local = 载荷参数 → twinLocal = Q<槽位>。和上一条是两回事：
             // 参数那一侧的品质在侧信道寄存器里，不在某个孪生局部里。
             "ldarg:PAY stloc",
+            "call:out",
 
             // local = split_inc(ref n, ref m, p)。**split_inc 一族的入口**：
             // 站点内搬运那 9 处 `X.inc -= 份额` 的被减数就是它定义的局部。
@@ -2579,6 +2809,7 @@ namespace ProjectEden.Preloader
             "recalc stloc",                                         // local = 与品质无关的重算
             "ldloc stloc",                                          // local = 另一个载荷局部
             "ldarg:PAY stloc",                                      // local = 载荷参数
+            "call:out",                                             // local 由被调方 out 形参写回
             "call:split_inc stloc",                                 // local = split_inc(...)
             "ldflda:PAY dup ldind.i4 add stind.i4",                 // X.inc += v
             "ldflda:PAY dup ldind.i4 sub stind.i4",                 // X.inc -= v
