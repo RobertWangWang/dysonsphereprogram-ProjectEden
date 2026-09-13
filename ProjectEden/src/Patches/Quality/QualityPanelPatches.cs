@@ -157,17 +157,19 @@ namespace ProjectEden.Patches
             label.raycastTarget = false;
             label.enabled = false;
 
-            // 黑字（所有者指定）。
+            // **两种底色下都要读得出来，而这不是靠挑一种颜色解决的。**
             //
-            // **描边跟着翻成浅色，这不是装饰。** 这个标签所在的位置，底色会随着填充推进
-            // 从深变浅：纯黑字在浅色填充上很清楚，在未填充的深色段上会直接消失。
-            // 浅色描边只在深底那一半起作用，浅底那一半几乎看不出来。
-            label.color = new Color(0.05f, 0.06f, 0.08f);
+            // 这个位置的底色会随填充推进从深灰变成白：任何一种纯色都会在其中一半上失效——
+            // 黑字在白底上清楚、在深灰上糊，浅色字反过来。
+            //
+            // 办法是让**轮廓去定义字形**：浅色字 + 实心黑描边。白底上看到的是黑描边勾出的字，
+            // 深底上看到的是浅色的字身，两边都成立。游戏 HUD 普遍是这么做的。
+            label.color = new Color(1f, 0.94f, 0.80f);
 
             var outline = go.GetComponent<Outline>() ?? go.AddComponent<Outline>();
 
-            outline.effectColor = new Color(0.92f, 0.95f, 1f, 0.9f);
-            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            outline.effectColor = new Color(0f, 0f, 0f, 1f);
+            outline.effectDistance = new Vector2(1.8f, -1.8f);
 
             if (!_reported)
             {
