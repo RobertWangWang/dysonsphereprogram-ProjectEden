@@ -379,6 +379,13 @@ namespace ProjectEden.Preloader
                 foreach (VariableDefinition v in carriers)
                     ctx.Locals[v] = null; // 占位：分类只关心「是不是载荷局部」
 
+                // **每一轮开头都剪一次，不能只在剔掉东西之后剪。** 合成语句服务的局部
+                // 也可能一开始就不在可用集合里（它另有一处赋值），那时第一轮 doomed 是空的、
+                // 直接 break，剪枝从来没跑过——留下的合成语句会以「拼不出来」挡住整个变换，
+                // 而它描述的那件事其实不需要做。
+                stmts.RemoveAll(st => st.Synth && (Orphan(m, code, st.To, carriers)
+                                                   || Orphan(m, code, st.From, carriers)));
+
                 var doomed = new HashSet<VariableDefinition>();
 
                 foreach (Stmt st in stmts)
@@ -397,10 +404,6 @@ namespace ProjectEden.Preloader
                 if (doomed.Count == 0) break;
 
                 carriers.ExceptWith(doomed);
-
-                // 合成语句随它服务的局部一起消失——留着只会以「拼不出来」的身份挡住变换
-                stmts.RemoveAll(st => st.Synth && (Orphan(m, code, st.To, carriers)
-                                                   || Orphan(m, code, st.From, carriers)));
             }
 
             // 2) 逐语句匹配
@@ -767,6 +770,43 @@ namespace ProjectEden.Preloader
                     extra.Add(new Stmt { From = i - 1, To = i, Core = "ldarg:PAY stloc", Synth = true });
 
                     if (cand.Add(adst)) grew = true;
+                }
+
+                // 纯算术得出的载荷局部：`V_4 = 件数 × 每件品质分`。
+                //
+                // 这类语句里**一个载荷字段都没有**（两个操作数都是局部），所以按载荷切分
+                // 看不见它——而它正是下游 `X.inc -= V_4` 那一族的被减数。
+                //
+                // 能不能带品质由 TwinValue 自己判（量纲规则在 TwinArith 里），
+                // 这里只负责把语句补进来；判不出来就不是载荷局部，下游自然也拼不出来。
+                for (var i = 1; i < code.Count; i++)
+                {
+                    if (taken.Contains(i) || !IsStloc(code[i])) continue;
+
+                    VariableDefinition cdst = VarOf(m, code[i]);
+
+                    if (cdst == null || !IsArith(code[i - 1])) continue;
+
+                    int[] va = ArgStarts(code, i, 1);
+
+                    if (va == null || !PureRange(code, va[0], i - 1)) continue;
+
+                    var uses = false;
+
+                    for (int k = va[0]; k < i; k++)
+                    {
+                        VariableDefinition u = IsLdloc(code[k]) ? VarOf(m, code[k]) : null;
+
+                        if (u != null && cand.Contains(u)) { uses = true; break; }
+                    }
+
+                    if (!uses) continue;
+
+                    taken.Add(i);
+
+                    extra.Add(new Stmt { From = va[0], To = i, Core = "calc stloc", Synth = true });
+
+                    if (cand.Add(cdst)) grew = true;
                 }
 
                 for (var i = 1; i < code.Count; i++)
@@ -1197,18 +1237,19 @@ namespace ProjectEden.Preloader
                 return outp;
             }
 
-            if (lv == null && rv == null) return null;
+            // **加减要求两侧都带品质**，一侧记 0 是错的。
+            //
+            // 判据是量纲：`点数 + 点数` 有意义，`件数 - 点数` 没有——而原版里正有这种混用。
+            // StorageComponent::TakeTailItemsByIncTable 的 `n = count - rem` 就是：
+            // rem 是余下的点数，n 是「带 level 点的件数」，结果是**件数**不是点数。
+            // 按「认不出的一侧记 0」去孪生它，会得到一个假的品质值往下游流，
+            // 而下游拿它去乘、去减真实品质——不报错，品质凭空多出来或少掉。
+            if (lv == null || rv == null) return null;
 
             var sum = new List<Instruction>();
 
-            if (lv != null) sum.AddRange(lv);
-            else if (!PureRange(code, lf, lt)) return null;
-            else sum.Add(Instruction.Create(OpCodes.Ldc_I4_0));
-
-            if (rv != null) sum.AddRange(rv);
-            else if (!PureRange(code, rf, rt)) return null;
-            else sum.Add(Instruction.Create(OpCodes.Ldc_I4_0));
-
+            sum.AddRange(lv);
+            sum.AddRange(rv);
             sum.Add(Instruction.Create(code[to].OpCode));
 
             return sum;
@@ -1626,6 +1667,7 @@ namespace ProjectEden.Preloader
                 // local = X.inc  →  twinLocal = X.qua
                 case "ldfld:PAY stloc":
                 case "call:get_Value ldfld:PAY stloc":   // V = kvp.Value.inc（取值器已核实是纯读字段）
+                case "calc stloc":                       // V = 件数 × 每件品质分（纯算术）
                 case "ldfld:PAY mul sub stloc":          // V = X.inc - 等级 × 件数
                 {
                     VariableDefinition dst = VarOf(ctx.Method, store);
@@ -2180,6 +2222,7 @@ namespace ProjectEden.Preloader
 
             // 表达式递归（加减乘除）打通的几种：取值器前缀、两个载荷相加、按系数缩放
             "call:get_Value ldfld:PAY stloc",
+            "calc stloc",
             "call:get_package ldc stfld:PAY",
             "ldfld:PAY ldfld:PAY add stfld:PAY",
             "ldfld:PAY mul sub stloc",
@@ -2231,6 +2274,7 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",                             // X.inc = split_inc(...)
             "call:get_Value ldfld:PAY stloc",                       // V = kvp.Value.inc
+            "calc stloc",                                           // V = 件数 × 每件品质分
             "call:get_package ldc stfld:PAY",                       // package.X.inc = 常数
             "ldfld:PAY ldfld:PAY add stfld:PAY",                    // X.inc = A.inc + B.inc
             "ldfld:PAY mul sub stloc",                              // V = X.inc - 等级 × 件数
