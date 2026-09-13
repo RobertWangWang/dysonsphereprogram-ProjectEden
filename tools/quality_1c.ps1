@@ -78,11 +78,12 @@ $done = Field $r "Twinned"
 
 $missing = 0
 foreach ($k in $un.Keys) { $missing += $un[$k] }
+$done = (Field $r "Twinned") + (Field $r "NoTwinNeeded") + (Field $r "Dropped")
 $totalStmts = $done + $missing
 
 Write-Host ""
 Write-Host ("=== shape coverage: {0}/{1} statements = {2:P1} ===" -f $done, $totalStmts, ($done / [double]$totalStmts)) -ForegroundColor Green
-Write-Host ("    methods touched {0}, twin locals {1}" -f (Field $r "Methods"), (Field $r "TwinLocals"))
+Write-Host ("    twinned {0}, no-twin-needed {1}, dropped {2}, methods {3}, twin locals {4}" -f (Field $r "Twinned"), (Field $r "NoTwinNeeded"), (Field $r "Dropped"), (Field $r "Methods"), (Field $r "TwinLocals"))
 
 if ($un.Count -gt 0) {
     Write-Host ""

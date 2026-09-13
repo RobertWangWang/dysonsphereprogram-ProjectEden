@@ -48,6 +48,15 @@ namespace ProjectEden.Preloader
             /// <summary>已孪生的语句数</summary>
             internal int Twinned;
 
+            /// <summary>确认不需要孪生的语句数（取数组长度、判空、循环边界）</summary>
+            internal int NoTwinNeeded;
+
+            /// <summary>品质被<b>明确丢弃</b>的语句数</summary>
+            internal int Dropped;
+
+            /// <summary>丢弃发生在哪些方法里——这条要打进日志，缺口不许沉默</summary>
+            internal readonly Dictionary<string, int> DropSites = new Dictionary<string, int>(StringComparer.Ordinal);
+
             /// <summary>涉及的方法体数</summary>
             internal int Methods;
 
@@ -171,6 +180,17 @@ namespace ProjectEden.Preloader
                 }
             }
 
+            // **缺口不许沉默，而且必须排在提前返回之前。**
+            // 第一版把这一段写在「形状表没补齐就返回」的后面，结果丢弃信息在
+            // 补齐之前从来不打印——正好违反了它自己要执行的那条规矩。
+            if (r.Dropped > 0)
+                r.Notes.Add(
+                    $"**品质在 {r.Dropped} 处被明确丢弃**（主干道之外没有孪生槽位可去）：" +
+                    string.Join("、", r.DropSites
+                        .OrderByDescending(kv => kv.Value)
+                        .Select(kv => $"{kv.Key}×{kv.Value}")
+                        .ToArray()));
+
             if (r.Unhandled.Count > 0)
             {
                 r.Notes.Add(
@@ -181,8 +201,9 @@ namespace ProjectEden.Preloader
             }
 
             r.Notes.Add(
-                $"品质搬运层：{r.Twinned} 条语句已孪生，涉及 {r.Methods} 个方法体，" +
-                $"新增 {r.TwinLocals} 个孪生局部变量，{r.ChannelUses} 处走侧信道。");
+                $"品质搬运层：{r.Twinned} 条语句已孪生、{r.NoTwinNeeded} 条确认不需要孪生，" +
+                $"涉及 {r.Methods} 个方法体，新增 {r.TwinLocals} 个孪生局部变量，" +
+                $"{r.ChannelUses} 处走侧信道。");
 
             r.Applied = r.Blockers.Count == 0;
 
@@ -277,9 +298,17 @@ namespace ProjectEden.Preloader
 
                 string core = CoreShape(code, from, to, twin);
 
-                if (Known.Contains(core))
+                if (TwinShapes.Contains(core)) { r.Twinned++; continue; }
+
+                if (NoTwinShapes.Contains(core)) { r.NoTwinNeeded++; continue; }
+
+                if (DropShapes.Contains(core))
                 {
-                    r.Twinned++;
+                    r.Dropped++;
+
+                    string where = $"{m.DeclaringType.Name}::{m.Name}";
+
+                    r.DropSites[where] = r.DropSites.TryGetValue(where, out int d) ? d + 1 : 1;
 
                     continue;
                 }
@@ -321,13 +350,14 @@ namespace ProjectEden.Preloader
             return set;
         }
 
-        // ── 形状表 ─────────────────────────────────────────────
+        // ── 形状表：每一种形状必须落进三档之一 ────────────────
         //
-        // 普查给出主干道共 48 种核心形状。这一版先认下面这些；
-        // 其余的会被报成 Unhandled，于是变换整个不生效。
-        // **这正是增量落地的机制**：补一条形状，覆盖率涨一点，全齐了才会真的改字节。
+        // 普查给出主干道共 48 种核心形状。三档之外的一律报成 Unhandled，
+        // 于是变换整个不生效。**这正是增量落地的机制**：
+        // 补一条形状，覆盖率涨一点，全齐了才会第一次真的改字节。
 
-        private static readonly HashSet<string> Known = new HashSet<string>(new[]
+        /// <summary>要孪生：发射一条平行语句，把 inc 换成 qua。</summary>
+        private static readonly HashSet<string> TwinShapes = new HashSet<string>(new[]
         {
             "ldc stfld:PAY",                                        // X.inc = 常数
             "stfld:PAY",                                            // X.inc = 栈上的值
@@ -338,6 +368,52 @@ namespace ProjectEden.Preloader
             "ldc ldflda:PAY dup ldind.i4 add stind.i4",             // 同上，常数下标
             "ldind.i4 ldfld:PAY add stind.i4",                      // *out += X.inc
             "ldnull stfld:PAY",                                     // X.incServed = null
+            "ldlen newarr stfld:PAY",                               // X.incServed = new int[n]
+            "newarr stfld:PAY",                                     // 同上，长度在栈上
+            "ldflda:PAY call:Resize",                               // Array.Resize(ref X.incServed, n)
+            "ldfld:PAY div stloc",                                  // local = X.inc / count（求等级）
+            "ldfld:PAY div mul ldc add stloc",                      // 同上，再做一次换算
+            "ldfld:PAY ldc stelem",                                 // arr[i] = X.inc
+            "ldfld:PAY ldc dup stloc stelem stelem",                // 同上，顺手留个副本
+        }, StringComparer.Ordinal);
+
+        /// <summary>
+        /// <b>不需要孪生</b>：这条语句碰的是载荷<b>数组对象本身</b>（取长度、判空、
+        /// 拿它做循环边界），而不是里面的点数值。孪生数组和原数组永远等长、同生共死，
+        /// 所以这里什么都不用做。
+        ///
+        /// <b>单独列一档而不是塞进「要孪生」</b>：如果哪天这里真的需要动，
+        /// 它会以「形状消失了」的方式暴露出来，而不是被一条无害的孪生语句盖住。
+        /// </summary>
+        private static readonly HashSet<string> NoTwinShapes = new HashSet<string>(new[]
+        {
+            "ldfld:PAY ldlen blt.s",                                // for (i < incServed.Length)
+            "ldfld:PAY ldlen beq.s",
+            "ldfld:PAY ldlen call:Write",                           // 存长度，不是存点数
+            "ldfld:PAY brfalse.s",                                  // if (incServed == null)
+            "ldfld:PAY ldc ble.s",
+        }, StringComparer.Ordinal);
+
+        /// <summary>
+        /// <b>品质在这里被丢弃</b>——而且是<b>说出来的丢弃</b>，不是静默的。
+        ///
+        /// 这些语句把载荷值送进主干道之外的地方（<c>PilerComponent</c> 自己的缓存字段、
+        /// 垃圾堆、临时货包……）。主干道只有四个载荷，值一旦离开就没有对应的孪生槽位可去。
+        ///
+        /// <b>其中自动集装机那几条值得单独看一眼。</b> <c>PilerComponent.cacheCargoInc1/2</c>
+        /// 是「正在叠的那一堆」的暂存，而集装正是这个 mod 传送带的核心（5000 层）。
+        /// 品质在那里丢掉意味着<b>叠过的货会掉品质</b>。这是当前范围的已知代价，
+        /// 变换会把丢弃次数报出来，日志里看得见——要消掉它，就得把那两个缓存字段
+        /// 也加进主干道，那是一次明确的范围扩张，不该顺手做。
+        /// </summary>
+        private static readonly HashSet<string> DropShapes = new HashSet<string>(new[]
+        {
+            "ldfld:PAY stfld",                                      // 缓存字段 = X.inc
+            "ldfld:PAY add stfld",
+            "ldfld:PAY sub stfld",
+            "ldfld:PAY call:AddTrashOnPlanet",                      // 扔到地上（TrashObject 没有孪生字段）
+            "ldfld:PAY mul call:AddTrashOnPlanet",
+            "ldfld:PAY call:AddTempCargo",                          // 拆传送带时的临时货包
         }, StringComparer.Ordinal);
 
         // ── 小工具 ─────────────────────────────────────────────
