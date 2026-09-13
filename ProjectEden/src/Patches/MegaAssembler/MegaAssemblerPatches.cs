@@ -140,6 +140,11 @@ namespace ProjectEden.Patches
                                       settled == 0 && CatalystBedPatches.LooksProductive(ref component, power));
 
             CatalystBedPatches.DebugTick(factory, ref component);
+
+            // 氧化还原燃烧厂：把刚压出来的药柱直接搬进自己的燃料舱。
+            // 这台建筑同时挂着组装机和发电机两个组件（EntityData 里是两个独立字段），
+            // 所以「压料」和「烧料」在同一台机器上，中间不经过传送带。
+            RedoxBurnerPatches.Burn(factory, ref component);
         }
 
         /// <summary>

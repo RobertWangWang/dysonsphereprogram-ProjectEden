@@ -44,7 +44,17 @@ namespace ProjectEden.Patches
         /// <summary>机器类型 → 它额外接受的配方类型。只增不减：本类型永远接受自己。</summary>
         private static readonly Dictionary<int, int[]> Table = new Dictionary<int, int[]>();
 
-        private static int _replaced;
+        /// <summary>
+        /// 每个方法<b>最近一次</b>改写了几处。键是方法，不是累加器——
+        /// <b>同一个方法会被 transpile 不止一次</b>（别的补丁挂到同一个方法上时 Harmony 会重跑），
+        /// 用累加器的话总数就会翻倍，而每一次其实都是对的。
+        ///
+        /// 实测就撞上了这个：逐方法全部命中、一条 ERROR 都没有，汇总行却报
+        /// 「共改写 13 处（对不上 8）」——<b>一个正常工作的功能被自己的自检说成坏了</b>。
+        /// 这正是流体白名单那次的教训：<b>核最终状态，别核自己干了几次</b>。
+        /// 顺带那个写死的 8 也是陈的，Sites 加起来是 9。
+        /// </summary>
+        private static readonly Dictionary<string, int> Hits = new Dictionary<string, int>();
 
         internal static bool Enabled => Table.Count > 0;
 
@@ -247,7 +257,7 @@ namespace ProjectEden.Patches
                     $"配方类型兼容：{original.DeclaringType?.Name}.{original.Name} 期望改写 {want} 处，实际 {hits} 处——" +
                     "游戏更新过的话这里要重新读 IL。多机型配方在这条路径上不生效");
             else
-                _replaced += hits;
+                Hits[original.DeclaringType?.Name + "." + original.Name] = hits;
 
             return code;
         }
@@ -262,9 +272,30 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            ProjectEdenPlugin.Log.LogInfo(
-                $"配方类型兼容：{Table.Count} 台机器登记了多类型，八处闸门共改写 {_replaced} 处"
-                + (_replaced == 8 ? "" : "（**对不上 8，去查上面的 ERROR**）"));
+            var want = 0;
+
+            foreach (Tuple<Type, string, int> site in Sites) want += site.Item3;
+
+            var got = 0;
+
+            foreach (KeyValuePair<string, int> kv in Hits) got += kv.Value;
+
+            var where = new List<string>();
+
+            foreach (KeyValuePair<string, int> kv in Hits) where.Add($"{kv.Key} {kv.Value}");
+
+            where.Sort();
+
+            string detail = string.Join("、", where.ToArray());
+
+            if (got == want && Hits.Count == Sites.Length)
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"配方类型兼容：{Table.Count} 台机器登记了多类型，" +
+                    $"{Sites.Length} 个方法共 {want} 处闸门全部改写（{detail}）");
+            else
+                ProjectEdenPlugin.Log.LogError(
+                    $"配方类型兼容：{Sites.Length} 个方法应共改写 {want} 处，实际 {Hits.Count} 个方法 {got} 处" +
+                    $"（{detail}）——差的那些方法上多类型不生效，游戏更新过的话要重新读 IL");
         }
     }
 }

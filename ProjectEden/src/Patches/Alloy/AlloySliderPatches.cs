@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using HarmonyLib;
+using ProjectEden.Utils;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -74,12 +75,12 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(UIAssemblerWindow), "_OnUpdate")]
         private static void UIAssemblerWindow_OnUpdate(UIAssemblerWindow __instance)
         {
-            // 五种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
+            // 七种模式共用这块面板，所以只要其中任何一种就绪就不能提前收起来。
             // 只判 AlloyRatioPatches.Count 的话，关掉 alloys.json 会连带让
-            // 弹药、复合材和增产剂的面板一起消失——那是几个不相干的功能。
+            // 弹药、复合材、增产剂和燃烧厂的面板一起消失——那是几个不相干的功能。
             if (__instance?.factory == null
                 || (AlloyRatioPatches.Count == 0 && !AmmoRegistry.Ready && !CompositeRegistry.Ready
-                    && !ProliferatorPatches.Ready && !CatalystBedPatches.Ready))
+                    && !ProliferatorPatches.Ready && !CatalystBedPatches.Ready && !RedoxRegistry.Ready))
             {
                 Hide();
 
@@ -164,6 +165,26 @@ namespace ProjectEden.Patches
                     prolif = nowProlif;
 
                 RefreshProliferator(prolif);
+
+                return;
+            }
+
+            // 氧化还原燃烧厂：第七种模式，也是**第一种三行的**——两行选料 + 一行滑条。
+            // 它和活性复合材同形（选择器和滑条同屏），但多一行，而 LayoutRow 本来就是按行切的，
+            // 所以不用改它。滑条调的是「配氧比」：氧化剂投料量相对化学计量的百分数，
+            // 100 就是正好配平。
+            if (RedoxBurnerPatches.Current(__instance.factory, entityId, out int[] redox))
+            {
+                if (!EnsurePanel(__instance)) return;
+
+                _panel.SetActive(true);
+
+                HandleRedoxInput(__instance.factory, entityId, redox);
+
+                if (RedoxBurnerPatches.Current(__instance.factory, entityId, out int[] nowRedox))
+                    redox = nowRedox;
+
+                RefreshRedox(__instance.factory, entityId, redox);
 
                 return;
             }
@@ -577,6 +598,227 @@ namespace ProjectEden.Patches
         /// 三行共用同一套控件，所以<b>每次刷新都要重跑 LayoutRow</b>：这块面板是
         /// 五种模式共用的，上一台机器要是选料模式，不重排的话这里会继承它的布局。
         /// </summary>
+        private static bool _redoxClickLatch;
+
+        /// <summary>
+        /// 燃烧厂面板的输入。<b>三行三个量</b>：
+        ///
+        /// 第 0 / 1 行选还原剂和氧化剂，用<b>点</b>不用拖——选的是离散的一种物品，
+        /// 拖动会一路扫过中间那些值，每扫过一个都触发一次 Apply（弹药和复合材那边同理）。
+        ///
+        /// 第 2 行调配氧比，用<b>拖</b>不用点——它是连续量，而且这正是这台机器要玩家
+        /// 亲手做的那件事：把方程配平。拖的时候档次会在某个点跳一级，手感上要能扫过去看见。
+        /// </summary>
+        private static void HandleRedoxInput(PlanetFactory factory, int entityId, int[] state)
+        {
+            if (!Input.GetMouseButton(0))
+            {
+                _redoxClickLatch = false;
+                _dragging = -1;
+
+                return;
+            }
+
+            RedoxConfig cfg = RedoxRegistry.Config;
+
+            int lo = cfg.ratioMin > 0 ? cfg.ratioMin : 70;
+            int hi = cfg.ratioMax > 0 ? cfg.ratioMax : 130;
+
+            // ── 第 2 行：配氧比滑条。按下那一帧抓住它，之后即使划出轨道也继续跟随 ──
+            if (_dragging == 2 || (_dragging < 0 && Input.GetMouseButtonDown(0)
+                                   && InRow(2, out Vector2 _)))
+            {
+                _dragging = 2;
+
+                if (!UIRoot.ScreenPointIntoRect(Input.mousePosition, Rows[2].Track, out Vector2 p)) return;
+
+                Rect r = Rows[2].Track.rect;
+
+                if (r.width <= 0f) return;
+
+                float f = Mathf.Clamp01((p.x - r.xMin) / r.width);
+
+                int ratio = Mathf.Clamp(lo + Mathf.RoundToInt(f * (hi - lo)), lo, hi);
+
+                if (ratio == state[2]) return;
+
+                RedoxBurnerPatches.Apply(factory, entityId, new[] { state[0], state[1], ratio });
+
+                return;
+            }
+
+            // ── 第 0 / 1 行：选料。左半格往前、右半格往后 ──
+            if (_redoxClickLatch) return;
+
+            var row = -1;
+            Vector2 hit;
+
+            if (InRow(0, out hit)) row = 0;
+            else if (InRow(1, out hit)) row = 1;
+            else return;
+
+            _redoxClickLatch = true;
+
+            List<RedoxRegistry.Agent> pool =
+                row == 0 ? RedoxRegistry.Reducers : RedoxRegistry.Oxidizers;
+
+            if (pool.Count == 0) return;
+
+            Rect rect = Rows[row].Track.rect;
+            int step = hit.x < rect.center.x ? -1 : 1;
+
+            var at = 0;
+
+            for (var i = 0; i < pool.Count; i++)
+                if (pool[i].ItemId == state[row])
+                    at = i;
+
+            int picked = pool[((at + step) % pool.Count + pool.Count) % pool.Count].ItemId;
+
+            var next = new[] { state[0], state[1], state[2] };
+            next[row] = picked;
+
+            RedoxBurnerPatches.Apply(factory, entityId, next);
+        }
+
+        /// <summary>
+        /// 燃烧厂面板的显示。
+        ///
+        /// 结果行要同时写出<b>密度、档次、产量和当前发电功率</b>四个数，
+        /// 因为它们分别对应玩家能动的三个量各自的后果：换还原剂改能量，
+        /// 换氧化剂改配比，拖滑条两个都改。少写一个，玩家就看不出刚才那一下动了什么。
+        ///
+        /// 发电功率是<b>只读</b>的，而且必须从发电组件上现读——巨型建筑的三十个储物格
+        /// 对玩家不可见（<c>MegaStationWindowPatches</c> 把 stationId 报成 0 让配方窗口顶上来），
+        /// 燃料舱同样藏在里面。没有这一行，玩家没有任何途径知道它到底在不在发电。
+        /// </summary>
+        private static void RefreshRedox(PlanetFactory factory, int entityId, int[] state)
+        {
+            RedoxConfig cfg = RedoxRegistry.Config;
+
+            _titleText.text = "氧化还原燃烧厂　配料与配氧比".Translate();
+
+            _panelTrs.sizeDelta = new Vector2(0f, HeadHeight + 3 * RowHeight + FootHeight);
+
+            for (var i = 0; i < MaxRows; i++)
+            {
+                var on = i < 3;
+
+                if (Rows[i].Root.activeSelf != on) Rows[i].Root.SetActive(on);
+
+                if (!on) continue;
+
+                Rows[i].Root.transform.localPosition = new Vector3(0f, -(HeadHeight + i * RowHeight), 0f);
+            }
+
+            RedoxRegistry.Agent reducer = Find(RedoxRegistry.Reducers, state[0]);
+            RedoxRegistry.Agent oxidizer = Find(RedoxRegistry.Oxidizers, state[1]);
+
+            // 第 0 / 1 行：选料
+            PickerRow(Rows[0], "还原剂".Translate(), reducer?.Name);
+            PickerRow(Rows[1], "氧化剂".Translate(), oxidizer?.Name);
+
+            // 第 2 行：配氧比滑条
+            int lo = cfg.ratioMin > 0 ? cfg.ratioMin : 70;
+            int hi = cfg.ratioMax > 0 ? cfg.ratioMax : 130;
+            int ratio = Mathf.Clamp(state[2], lo, hi);
+
+            Rows[2].Label.text = "配氧比".Translate();
+
+            LayoutRow(Rows[2], false);
+
+            float frac = hi > lo ? (ratio - lo) / (float)(hi - lo) : 0f;
+
+            Rows[2].Fill.anchorMin = Vector2.zero;
+            Rows[2].Fill.anchorMax = new Vector2(Mathf.Clamp01(frac), 1f);
+            Rows[2].Fill.offsetMin = Vector2.zero;
+            Rows[2].Fill.offsetMax = Vector2.zero;
+            Rows[2].TrackImage.color = new Color(1f, 1f, 1f, 0.12f);
+            Rows[2].Value.text = ratio + "%";
+
+            _resultText.rectTransform.anchoredPosition =
+                new Vector2(SidePad, -(HeadHeight + 3 * RowHeight + 4f));
+
+            if (reducer == null || oxidizer == null)
+            {
+                _resultText.text = "配料未就绪".Translate();
+                _resultText.color = new Color(0.95f, 0.7f, 0.5f);
+
+                return;
+            }
+
+            float density = RedoxBurnerPatches.Density(reducer, oxidizer, ratio);
+            int tier = RedoxBurnerPatches.TierIndex(density);
+            int yield = RedoxBurnerPatches.Yield(reducer, tier, ratio);
+            int oxCount = RedoxBurnerPatches.OxidizerCount(reducer, oxidizer, ratio);
+
+            _resultText.text =
+                $"{reducer.Name} ×{cfg.reducerParts} + {oxidizer.Name} ×{oxCount}"
+                + $"  →  {RedoxRegistry.Tiers[tier].Entry.name} ×{yield}"
+                + $"　{"能量密度".Translate()} {density:0.00} MJ/{"件".Translate()}"
+                + $"　{"发电".Translate()} {Power(factory, entityId, false) / 1e9:0.##}"
+                + $" / {Power(factory, entityId, true) / 1e9:0.##} GW";
+
+            // 配平那一点是绿的，偏离就转暖色：滑条的最优位置要一眼看得出来
+            _resultText.color = Mathf.Abs(ratio - 100) <= 2
+                ? new Color(0.72f, 0.92f, 0.78f)
+                : new Color(0.92f, 0.86f, 0.66f);
+        }
+
+        private static RedoxRegistry.Agent Find(List<RedoxRegistry.Agent> pool, int itemId)
+        {
+            for (var i = 0; i < pool.Count; i++)
+                if (pool[i].ItemId == itemId)
+                    return pool[i];
+
+            return null;
+        }
+
+        /// <summary>选料行的通用摆法：轨道拉满、名字居中、◀ ▶ 落在左右两半。</summary>
+        private static void PickerRow(Row row, string label, string value)
+        {
+            row.Label.text = label;
+
+            LayoutRow(row, true);
+
+            row.Value.text = "◀  " + (value ?? "?") + "  ▶";
+            row.Fill.anchorMin = Vector2.zero;
+            row.Fill.anchorMax = new Vector2(0f, 1f);
+            row.Fill.offsetMin = Vector2.zero;
+            row.Fill.offsetMax = Vector2.zero;
+            row.TrackImage.color = new Color(1f, 1f, 1f, 0.12f);
+        }
+
+        /// <summary>
+        /// 这台建筑的发电功率（瓦）。<paramref name="cap"/> 为真取<b>上限</b>，为假取<b>实发</b>。
+        ///
+        /// <b>两个都要显示，而且这一条是被一次误报逼出来的。</b>
+        /// 早先只写 <c>generateCurrentTick</c>（电网真的取走了多少），结果面板上是
+        /// 「发电 0.03 GW」而配置里写着 30 GW，看着像是数值或单位错了。
+        /// 实际上两个数都对：<b>电网只取它当下需要的那么多</b>，所以一座空载的电厂
+        /// 实发就是接近零——这正是 DSP 所有发电建筑的行为。
+        ///
+        /// 可是「实发远小于上限」还有第二个原因：<b>缺燃料</b>，那时 <c>capacityCurrentTick</c>
+        /// 自己就会掉下来。只写实发的话，这两种情况在面板上长得一模一样，
+        /// 而它们要的处理完全相反（一个不用管，一个要去看进料）。
+        /// 并排写出「实发 / 上限」，两者才分得开。
+        /// </summary>
+        private static double Power(PlanetFactory factory, int entityId, bool cap)
+        {
+            if (factory?.entityPool == null || entityId <= 0 || entityId >= factory.entityPool.Length)
+                return 0.0;
+
+            int genId = factory.entityPool[entityId].powerGenId;
+
+            if (genId <= 0 || factory.powerSystem?.genPool == null
+                || genId >= factory.powerSystem.genPool.Length)
+                return 0.0;
+
+            ref PowerGeneratorComponent g = ref factory.powerSystem.genPool[genId];
+
+            return (cap ? g.capacityCurrentTick : g.generateCurrentTick) * 60.0;
+        }
+
         private static void RefreshCatalyst(int charge, int life, int stock, int spent)
         {
             CatalystConfig cfg = CatalystBedPatches.Config;

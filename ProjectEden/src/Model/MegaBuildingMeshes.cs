@@ -22,7 +22,7 @@ namespace ProjectEden.Model
 
         private static bool _shaderReported;
 
-        // ══ 九座建筑的造型 ════════════════════════════════════
+        // ══ 十座建筑的造型 ════════════════════════════════════
 
         // ── 天工装配厂：三层收口台座 + 中央塔柱 ──────────────
         private static void SkyAssembler(MeshKit k)
@@ -335,6 +335,109 @@ namespace ProjectEden.Model
             k.AddRailing(new Vector3(0f, 0f, 0f), 0.95f * U, 0.95f * U, 0.40f * U, 0.16f * U, S.Grating);
         }
 
+        /// <summary>
+        /// 氧化还原燃烧厂：<b>一排压机 + 一座矮胖的燃烧筒 + 一根排气塔 + 一间汽机房</b>。
+        ///
+        /// 造型要回答的问题是「凭什么一眼看出这是电厂而不是化工厂」。前九座里已经有了
+        /// 精馏塔（综合化学厂）、催化剂床（催化反应器）、对撞环（观微对撞机）和温室
+        /// （生物温室），所以这一座刻意<b>一根竖直塔柱都不放在中间</b>：
+        /// 主体是横躺的汽机房，竖直元素只有边上那根细排气塔，加上一排低矮的压机——
+        /// 宽而扁的剪影，和精馏塔顶着的综合化学厂（0.56/1.50）正好相反。
+        ///
+        /// 三处发光带分别落在压机的模腔口、燃烧筒的腰线和排气塔的根部，
+        /// 于是「压 → 烧 → 排」这条工艺顺序在剪影上是读得出来的。
+        /// </summary>
+        private static void RedoxBurner(MeshKit k)
+        {
+            // ── 底座：两层。上层收窄，边缘那圈台阶让它读得出是壳体而不是一块板 ──
+            k.AddBox(new Vector3(0f, 0.11f * U, 0f), new Vector3(2.4f * U, 0.22f * U, 2.4f * U),
+                     S.Concrete, S.Grating);
+            k.AddBox(new Vector3(0f, 0.30f * U, 0f), new Vector3(2.1f * U, 0.16f * U, 2.1f * U),
+                     S.PlateDark, S.PlateLight);
+
+            const float deck = 0.38f * U;
+
+            // ── 后排：汽机房。长条低箱，侧面百叶——发电设备要散热 ──
+            var hall = new Vector3(-0.10f * U, deck, -0.66f * U);
+            var hallSize = new Vector3(1.86f * U, 0.52f * U, 0.62f * U);
+
+            k.AddBox(new Vector3(hall.x, hall.y + hallSize.y * 0.5f, hall.z), hallSize,
+                     S.Vent, S.PlateLight);
+            // 屋脊：一道窄一号的盖板，免得长箱子读成一块砖
+            k.AddBox(new Vector3(hall.x, hall.y + hallSize.y + 0.06f * U, hall.z),
+                     new Vector3(hallSize.x * 0.88f, 0.12f * U, hallSize.z * 0.7f),
+                     S.PlateRivet, S.PlateDark);
+
+            // ── 前排：四台压机。矮圆筒 + 顶上的活塞杆，模腔口发光 ──
+            const float pressZ = 0.60f * U;
+            const float pressR = 0.17f * U;
+            const float pressH = 0.30f * U;
+
+            for (var i = 0; i < 4; i++)
+            {
+                float x = (-0.75f + 0.50f * i) * U;
+                var at = new Vector3(x, deck, pressZ);
+
+                k.AddCylinder(at, pressR, pressH, 12, S.PlateRivet, S.PlateDark);
+                // 模腔口：压机真正在做事的地方
+                k.AddCylinder(new Vector3(x, deck + pressH, pressZ), pressR * 0.62f, 0.04f * U, 12,
+                              S.Glow, S.Glow);
+
+                // 活塞杆高度交错，一排等高会读成栏杆
+                float rod = (i % 2 == 0 ? 0.34f : 0.26f) * U;
+
+                k.AddCylinder(new Vector3(x, deck + pressH + 0.04f * U, pressZ), 0.05f * U, rod, 8, S.Pipe);
+                k.AddBox(new Vector3(x, deck + pressH + 0.04f * U + rod + 0.05f * U, pressZ),
+                         new Vector3(0.20f * U, 0.10f * U, 0.20f * U), S.PlateLight, S.Accent);
+            }
+
+            // ── 右中：燃烧筒。矮、胖、多箍，顶上一个扁圆顶 ──
+            var drum = new Vector3(0.74f * U, deck, -0.02f * U);
+            const float drumR = 0.50f * U;
+            const float drumH = 0.64f * U;
+
+            k.AddCylinder(drum, drumR, drumH, 22, S.PlateLight, S.PlateDark);
+            // 加强箍：承压容器的识别点
+            k.AddRibs(drum, drumR + 0.012f * U, drumH, 9, 0.05f * U, S.PlateDark);
+            // 腰线：火焰透出来的那一圈
+            k.AddTorus(new Vector3(drum.x, drum.y + drumH * 0.42f, drum.z),
+                       drumR + 0.025f * U, 0.045f * U, 22, 6, S.Glow);
+            // 扁圆顶：半径只收到六成，收太狠会顶出一朵蘑菇（综合化学厂那次的教训）
+            k.AddCone(new Vector3(drum.x, drum.y + drumH, drum.z),
+                      drumR, drumR * 0.60f, 0.18f * U, 22, S.PlateLight, S.Accent);
+
+            // ── 右后：排气塔。全场唯一的竖直细长件，根部一圈亮带 ──
+            var stack = new Vector3(0.74f * U, deck, -0.86f * U);
+            const float stackR = 0.15f * U;
+            const float stackH = 1.28f * U;
+
+            k.AddCylinder(stack, stackR * 1.5f, 0.16f * U, 14, S.Concrete, S.PlateDark);
+            k.AddCylinder(new Vector3(stack.x, stack.y + 0.16f * U, stack.z), stackR, stackH, 14,
+                          S.PlateRivet, S.PlateDark);
+            k.AddTorus(new Vector3(stack.x, stack.y + 0.30f * U, stack.z),
+                       stackR + 0.02f * U, 0.035f * U, 16, 6, S.Glow);
+            // 喇叭口：顶端外扩，读得出是排气而不是一根柱子
+            k.AddCone(new Vector3(stack.x, stack.y + 0.16f * U + stackH, stack.z),
+                      stackR, stackR * 1.55f, 0.20f * U, 14, S.PlateLight, S.Hazard);
+
+            // ── 工艺管路：压机 → 燃烧筒 → 汽机房 ──────────────
+            const float pipeY = 0.92f * U;
+
+            k.AddGreebleRow(new Vector3(-0.75f * U, deck + pipeY, pressZ),
+                            new Vector3(drum.x, deck + pipeY, pressZ),
+                            8, new Vector3(0.15f * U, 0.12f * U, 0.12f * U), S.Pipe);
+
+            k.AddCylinder(new Vector3(drum.x, drum.y + drumH, drum.z), 0.075f * U,
+                          pipeY - drumH + 0.06f * U, 10, S.Pipe);
+
+            // 燃烧筒 → 汽机房：蒸汽管，这一根解释了热从哪去到哪
+            k.AddGreebleRow(new Vector3(drum.x, deck + 0.62f * U, drum.z),
+                            new Vector3(hall.x + hallSize.x * 0.35f, deck + 0.62f * U, hall.z),
+                            6, new Vector3(0.14f * U, 0.14f * U, 0.14f * U), S.Pipe);
+
+            k.AddRailing(new Vector3(0f, 0f, 0f), 1.0f * U, 1.0f * U, 0.38f * U, 0.15f * U, S.Grating);
+        }
+
         private static void CatalyticReactor(MeshKit k)
         {
             k.AddBox(new Vector3(0f, 0.13f * U, 0f), new Vector3(2.1f * U, 0.26f * U, 2.1f * U), S.Concrete, S.Grating);
@@ -499,6 +602,7 @@ namespace ProjectEden.Model
                 case 6506: LavaCooler(kit); break;
                 case 6507: CatalyticReactor(kit); break;
                 case 6508: OmniChemPlant(kit); break;
+                case 6509: RedoxBurner(kit); break;
                 default: return false;
             }
 

@@ -996,12 +996,25 @@ namespace ProjectEden
                 }
 
                 long before = proto.HeatValue;
+                int beforeFuel = proto.FuelType;
 
                 proto.HeatValue = e.heatValue;
+
+                // fuelType 留 0 就不动它——氢本来就是化学燃料，要改的只是数值。
+                // 而给一个原版没当燃料的东西加热值时必须填，否则是「半对燃料」：
+                // 有热值、没有任何发电机认它，烧出来是 0 电。
+                if (e.fuelType != 0) proto.FuelType = e.fuelType;
+
                 done++;
 
+                if (beforeFuel == 0 && proto.FuelType == 0)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        $"「{proto.Name}」拿到了热值却没有燃料位（FuelType 仍是 0）——" +
+                        "它烧起来是 0 电。要么在这一条上补 fuelType，要么这个热值本来就不该给");
+
                 ProjectEdenPlugin.Log.LogWarning(
-                    $"原版热值改写：「{proto.Name}」{before / 1e6:0.##} MJ → {e.heatValue / 1e6:0.##} MJ。" +
+                    $"原版热值改写：「{proto.Name}」{before / 1e6:0.##} MJ → {e.heatValue / 1e6:0.##} MJ" +
+                    (e.fuelType != 0 ? $"，燃料位 {beforeFuel} → {proto.FuelType}" : "") + "。" +
                     "本 mod 的热值锚在煤上（393.5 kJ/mol ↔ 2.7 MJ），而原版自己不自洽；" +
                     "不改的话蒸汽重整一条 4 秒配方就能凭空多出约 50 MJ 可燃热值。" +
                     "**代价：烧它发电的收益按同比例变化。** 不想要就改 ores.json 的 vanillaHeat.enabled");
@@ -1010,9 +1023,70 @@ namespace ProjectEden
             if (done > 0) ProjectEdenPlugin.Log.LogInfo($"原版热值改写：共 {done} 项");
         }
 
+        /// <summary>
+        /// 给矿锭补上燃料位与热值。
+        ///
+        /// <b>放在 PostAddData 而不是注册阶段，是因为这里才能核对最终状态。</b>
+        /// 注册阶段拿得到的是我们刚 new 出来的那个 proto，写进去当然会成功；
+        /// 而 LDBTool 的 CustomID.cfg 会在注册之后按显示名重新钉 ID，所以
+        /// 「我写对了」和「最终状态对」是两件事——流体白名单那次已经为这个区别付过学费。
+        /// 从 LDB 里取回来再写，顺便就把 ID 是否还指着同一个东西也验了。
+        /// </summary>
+        private static void ApplyIngotFuel()
+        {
+            var done = 0;
+
+            foreach (Ore ore in Ores)
+            {
+                OreEntry e = ore.Entry;
+
+                if (!ore.HasIngot || e.ingotFuelType == 0 && e.ingotHeatValue == 0L) continue;
+
+                if (e.ingotFuelType == 0 || e.ingotHeatValue <= 0L)
+                {
+                    ProjectEdenPlugin.Log.LogWarning(
+                        $"「{e.ingotName}」的 ingotFuelType={e.ingotFuelType}、" +
+                        $"ingotHeatValue={e.ingotHeatValue} 只配了一半，两个都要有才烧得起来，已忽略");
+
+                    continue;
+                }
+
+                ItemProto proto = LDB.items.Select(ore.IngotItemId);
+
+                if (proto == null)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"「{e.ingotName}」在 LDB 里找不到（ID {ore.IngotItemId}），燃料属性未写入");
+
+                    continue;
+                }
+
+                if (proto.Name != e.ingotName)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"ID {ore.IngotItemId} 实际叫「{proto.Name}」而配置里写的是「{e.ingotName}」——" +
+                        "指错了东西，拒绝写入燃料属性");
+
+                    continue;
+                }
+
+                proto.FuelType = e.ingotFuelType;
+                proto.HeatValue = e.ingotHeatValue;
+
+                done++;
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"「{e.ingotName}」可作燃料：类型 {e.ingotFuelType}，" +
+                    $"热值 {e.ingotHeatValue / 1000000.0:0.##} MJ");
+            }
+
+            if (done > 0) ProjectEdenPlugin.Log.LogInfo($"矿锭燃料属性：共 {done} 项");
+        }
+
         internal static void OnPostAddData()
         {
             ApplyVanillaHeat();
+            ApplyIngotFuel();
 
             foreach (ExtraItem extra in ExtraItems)
             {

@@ -53,6 +53,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXVI. Magma: putting a water pump on a lava planet](#xxvi-magma-putting-a-water-pump-on-a-lava-planet)
 - [XXVII. Catalytic Reactor: a factory that remembers its own state](#xxvii-catalytic-reactor-a-factory-that-remembers-its-own-state)
 - [XXVIII. The Integrated Chemical Plant: the first machine here that eats several recipe types](#xxviii-the-integrated-chemical-plant-the-first-machine-here-that-eats-several-recipe-types)
+- [XXIX. The Redox Combustion Plant: a machine that makes its own fuel and burns it](#xxix-the-redox-combustion-plant-a-machine-that-makes-its-own-fuel-and-burns-it)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -3202,6 +3203,125 @@ transpiler.
 Plant took 16 — which that range silently excluded, so both the item tooltip's type row and the
 recipe's "made in" line fell back to vanilla's placeholder. The test is now `t >= 9 && t != 15`:
 **vanilla owns 1–8 and 15, everything else is ours.**
+
+
+## XXIX. The Redox Combustion Plant: a machine that makes its own fuel and burns it
+
+The tenth mega building, and the **first one here that is both an assembler and a generator**.
+It does two jobs inside one shell: it presses a reductant and an oxidiser into propellant grains
+(the assembler half), then burns those very grains for power (the generator half). A grain drops
+from the press into the chamber and **never touches a belt**.
+
+That is also the reason it exists: things no pipe could carry — metal powder, heavy cuts thick
+enough to cling to the wall — can be burned here.
+
+### Your job: balance the equation
+
+The panel has three rows. The top two cycle through materials (click the left or right half);
+the bottom one is the **oxidiser-ratio slider**.
+
+```
+Reductant       ◀  Aluminium Ingot  ▶
+Oxidiser        ◀  Nitric Acid  ▶
+Oxidiser ratio  ▓▓▓▓▓▓▓▓░░░░░░       100%
+
+Aluminium Ingot ×8 + Nitric Acid ×5  →  Composite Grain ×3
+Energy density 3.59 MJ/item   Output 30.00 GW
+```
+
+The ratio is how much oxidiser you feed relative to what the chemistry actually needs. The two
+directions are not symmetric, and **only one of them is a penalty — the other is plain waste**:
+
+- **Below 100% (fuel-rich):** the oxidiser can only burn that fraction of the fuel; the rest stays
+  in the slag. Yield drops proportionally.
+- **Above 100% (oxidiser-rich):** the fuel is already fully burnt, so nothing more comes out — the
+  surplus oxidiser is simply thrown away.
+
+So why push it up? Because **a richer charge burns more completely, runs hotter, and presses into a
+denser grain** — and enough density promotes the pair to the next tier. That makes it a real
+trade-off: drag down when oxidiser is your bottleneck, drag up when belt throughput is.
+
+> **One stated bias.** It is equally true that surplus oxidiser is dead weight in the grain and
+> would pull density *down*; here "burns more completely" is allowed to win. Counting both would
+> pin the optimum at 100% forever and leave the slider decorative — a trap this mod already fell
+> into once with alloy grades. So `redox.json` labels this term a balance knob rather than dressing
+> it up as a derivation.
+
+### The twelve combinations
+
+Six reductants × two oxidisers. Energy density = reductant heat value ÷ (1 + oxygen demand ÷
+oxygen supply), i.e. **how many MJ each input item buys you** — the real currency on a belt.
+The table below is at 100% ratio.
+
+| Reductant | Oxidiser | Energy density | Tier | One craft |
+|---|---|---|---|---|
+| Aluminium Ingot ×8 | Nitric Acid ×5 | **3.59 MJ / item** | III Composite Grain | → Composite Grain ×3 |
+| Silicon ×8 | Nitric Acid ×6 | **3.47 MJ / item** | III Composite Grain | → Composite Grain ×3 |
+| Aluminium Ingot ×8 | Oxygen ×6 | **3.29 MJ / item** | III Composite Grain | → Composite Grain ×3 |
+| Benzene ×8 | Nitric Acid ×48 | **3.20 MJ / item** | III Composite Grain | → Composite Grain ×12 |
+| Silicon ×8 | Oxygen ×8 | **3.12 MJ / item** | II Slurry Fuel | → Slurry Fuel ×4 |
+| Benzene ×8 | Oxygen ×60 | **2.64 MJ / item** | II Slurry Fuel | → Slurry Fuel ×16 |
+| Methanol ×8 | Nitric Acid ×10 | **2.27 MJ / item** | II Slurry Fuel | → Slurry Fuel ×3 |
+| Naphtha ×8 | Nitric Acid ×10 | **2.05 MJ / item** | I Bipropellant | → Bipropellant ×5 |
+| Methanol ×8 | Oxygen ×12 | **2.00 MJ / item** | I Bipropellant | → Bipropellant ×5 |
+| Naphtha ×8 | Oxygen ×12 | **1.80 MJ / item** | I Bipropellant | → Bipropellant ×5 |
+| Ammonia ×8 | Nitric Acid ×5 | **1.62 MJ / item** | I Bipropellant | → Bipropellant ×2 |
+| Ammonia ×8 | Oxygen ×6 | **1.49 MJ / item** | I Bipropellant | → Bipropellant ×2 |
+
+**Metals sit at the top, and that is not favouritism.** Huggett's constant (about 13.1 MJ per kg of
+oxygen) is an empirical law for **carbon-bearing** fuels, and aluminium and silicon contain no
+carbon, so they fall outside it by construction: measured across this mod, organics run
+0.51–0.67 oxygen per MJ, silicon 0.32 and aluminium 0.26. On the same oxidiser belt, metals give
+roughly twice the power.
+
+The price is that metals have to be smelted first. Benzene is the opposite case: the highest energy
+per item (22.4 MJ), but one benzene needs sixty oxygen.
+
+### Only two oxidisers, and that is the result of a filter
+
+Chlorine and fluorine are excluded by this mod's content rule (the same rule that earlier ruled out
+PVC, silicones and the phosphorus routes). Of the remaining candidates, two more were considered
+and **rejected by their own numbers**:
+
+- **Nitrogen dioxide** releases 2.0 oxygen atoms per item — exactly as many as oxygen — while
+  costing two more steps of the nitrogen chain. The same thing for more money is dead content.
+- **Ammonium nitrate** releases only 1.0: its own four hydrogens claim two oxygens as water before
+  any external fuel gets a share. And it needs nitric acid first anyway.
+
+What survives is a genuine trade: **oxygen** at 2.0 and the lowest cost (it is the by-product of
+water electrolysis and already piling up), **nitric acid** at 2.5 and the highest (ammonia →
+nitrogen dioxide → nitric acid, three steps).
+
+> **This also closes a hole.** Until now nitric acid was produced and then consumed by **nothing** —
+> it is the dead end this documentation names by name. It has a downstream at last.
+
+### Metals burn, but not in a thermal power plant
+
+Aluminium ingot 5.75 MJ, silicon 6.25 MJ, both derived from the usual anchor (coal, 393.5 kJ/mol ↔
+2.7 MJ). Both are given **only the propellant fuel bit, never the chemical one** — a solid ingot
+does not burn in a coal boiler; it has to be powdered and matched with an oxidiser. So they are
+feedstock for this plant, not a free multiplier on vanilla thermal power.
+
+### Power: 30 GW, and one counter-intuitive measurement
+
+Building it costs **100 Combustible Liquid Power Plants + 1000 Energy Matrices**. Those 100 plants
+are already 21.6 GW between them, so 30 GW means "better than what it consumed, but not by an order
+of magnitude" — the real selling point is that it needs **no external fuel line**, occupies one
+footprint and takes one grid connection.
+
+> **It cannot be selling efficiency, because Carnot is already saturated here.** A 3000 °C flame
+> works out to 0.636 under this mod's model, against 0.6082 for the Combustible Liquid Power Plant
+> burning ammonia at 2000 °C — three percentage points for another thousand degrees. What the
+> premixed grain actually buys is **power density**: it breathes no air and has no flue-gas volume,
+> so one turbine handles an order of magnitude more power.
+
+### It feeds itself first
+
+Within a single tick the order is: push last tick's leftovers into the storage slots → press new
+grains → **top up the fuel bay**. So freshly pressed grains go into the chamber first, and only
+once the bay is full (a cap of 3000 grains) does the surplus flow into the storage slots, where
+drones or belts can take it away. A power plant feeding itself first needs no extra switch — it
+falls out of the execution order.
 
 
 ## Config Quick Reference

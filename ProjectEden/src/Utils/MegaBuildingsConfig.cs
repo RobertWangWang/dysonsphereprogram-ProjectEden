@@ -196,6 +196,19 @@ namespace ProjectEden.Utils
         public long idleEnergyPerTick;
         public long workEnergyPerTick;
 
+        /// <summary>
+        /// 发电段。配了这一段，这座巨型建筑就<b>同时</b>是一台发电机。
+        ///
+        /// <b>这不是在绕过组件模型，是组件模型本来就允许。</b>
+        /// <c>PlanetFactory.CreateEntityLogicComponents</c> 里 <c>isPowerGen</c>（IL 059E）
+        /// 和 <c>isAssembler</c>（IL 1122）是两个独立的顺序 if，<c>EntityData</c> 也有
+        /// 各自的 <c>powerGenId</c> / <c>assemblerId</c> / <c>stationId</c> / <c>powerConId</c>。
+        /// 同一台实体挂四个组件，先例是综合物流枢纽（station + dispenser）。
+        ///
+        /// 留空（null）就是普通的巨型建筑，一点发电逻辑都不会挂上去。
+        /// </summary>
+        public MegaGeneratorEntry generator;
+
         public float tintR;
         public float tintG;
         public float tintB;
@@ -246,5 +259,50 @@ namespace ProjectEden.Utils
         /// 最后和矮胖的设计落到同一个体量上。
         /// </summary>
         public float modelHeightScale;
+    }
+
+    /// <summary>
+    /// 一座巨型建筑的发电段。
+    ///
+    /// <b>写的是绝对值，不是倍率</b>——和 machines.json 的 generator 段刚好相反。
+    /// 那边是整台克隆原版电厂，真值在 <c>resources.assets</c> 的 prefab 里、离线读不到，
+    /// 所以只能给倍率；这边的 prefab 是物流运输站，根本没有发电字段可乘，
+    /// 只能直接写。注册时会把换算成 MW 的结果打进日志。
+    /// </summary>
+    internal class MegaGeneratorEntry
+    {
+        /// <summary>每 tick 的发电上限（焦耳）。×60 就是瓦。</summary>
+        public long genEnergyPerTick;
+
+        /// <summary>
+        /// 每 tick 消耗的<b>燃料能量</b>（焦耳）。
+        /// 能量利用率 η = <c>genEnergyPerTick / useFuelPerTick</c>，
+        /// 所以这个数必须大于上面那个，否则就是永动机。注册时会核对并报错。
+        /// </summary>
+        public long useFuelPerTick;
+
+        /// <summary>
+        /// 燃料掩码。32 = 药柱专用位（原版占 15，可燃液体占 16）。
+        /// 注意<b>烧的时候不查它</b>——<c>EnergyCap_Fuel</c> 只看 <c>fuelCount &gt; 0</c>；
+        /// 掩码管的是传送带和手动塞料时哪些东西进得来。
+        /// </summary>
+        public int fuelMask;
+
+        /// <summary>
+        /// 从哪座原版发电建筑身上量「怎么接电网」的参数（默认 2204 = 火力发电厂）。
+        ///
+        /// <b>为什么非量不可：发电机自己必须也是一个电力节点。</b>
+        /// 全汇编里只有 <c>PowerSystem.OnNodeAdded</c> 往 <c>PowerNetwork.generators</c> 里加东西，
+        /// 而它加的是 <c>PowerNetworkStructures.Node.genId</c>——也就是<b>节点自己那台发电机</b>。
+        /// 对照一下就看得很清楚：<c>NewConsumerComponent</c> 会调 <c>OnConsumerAdded</c> 把耗电体
+        /// 挂进覆盖它的电网，而 <c>NewGeneratorComponent</c> <b>一个后续调用都没有</b>。
+        /// 所以 <c>isPowerGen</c> 只是「它能发电」，<c>isPowerNode</c> 才是「它接得上电网」——
+        /// 原版每座电厂脚下那根连接线就是这件事。
+        ///
+        /// <b>值要量不要猜</b>：connectDistance / coverRadius 存在 resources.assets 的 prefab 里，
+        /// 离线读不到也反编译不出来，写死就是凭记忆猜（蓄电器和发电机倍率那两处已经为同一个理由
+        /// 只收倍率不收绝对值）。注册时会把量到的数打进日志。
+        /// </summary>
+        public int connectFromItemId;
     }
 }

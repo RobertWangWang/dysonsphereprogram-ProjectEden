@@ -2471,6 +2471,172 @@ def omni_chem():
     return d
 
 
+def redox_burner():
+    """氧化还原燃烧厂：**一排压机 + 一座矮胖燃烧筒 + 一根排气塔**。
+
+    和 MegaBuildingMeshes.RedoxBurner 一一对应。造型要回答的是「凭什么一眼看出
+    这是电厂而不是又一座化工厂」——前九张里已经有细高精馏塔（综合化学厂、燔石化工厂）、
+    圆顶罐、对撞环和温室，所以这一张<b>刻意不在中间放竖直塔柱</b>：
+    主体是矮胖的燃烧筒，唯一的竖直件是偏在一侧的细排气塔，前面压着一排更矮的压机。
+    宽而扁的剪影，和综合化学厂正好相反。
+
+    三处亮色落在压机的模腔口、燃烧筒的腰线和排气塔的喇叭口，
+    于是「压 → 烧 → 排」这条顺序在 80px 下也读得出方向。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6509)   # 主色跟着 megabuildings.json 的 tint 走
+    steel = _pal("#8e94a3")
+
+    # 宽底座
+    _prism(d, 0, 33, 43, 9, dark)
+    _prism(d, 0, 25, 38, 8, p, gloss=0.18)
+
+    # 右：燃烧筒。矮、胖、带腰线 —— 全图最大的一块，它就是主体
+    _cyl(d, 15, 1, 15, 22, p, cap_gloss=0.3)
+    # 腰线：火焰透出来的那一圈。画在筒身中段，不画在顶上——顶上是圆顶不是火口
+    d.append(dw.Path(stroke="#ffb454", stroke_width=3.0, fill="none", stroke_linecap="round")
+             .M(0.6, 12).A(15, 15 * ISO, 0, 0, 0, 29.4, 12))
+    # 扁圆顶：半径收到六成。收太狠会顶出一朵蘑菇（综合化学厂那次的教训）
+    d.append(dw.Ellipse(15, -1.5, 9.0, 9.0 * ISO * 1.3, fill=p[0], stroke=dark[3], stroke_width=1.2))
+
+    # 左后：排气塔。全图唯一的细长竖直件，顶端外扩成喇叭口。
+    # 亮带画在**根部**而不是半腰——半腰那一道会读成浮在空中的一粒药丸
+    d.append(dw.Rectangle(-26.0, -32, 8.5, 40, fill=p[1], stroke=dark[3], stroke_width=1.3))
+    d.append(dw.Rectangle(-26.0, -2, 8.5, 8, fill="#ffb454", stroke=dark[3], stroke_width=1.1))
+    d.append(dw.Lines(-29.5, -32, -14.0, -32, -11.0, -41, -32.5, -41, close=True,
+                      fill=p[0], stroke=dark[3], stroke_width=1.3))
+
+    # 前排：四台压机。等高会读成栏杆，所以活塞杆一高一低
+    for i, x in enumerate((-30, -19, -8, 3)):
+        _cyl(d, x, 16, 5.2, 9, p, cap_gloss=0.25)
+        d.append(dw.Ellipse(x, 16, 3.0, 3.0 * ISO, fill="#ffd88a", stroke=dark[3], stroke_width=0.9))
+
+        rod = 13 if i % 2 == 0 else 9
+        d.append(dw.Line(x, 14, x, 14 - rod, stroke=steel[2], stroke_width=2.6, stroke_linecap="round"))
+        d.append(dw.Rectangle(x - 3.4, 14 - rod - 3.4, 6.8, 3.6,
+                              fill=steel[0], stroke=dark[3], stroke_width=0.9))
+
+    return d
+
+
+def bipropellant():
+    """双元推进剂 I：**两只并肩的细罐，一道轭架箍在一起**。
+
+    液体火箭的标准形制：燃料和氧化剂分舱储存，进燃烧室之前才相遇。
+    <b>剪影是「双罐」而不是「单罐」</b>，这一点是刻意的——三档药柱如果都画成
+    一只圆筒、只换顶盖，在 80px 的格子里就是同一张图，那正是上一轮「细节都差不多」
+    被报上来的毛病。所以三档各给一种外形：这一档双罐，浆料档矮胖桶，固体档细高柱。
+
+    左罐冷色（还原剂）、右罐暖色（氧化剂），中间那道轭架是把它们绑成**一件**物品的东西。
+    """
+    d = canvas()
+
+    shell = _pal("#7f8aa0")
+    fuel = _pal("#3f97cc")
+    oxid = _pal("#cf6f42")
+
+    # 两只细罐。稍微错开高度，等高等宽会读成一副耳机
+    _cyl(d, -13, -14, 11, 40, fuel, cap_gloss=0.32)
+    _cyl(d, 13, -8, 11, 36, oxid, cap_gloss=0.32)
+
+    # 轭架：两道横箍，把两只绑在一起
+    for y in (2, 18):
+        d.append(dw.Rectangle(-26, y, 52, 5.0, rx=2.0,
+                              fill=shell[1], stroke=shell[3], stroke_width=1.2))
+
+    # 汇流管：两罐出口在下方合成一路 —— 「进燃烧室之前才相遇」
+    d.append(dw.Path(stroke=shell[2], stroke_width=4.2, fill="none",
+                     stroke_linecap="round", stroke_linejoin="round")
+             .M(-13, 30).L(-13, 36).L(13, 36).L(13, 30))
+    d.append(dw.Line(0, 36, 0, 43, stroke=shell[0], stroke_width=4.2, stroke_linecap="round"))
+
+    return d
+
+
+def slurry_fuel():
+    """金属浆料燃料 II：**一只矮胖的桶，敞着口，浆面上浮着金属颗粒**。
+
+    metallized slurry fuel 是真实存在的一类燃料：金属粉悬在有机载体里，
+    兼顾金属的能量密度和液体的可泵送性。所以要同时说出「是液体」和「里面有金属」。
+
+    剪影取<b>宽大于高</b>的油桶，和双罐档、细高的固体档都分得开；两道滚箍是油桶的识别点。
+    颗粒画成有棱角的多边形而不是圆点——磨出来的金属晶粒是有棱的（沿用 _grain 那套）。
+    """
+    import random
+
+    d = canvas()
+
+    shell = _pal("#7f8aa0")
+    slurry = _pal("#575d6b")
+
+    # 矮胖：半宽 27、高度只有 26
+    _cyl(d, 0, -6, 27, 26, shell, cap_gloss=0.22)
+
+    # 滚箍：油桶的识别点
+    for y in (4, 14):
+        d.append(dw.Path(stroke=shell[3], stroke_width=2.4, fill="none")
+                 .M(-27, y).A(27, 27 * ISO, 0, 0, 0, 27, y))
+
+    # 浆面：整个桶口
+    d.append(dw.Ellipse(0, -6, 22, 22 * ISO, fill=slurry[2], stroke=shell[3], stroke_width=1.4))
+    d.append(dw.Ellipse(0, -6, 22, 22 * ISO, fill=slurry[0], fill_opacity=0.18))
+
+    rng = random.Random(6656)
+
+    # 颗粒撒满整个浆面，别挤在一角
+    for _ in range(14):
+        a = rng.uniform(0, 6.283)
+        r = math.sqrt(rng.uniform(0, 1)) * 17
+        x = math.cos(a) * r
+        y = -6 + math.sin(a) * r * ISO
+
+        _grain(d, x, y, rng.uniform(2.0, 3.2), ("#c3cada", shell[3], "#eef2fa"), rng)
+
+    return d
+
+
+def composite_propellant():
+    """固体复合推进剂 III：**一根细高的药柱，端面开着星形孔**。
+
+    <b>星孔是真的，而且正是这一档的识别点。</b> 现实的固体火箭药柱把端面做成星形穿孔，
+    为的是让燃烧面积在整个燃烧过程里近似恒定——圆柱孔会越烧面积越大、推力一路上扬。
+    画一个星孔比再画一罐液体更能说明「这是固体」，而且一眼就和前两档分开。
+
+    外面那圈暗色是<b>粘合剂包覆层</b>（现实里是 HTPB，本 mod 用聚丙烯腈）：
+    药柱侧面要包住、只让端面燃烧，否则它会从侧面一起烧起来。
+    剪影取细高，和矮胖的浆料桶正好相反。
+    """
+    d = canvas()
+
+    body = _pal("#93866c")      # 复合推进剂是土褐色的，不是钢色
+    binder = _pal("#574c3c")
+
+    # 细高：半宽 18、高 48
+    _cyl(d, 0, -22, 18, 48, body, cap_gloss=0.26)
+
+    # 包覆层：侧面那圈暗边
+    d.append(dw.Path(stroke=binder[1], stroke_width=3.0, fill="none")
+             .M(-18, -22).L(-18, 26))
+    d.append(dw.Path(stroke=binder[1], stroke_width=3.0, fill="none")
+             .M(18, -22).L(18, 26))
+
+    # 端面：包覆环 → 药体 → 星孔
+    d.append(dw.Ellipse(0, -22, 18, 18 * ISO, fill=binder[2], stroke=binder[3], stroke_width=1.3))
+    d.append(dw.Ellipse(0, -22, 14.4, 14.4 * ISO, fill=body[0], stroke=binder[3], stroke_width=1.0))
+
+    pts = []
+
+    for i in range(12):
+        a = math.pi * 2 * i / 12 - math.pi / 2
+        r = 11.0 if i % 2 == 0 else 4.4
+        pts += [math.cos(a) * r, -22 + math.sin(a) * r * ISO]
+
+    d.append(dw.Lines(*pts, close=True, fill=binder[3], stroke=binder[1], stroke_width=1.1))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -2521,6 +2687,12 @@ if __name__ == "__main__":
     render(bio_greenhouse(), "bio-greenhouse")
     render(lava_cooler(), "lava-cooler")
     render(omni_chem(), "omni-chem")
+    render(redox_burner(), "redox-burner")
+
+    # 三档药柱：氧化还原燃烧厂压出来的燃料
+    render(bipropellant(), "bipropellant")
+    render(slurry_fuel(), "slurry-fuel")
+    render(composite_propellant(), "composite-propellant")
     render(tab_mega(), "tab-mega")
 
     # 生物温室的产物与配方图标

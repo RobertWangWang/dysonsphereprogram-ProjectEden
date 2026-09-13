@@ -433,6 +433,25 @@
     "待生仓": "Spent hopper",
     "储物格未就绪——催化剂进不来，去看布局": "Storage slots not ready - catalyst cannot get in; check the layout",
     "还能跑 {0:0} 秒　　催化剂库存 {1}": "{0:0}s of activity left    catalyst in stock {1}",
-    "等待催化剂：库存 {0}，装一床需要 {1}": "Waiting for catalyst: {0} in stock, a full bed needs {1}"
+    "等待催化剂：库存 {0}，装一床需要 {1}": "Waiting for catalyst: {0} in stock, a full bed needs {1}",
+    "//-- 氧化还原燃烧厂 --": "",
+    "氧化还原燃烧厂": "Redox Combustion Plant",
+    "氧化还原燃烧设备": "Redox Combustion Facility",
+    "把还原剂和氧化剂压成药柱、再当场烧掉的巨构。压制段和燃烧段共用一个壳子，药柱从压机直接落进燃烧室，不上传送带——这正是它能烧那些没法用管道输送的东西（金属粉、高黏馏分）的原因。配平了才烧得干净：氧化剂不够，没烧掉的燃料原样留在渣里；氧化剂过量，多出来的只是死重。": "A megastructure that presses reductant and oxidiser into propellant grains and then burns them on the spot. The press hall and the combustion hall share one shell, so a grain drops straight from the press into the chamber without ever touching a belt — which is exactly why this plant can burn things no pipe could carry, such as metal powder and heavy cuts. Balance the charge and it burns clean: too little oxidiser and the unburnt fuel simply stays in the slag; too much and the excess is dead weight.",
+    "推进剂药柱 · 压制": "Propellant Grain - Pressing",
+    "把一种还原剂和一种氧化剂压成药柱。配平了才烧得干净——氧化剂不够，烧不掉的燃料原样留在渣里；氧化剂过量，多出来的只是死重。": "Press one reductant together with one oxidiser into a propellant grain. Only a balanced charge burns clean — too little oxidiser and the fuel that cannot burn stays in the slag; too much and the excess is dead weight.",
+    "双元推进剂": "Bipropellant",
+    "一只壳子里的两个舱：一边燃料、一边氧化剂，进燃烧室之前才相遇。能量密度在三档里垫底，胜在原料最好凑——任何一种液体烃配上氧化剂就成。": "Two bays inside one shell: fuel on one side, oxidiser on the other, meeting only on the way into the chamber. The lowest energy density of the three tiers, but the easiest to feed — any liquid hydrocarbon plus an oxidiser will do.",
+    "金属浆料燃料": "Metallized Slurry Fuel",
+    "金属粉悬在有机载体里调成的稠浆，稠得挂壁。既有金属的能量密度，又还能泵——现实中这类燃料存在的全部理由就是这个折中。": "Metal powder suspended in an organic carrier, thick enough to cling to the wall. It keeps the energy density of the metal while remaining pumpable — which is the entire reason this class of fuel exists in the real world.",
+    "固体复合推进剂": "Composite Solid Propellant",
+    "金属粉、氧化剂和聚合物粘合剂压成的药柱，端面穿着一个星形孔。星孔不是装饰：它让燃烧面积在整个过程里几乎不变，而圆柱孔会越烧面积越大。三档里能量密度最高，代价是要先有金属和粘合剂。": "A grain pressed from metal powder, oxidiser and a polymer binder, with a star-shaped perforation through its face. The star is not decoration: it keeps the burning area nearly constant throughout, whereas a cylindrical bore grows as it burns. The highest energy density of the three tiers, at the cost of needing metal and binder first.",
+    "氧化还原燃烧厂　配料与配氧比": "Redox Combustion Plant - charge and oxidiser ratio",
+    "还原剂": "Reductant",
+    "氧化剂": "Oxidiser",
+    "配氧比": "Oxidiser ratio",
+    "配料未就绪": "Charge not ready",
+    "能量密度": "Energy density",
+    "件": "item"
   }
 }

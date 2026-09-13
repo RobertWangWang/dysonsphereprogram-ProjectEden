@@ -56,6 +56,15 @@ namespace ProjectEden.Utils
         public string name;
 
         public long heatValue;
+
+        /// <summary>
+        /// 可选：顺带改燃料位。
+        ///
+        /// 留 0 就只改热值、不动 <c>FuelType</c>（氢那一条就是这样——它本来就是化学燃料，
+        /// 要改的只是数值）。而给一个原版<b>根本没当燃料</b>的东西加热值时必须填它，
+        /// 否则那是「半对燃料」：有热值、没有任何一种发电机认它，烧出来是 0 电。
+        /// </summary>
+        public int fuelType;
     }
 
     /// <summary>
@@ -313,6 +322,21 @@ namespace ProjectEden.Utils
         /// 填了就直接用这张，不再拿铁块的图标改色。矿石图标和矿脉图标不受影响。
         /// </summary>
         public string ingotIcon;
+
+        /// <summary>
+        /// 锭的燃料位与热值。两个都要给，只给一半会警告并忽略（半对燃料烧出来是 0 电）。
+        ///
+        /// <b>为什么锭也需要这一对。</b> 金属粉在氧化剂里是真烧得起来的，而且
+        /// <b>它的耗氧量只有含碳燃料的一半</b>——Huggett 常数（每 MJ 约耗 13.1 MJ/kg 氧）
+        /// 是对含碳燃料成立的经验律，金属不含碳，本来就跳出那条线。
+        ///
+        /// <b>给 32 而不给 1 是有意的：</b> bit 1 是火力发电厂和机甲反应堆吃的那一位，
+        /// 而一块实心金属锭扔进燃煤锅炉不会烧——要先磨粉、还要配氧化剂。
+        /// 所以它只在氧化还原燃烧厂里是燃料。
+        /// </summary>
+        public int ingotFuelType;
+
+        public long ingotHeatValue;
 
         // ── 配方 ─────────────────────────────────────────────
 

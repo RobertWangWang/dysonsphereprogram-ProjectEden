@@ -266,6 +266,60 @@
       "tintR": 0.8800,
       "tintG": 0.4840,
       "tintB": 0.8188
+    },
+    {
+      "//": "第十座，也是**第一台既是组装机又是发电机的建筑**。它把还原剂和氧化剂压成药柱（组装机那一侧），再把刚压出来的药柱直接烧掉发电（发电机那一侧），中间不经过传送带。",
+
+      "//the-retraction": "CLAUDE.md 长期写着「DSP 的组件模型表达不了『边转化边发电』」——**那句话只对了一半，这一座就是订正**。一个组件确实做不到；但一台实体挂两个组件做得到：CreateEntityLogicComponents 里 isPowerGen(IL 059E) 和 isAssembler(IL 1122) 是两个完全独立的顺序 if，EntityData 也有各自的 powerGenId / assemblerId / stationId / powerConId 四个字段。先例是综合物流枢纽同时挂 station 和 dispenser。",
+
+      "//how-it-self-feeds": "PowerGeneratorComponent.SetNewFuel(itemId, count, inc) 是公开方法，自己会从 LDB 取 HeatValue 填 fuelHeat；EnergyCap_Fuel 只看 fuelCount > 0，**烧的时候不查 fuelMask**（掩码只是传送带取料的过滤器）。所以「把自己的产物搬进自己的燃料舱」是一次普通方法调用，零 transpiler。搬运挂在 MegaAssemblerPatches.MegaTick 上。",
+
+      "//recipeType": "17。ERecipeType 没有上限（枚举没有 Max 哨兵、没有数组按它下标、两个 switch 超范围都落 default、productionMask 不是按类型置位），推导记在 CLAUDE.md。16 是综合化学厂那张兼容表的键，往下取 17。",
+
+      "//model": "702。703~727 已被巨型建筑、克隆机器和矿脉排满，而 728 会被 ResolveModelId 拒绝（上限 dataArray.Length + 64 - 1 = 727），所以只能继续往下取。**启动日志里会打出实际分配到的模型 ID——如果不是 702，就把这里改成日志里那个数**，模型 ID 是进存档的。",
+
+      "//slot": "建造栏第 1 行第 11 槽。1~10 已满（其中第 7 槽是 machines.json 里的风力发电机集群，两个文件共用同一片槽位空间）。**第 11 槽超出了子项行的 10 个按钮**，所以启动时 BuildMenuSlotGuardPatches 会照例报一条 WARNING——那是预期的，建筑仍然可以横向滚动到（电化学厂在 BuildIndex 511 上已经验证过同一件事）。",
+
+      "itemId": 6509,
+      "modelId": 702,
+      "recipeId": 6509,
+      "displayName": "氧化还原燃烧厂",
+      "description": "把还原剂和氧化剂压成药柱、再当场烧掉的巨构。压制段和燃烧段共用一个壳子，药柱从压机直接落进燃烧室，不上传送带——这正是它能烧那些没法用管道输送的东西（金属粉、高黏馏分）的原因。配平了才烧得干净：氧化剂不够，没烧掉的燃料原样留在渣里；氧化剂过量，多出来的只是死重。",
+      "iconName": "redox-burner",
+      "recipeType": 17,
+      "machineTypeName": "氧化还原燃烧设备",
+      "gridRow": 1,
+      "gridCol": 11,
+      "slot": 11,
+
+      "//power-in": "组装机那一侧照常耗电：待机 30 MW、工作 180 MW。和它自己发的 30 GW 比是千分之六——一座电厂当然要净输出，这两个数存在只是为了让「断电就停产」这条规则对它同样成立。",
+      "idleEnergyPerTick": 500000,
+      "workEnergyPerTick": 3000000,
+
+      "//generator": "发电段。genEnergyPerTick × 60 = 30 GW。",
+      "//eta": "0.636 = 3000 ℃ 火焰按 combustibles.json 那套算出来的（0.7 × 卡诺，冷端 298.15 K）。**顺带一个反直觉的测算结果：卡诺在这里已经饱和了**——2000 ℃ 的氨是 0.6082，再高一千度只多三个百分点。所以这座建筑卖的不可能是效率，只能是功率密度：燃料自带氧化剂、不吸空气、没有烟气体积，同一套汽轮机吞得下的功率高一个量级。",
+      "//power-knob": "**30 GW 是平衡旋钮，锚在它自己的建造配方上。** 造它要拆 100 台可燃性液体发电厂（100 × 216 MW = 21.6 GW），所以 30 GW 的意思是「比拆掉的那些强，但不是强一个数量级」——真正的卖点是它不需要外接燃料线、只占一格地、一个电网接口。按仓库的规矩，旋钮就说是旋钮。",
+      "//connectFromItemId": "2204 = 火力发电厂。**发电机必须自己也是电力节点才接得上电网**——全汇编只有 PowerSystem.OnNodeAdded 往 PowerNetwork.generators 里加元素，而它加的是节点自己那台发电机；NewGeneratorComponent 一个后续调用都没有（对照 NewConsumerComponent 会调 OnConsumerAdded）。连接距离和覆盖半径存在 resources.assets 的 prefab 里、离线读不到，所以从真机身上量，不写死。",
+      "generator": {
+        "genEnergyPerTick": 500000000,
+        "useFuelPerTick": 786000000,
+        "fuelMask": 32,
+        "connectFromItemId": 2204
+      },
+
+      "//recipeItems": "6625 = 可燃性液体发电厂（machines.json 里那座），6002 = 能量矩阵。",
+      "recipeItems": [6625, 6002],
+      "recipeItemCounts": [100, 1000],
+      "recipeTimeSpend": 600,
+
+      "//shape": "体量旋钮。宽而不高：一排压机加一座矮胖的燃烧室和排气塔，和精馏塔顶着的综合化学厂（0.56/1.50）刚好相反。",
+      "modelScale": 0.82,
+      "modelHeightScale": 0.9,
+
+      "//tint": "橙红。饱和度 0.45 封顶、明度 0.88 保底——_Color 是乘在生成的图集上的（PlateLight 196/200/208），压太深整座建筑就发黑。",
+      "tintR": 0.95,
+      "tintG": 0.564,
+      "tintB": 0.4845
     }
   ],
   "//replicatorPages": "合成器（Ctrl+替换/制造界面）横向翻页的总页数，每页 14 列。原版每个分页是 8 行 × 14 列、第 1 页几乎满了；开了之后底部会出现一根横向滚动条，可以左右拉动看后面几页。1 = 维持原版、不加滚动条。注意第 9 行及以后原版根本不画（RefreshRecipeIcons 里 row >= 8 直接跳过），所以扩容只能往列上走。",

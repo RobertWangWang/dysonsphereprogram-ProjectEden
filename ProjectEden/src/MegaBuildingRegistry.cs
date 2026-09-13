@@ -10,6 +10,7 @@
 // Released under GPL-3.0; see LICENSE and NOTICE at the repository root.
 
 using System.Collections.Generic;
+using System.Linq;
 using CommonAPI.Systems;
 using ProjectEden.Utils;
 using UnityEngine;
@@ -355,7 +356,7 @@ namespace ProjectEden
                 UnlockKey = -1,
                 Grade = 0,
                 Upgrades = new int[0],
-                DescFields = source.DescFields,
+                DescFields = MergeDescFields(source, entry),
                 prefabDesc = PrefabDesc.none,
             };
 
@@ -552,7 +553,167 @@ namespace ProjectEden
             modelPrefabDesc.idleEnergyPerTick = entry.idleEnergyPerTick;
             modelPrefabDesc.workEnergyPerTick = entry.workEnergyPerTick;
 
+            ApplyGenerator(ref modelPrefabDesc, entry);
+
             LDBTool.PreAddProto(model);
+        }
+
+        /// <summary>
+        /// 让这座巨型建筑<b>同时</b>成为一台发电机。
+        ///
+        /// <b>组件模型允许一台实体挂多个组件，这一点是读 IL 确认的、不是猜的。</b>
+        /// <c>PlanetFactory.CreateEntityLogicComponents</c> 里 <c>isPowerGen</c>（IL 059E）
+        /// 和 <c>isAssembler</c>（IL 1122）是两个完全独立的顺序 if，中间隔着十几个别的
+        /// 组件判断；<c>EntityData</c> 也为它们各留了 <c>powerGenId</c> / <c>assemblerId</c>
+        /// 两个字段。所以组装机 + 物流站 + 发电机 + 耗电体可以是同一台建筑。
+        ///
+        /// <b>那四个「必须逐个抄」的字段一个都不能漏。</b>
+        /// <c>PowerSystem.NewGeneratorComponent</c> 是把 <c>photovoltaic</c> /
+        /// <c>windForcedPower</c> / <c>gammaRayReceiver</c> / <c>geothermal</c> /
+        /// <c>genEnergyPerTick</c> / <c>useFuelPerTick</c> / <c>fuelMask</c> /
+        /// <c>powerCatalystId</c> 逐个字段抄进组件的（IL 0090~0195）。这里的 prefab 克隆自
+        /// 物流运输站，那四个发电方式的布尔本来就是 false，但<b>显式写成 false</b>：
+        /// 漏一个的后果是一台一度电不发的电厂，而且哪里都不报错。
+        /// </summary>
+        private static void ApplyGenerator(ref PrefabDesc desc, MegaBuildingEntry entry)
+        {
+            MegaGeneratorEntry gen = entry.generator;
+
+            if (gen == null || gen.genEnergyPerTick <= 0L) return;
+
+            if (gen.useFuelPerTick <= gen.genEnergyPerTick)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"「{entry.displayName}」的 useFuelPerTick({gen.useFuelPerTick}) 不大于 " +
+                    $"genEnergyPerTick({gen.genEnergyPerTick})——那是能量利用率 >= 100% 的永动机，" +
+                    "发电段已忽略");
+
+                return;
+            }
+
+            desc.isPowerGen = true;
+
+            // 四种发电方式全部显式关掉：这台烧燃料，不靠光、风、射线或地热
+            desc.photovoltaic = false;
+            desc.windForcedPower = false;
+            desc.gammaRayReceiver = false;
+            desc.geothermal = false;
+
+            desc.genEnergyPerTick = gen.genEnergyPerTick;
+            desc.useFuelPerTick = gen.useFuelPerTick;
+            desc.fuelMask = gen.fuelMask > 0 ? gen.fuelMask : 32;
+            desc.powerCatalystId = 0;
+
+            ApplyGridHookup(ref desc, gen, entry);
+
+            double eta = gen.genEnergyPerTick / (double)gen.useFuelPerTick;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"「{entry.displayName}」同时是发电机：发电 {gen.genEnergyPerTick * 60 / 1e9:0.##} GW，" +
+                $"耗燃料 {gen.useFuelPerTick * 60 / 1e9:0.##} GW，能量利用率 {eta:0.###}，" +
+                $"燃料掩码 {desc.fuelMask}");
+        }
+
+        /// <summary>
+        /// 物品提示栏要显示哪几行，由 <c>ItemProto.DescFields</c> 这张<b>字段号清单</b>决定，
+        /// 而不是由 prefabDesc 上有没有那个值决定。
+        ///
+        /// <b>这两件事很容易混为一谈，而且混错了完全不报错。</b>
+        /// <c>ItemProto.GetPropValue</c> 里确实有一支现成的分支会算
+        /// <c>prefabDesc.genEnergyPerTick × 60</c>（switch 的 case 5，IL 02F0~0309），
+        /// 但那一支<b>只有 DescFields 里点名了它才会被调到</b>。我们的物品模板抄自制造台，
+        /// 清单里当然没有发电那一项——于是这座 30 GW 的电厂在提示栏里一行发电功率都没有，
+        /// 而工作功率、待机功率照常显示，看着像是发电被漏掉了。
+        ///
+        /// <b>字段号从真机身上取并集，不写死。</b> 写 <c>new[] { 5 }</c> 也能work，
+        /// 但那是把一个从 IL 里读出来的魔数钉进代码；直接跟源电厂取并集则连
+        /// 「燃料消耗」这类同族的行一起带上，而且游戏更新挪动了编号也不会错。
+        /// 顺序保持「模板在前、电厂新增的在后」，提示栏的既有排版不动。
+        /// </summary>
+        private static int[] MergeDescFields(ItemProto source, MegaBuildingEntry entry)
+        {
+            int[] baseFields = source.DescFields ?? new int[0];
+
+            MegaGeneratorEntry gen = entry.generator;
+
+            if (gen == null || gen.genEnergyPerTick <= 0L) return baseFields;
+
+            int sourceId = gen.connectFromItemId > 0 ? gen.connectFromItemId : 2204;
+            ItemProto plant = LDB.items.Select(sourceId);
+
+            if (plant?.DescFields == null || plant.DescFields.Length == 0)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"「{entry.displayName}」：量不到原版电厂 {sourceId} 的 DescFields，" +
+                    "提示栏里不会有发电功率那一行");
+
+                return baseFields;
+            }
+
+            var merged = new List<int>(baseFields);
+
+            foreach (int f in plant.DescFields)
+                if (!merged.Contains(f))
+                    merged.Add(f);
+
+            if (merged.Count == baseFields.Length) return baseFields;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"「{entry.displayName}」提示栏字段：{baseFields.Length} 项 → {merged.Count} 项" +
+                $"（并入「{plant.Name}」的 {string.Join("/", plant.DescFields.Select(x => x.ToString()).ToArray())}）");
+
+            return merged.ToArray();
+        }
+
+        /// <summary>
+        /// 把「怎么接电网」从一座真实的原版电厂身上量过来。
+        ///
+        /// <b>这一步不是锦上添花，缺了它这座电厂一度电都发不出来</b>，而且完全不报错：
+        /// 组装机照跑、耗电照扣、燃料照烧，就是没有电流进电网。原因在 IL 里是闭合的——
+        /// 全汇编往 <c>PowerNetwork.generators</c> 里加元素的<b>只有</b>
+        /// <c>PowerSystem.OnNodeAdded</c>（IL 04DD 处 <c>list_sorted_add(net.generators, node.genId)</c>），
+        /// 而 <c>OnNodeAdded</c> 只被 <c>NewNodeComponent</c> 调用。也就是说：
+        /// <b>发电机是顺着「节点」进电网的，而节点身份来自 <c>isPowerNode</c></b>。
+        /// <c>NewGeneratorComponent</c> 自己什么都不调——对照 <c>NewConsumerComponent</c>
+        /// 会调 <c>OnConsumerAdded</c>，这个不对称就是整件事的答案。
+        ///
+        /// 我们的 prefab 克隆自物流运输站，那是个纯耗电体，所以节点身份得自己补上。
+        /// <b>补的是身份和连接距离，不是供电范围</b>：覆盖半径照抄源电厂（电厂本来就不给别人供电），
+        /// 这座建筑不该变成一座变电站。
+        /// </summary>
+        private static void ApplyGridHookup(ref PrefabDesc desc, MegaGeneratorEntry gen,
+                                            MegaBuildingEntry entry)
+        {
+            int sourceId = gen.connectFromItemId > 0 ? gen.connectFromItemId : 2204;
+
+            ItemProto source = LDB.items.Select(sourceId);
+            PrefabDesc src = source?.prefabDesc;
+
+            if (src == null)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"「{entry.displayName}」：量不到原版电厂 {sourceId} 的 prefab，" +
+                    "接电网的参数没抄过来——它会照常生产、照常耗电，但一度电都发不进电网");
+
+                return;
+            }
+
+            if (!src.isPowerNode)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"「{entry.displayName}」：物品 {sourceId}（{source.Name}）的 isPowerNode 是 false，" +
+                    "它大概不是一座发电建筑。接电网的参数仍会照抄，但很可能接不上——" +
+                    "把 generator.connectFromItemId 指到一座真的电厂上");
+            }
+
+            desc.isPowerNode = src.isPowerNode;
+            desc.powerConnectDistance = src.powerConnectDistance;
+            desc.powerCoverRadius = src.powerCoverRadius;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"「{entry.displayName}」接电网的参数量自「{source.Name}」({sourceId})：" +
+                $"isPowerNode={desc.isPowerNode}，连接距离 {desc.powerConnectDistance:0.##}，" +
+                $"覆盖半径 {desc.powerCoverRadius:0.##}");
         }
     }
 }

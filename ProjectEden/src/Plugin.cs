@@ -83,6 +83,7 @@ namespace ProjectEden
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             AmmoRegistry.Load();
+            RedoxRegistry.Load();
             CompositeRegistry.Load();
             CombustiblePowerPatches.Load();
             ProliferatorPatches.Load();
@@ -136,6 +137,8 @@ namespace ProjectEden
             // （要等合金本身进了 LDB 才拿得到它们的物品 ID）
             LDBTool.PreAddDataAction += AmmoRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += AmmoRegistry.OnPostAddData;
+            LDBTool.PreAddDataAction += RedoxRegistry.OnPreAddData;
+            LDBTool.PostAddDataAction += RedoxRegistry.OnPostAddData;
             // 复合材只解析不注册（物品和配方都在 ores.json 里），所以只挂 PostAdd
             LDBTool.PostAddDataAction += CompositeRegistry.OnPostAddData;
             // 活性增产剂：排在复合材之后——投料就是那四级，
@@ -204,6 +207,8 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= AlloyRatioPatches.OnPostAddData;
             LDBTool.PreAddDataAction -= AmmoRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= AmmoRegistry.OnPostAddData;
+            LDBTool.PreAddDataAction -= RedoxRegistry.OnPreAddData;
+            LDBTool.PostAddDataAction -= RedoxRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= CompositeRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= AlienVeinPatches.OnPostAddData;
@@ -490,6 +495,7 @@ namespace ProjectEden
             CompositePatches.ReapplyAll();
             CompositeOutputPatches.ReapplyAll();
             ProliferatorPatches.ReapplyAll();
+            RedoxBurnerPatches.ReapplyAll();
         }
 
         public void IntoOtherSave()

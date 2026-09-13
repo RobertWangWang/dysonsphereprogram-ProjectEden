@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: nine 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, a **综合化学厂** that is the first machine here to run **more than one `ERecipeType`** (chemical 2, electrochemical 9 and redox 10, all at 10000×) — the eight real gates on `assemblerRecipeType` become one table lookup, and its build recipe eats 1000 燔石化工厂 so the older plant is its prerequisite rather than its victim, and six rule-bypass cheat switches that are **on** by default (flipped after 1.5.0 by owner decision; they were off before, and the whole point of keeping them in their own file behind one master switch is that this default is one config override away from being reversed). ~31,000 lines of C# in 104 files — 97 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by nineteen JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: ten 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, a **综合化学厂** that is the first machine here to run **more than one `ERecipeType`** (chemical 2, electrochemical 9 and redox 10, all at 10000×) — the eight real gates on `assemblerRecipeType` become one table lookup, and its build recipe eats 1000 燔石化工厂 so the older plant is its prerequisite rather than its victim, a **氧化还原燃烧厂** that is the first entity here to carry **both an assembler and a generator** — it presses a reductant and an oxidiser into propellant grains on its own `ERecipeType` 17, feeds those grains straight into its own fuel bay without a belt, and burns them for 30 GW, with a three-row panel whose two picker rows choose the pair and whose slider sets the oxidiser ratio, and six rule-bypass cheat switches that are **on** by default (flipped after 1.5.0 by owner decision; they were off before, and the whole point of keeping them in their own file behind one master switch is that this default is one config override away from being reversed). ~31,000 lines of C# in 104 files — 97 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by twenty JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). Not a git repository. **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
@@ -336,6 +336,186 @@ this feature needed answered. It is now keyed by `protoId` in a `ConcurrentDicti
 names the building. *A "log it once" diagnostic should mean once per kind of thing, not once
 per session.*
 
+
+### An assembler that is also a generator — `src/Patches/Redox/`
+
+氧化还原燃烧厂 (item **6509**, model 702, `ERecipeType` **17**) is the tenth mega building and the
+first entity in this repo that carries **two production components at once**. It presses a
+reductant and an oxidiser into a propellant grain (the assembler half) and burns that grain for
+30 GW (the generator half), with the grain never touching a belt.
+
+**A retracted claim, and the retraction is the most useful part.** This file said, under
+熔岩冷却厂, that DSP "cannot express *turn X into Y while generating power*". That sentence was
+half right and the wrong half had been load-bearing for two features. The correct statement is
+that one **component** cannot; one **entity** can, and the evidence is three instructions apart:
+
+- `PlanetFactory.CreateEntityLogicComponents` tests `isPowerGen` at **IL 059E** and `isAssembler`
+  at **IL 1122** — two independent sequential `if`s with a dozen other component tests between
+  them, exactly the shape that already lets 综合物流枢纽 carry both a `StationComponent` and a
+  `DispenserComponent`.
+- `EntityData` carries `assemblerId`, `stationId`, `powerGenId` and `powerConId` as **four separate
+  fields**, so nothing has to be shared or faked.
+
+This is the same lesson as *"only 14 `ERecipeType` values remain"* and
+*`kMaxCargoFlowSpeedPerSecond`*: **a sentence in this file is a claim until the IL is re-read.**
+The original claim was never measured — it was inferred from the fact that a recipe has no power
+output field, which is true and does not imply what was drawn from it.
+
+**Feeding the generator needs no transpiler, and that is worth stating because it looks like it
+should.** `PowerGeneratorComponent.SetNewFuel(itemId, count, inc)` is public and fills `fuelHeat`
+itself from `LDB.items.Select(itemId).HeatValue` (IL 0016–0030); `EnergyCap_Fuel` gates only on
+`fuelCount > 0`. **`fuelMask` is not consulted at burn time** — it is the filter that
+`CargoTraffic.TryPickFuel` and hand-insertion use, so a grain moved in from code bypasses it
+entirely. So `RedoxBurnerPatches.Burn`, hooked into `MegaAssemblerPatches.MegaTick`, is one method
+call. Two details it does have to get right: `fuelCount` is **Int16**, so the bay is topped up to a
+3000 cap rather than to whatever was produced; and a **tier change is only applied when the bay is
+empty**, because `SetNewFuel` replaces `fuelHeat` wholesale while `fuelEnergy` may still hold part
+of the previous grain.
+
+**Burn takes priority over export, and that falls out of the ordering rather than being enforced.**
+`MegaTick` runs `UpdateSlots` (which is where `MegaStationPatches.UpdateStationStorage` drains
+`produced[]` into the station slots) *before* the cycles settle, and `Burn` runs *after* them. So
+each tick's fresh production goes to the fuel bay first and only the surplus — what is left once
+the bay is at its cap — reaches the station slots on the next tick. That is the behaviour you want
+(a power plant feeds itself first) and it needs no flag.
+
+**The three grain tiers are enumerated items for the same reason ammo damage is.** A grain's energy
+is `ItemProto.HeatValue`, stored per proto, and DSP has no per-stack or per-item metadata anywhere
+(the `Cargo` struct is full; four-axis alloy properties hit the same wall). So energy density is
+tiered — 双元推进剂 7 MJ / 金属浆料燃料 11 MJ / 固体复合推进剂 14 MJ — while **yield** rides
+`productCounts[0]` and costs no item slot at all. One recipe, twelve combinations.
+
+**The slider controls 配氧比, and the shape of its effect is half derived and half a stated knob.**
+
+- The **lean** side is exact, not a penalty: at φ < 1 the oxidiser can only burn φ of the fuel, so
+  yield is multiplied by φ. At φ > 1 the fuel is already fully burnt and yield stops rising — the
+  extra oxidiser is simply wasted.
+- That alone makes φ = 1 a single fixed optimum, i.e. **the slider would be decorative** — the
+  exact failure the alloy section records for single-axis grade thresholds. So density additionally
+  scales as `φ^0.5`, which can promote a pair into the next tier. The real effect it is shaped
+  after (richer mixture → more complete combustion → hotter flame → denser grain) is genuine, but
+  it deliberately outweighs the dilution term that would push the other way, so **it is labelled a
+  balance knob in `redox.json` rather than dressed up as a derivation.**
+
+Measured over the whole space — 6 reductants × 2 oxidisers × 61 slider positions = **732
+combinations — not one produces more burnable energy than it consumes**, because yield is
+`floor(parts × heat × min(1, φ) / tierHeat)`. The recipe is therefore constructively safe against
+`EnergyAudit` and needs no `energyNote` exemption.
+
+**Two candidate oxidisers were designed and then dropped by the repo's own dominance rule**, and
+that is recorded in `redox.json` so they do not get re-added: 二氧化氮 releases the same 2.0 oxygen
+atoms per item as 氧气 while costing two more steps of the nitrogen chain, and 硝酸铵 releases only
+1.0 (its own four hydrogens claim two oxygens as water before anything else can have them) while
+costing more than either. What survived — 氧气 2.0 cheap, 硝酸 2.5 expensive — is a real trade, and
+it gives **硝酸 its first consumer**: it had zero, and this file names it as the repo's cautionary
+example of an item with no downstream.
+
+**Metals as fuel: `fuelType` 32, never 1.** 铝块 (5.75 MJ) and 高纯硅块 (6.25 MJ) both get heat
+values, derived from the usual coal anchor. They are given **bit 32 only**, so a 火力发电厂 cannot
+burn them: a solid ingot does not burn in a coal boiler — it has to be powdered and matched with an
+oxidiser — and granting bit 1 would have been a free multiplier on vanilla thermal power. The
+audit needs those heat values regardless: without them the grain recipe would look like it creates
+energy from nothing. 高纯硅块 is vanilla, so it goes through `ores.json`'s `vanillaHeat` (which
+gained an optional `fuelType` for exactly this case, plus a warning when a heat value lands on
+something with no fuel bit — "half a pair burns for zero power"); 铝块 is ours, so `OreEntry` gained
+`ingotFuelType` / `ingotHeatValue`, applied at `PostAddData` against the **final** LDB state rather
+than at registration.
+
+**Carnot is already saturated here, which is why the plant sells power density and not efficiency.**
+A 3000 °C flame gives `0.7 × (1 − 298.15/3273.15) = 0.636` against the 可燃液体发电厂's 0.6082 at
+2000 °C — three percentage points for another thousand degrees. What the premixed grain actually
+buys is that the plant breathes no air and has no flue-gas volume, so one turbine handles an order
+of magnitude more power. The 30 GW figure itself is a **stated balance knob** anchored on the build
+recipe: it eats 100 可燃性液体发电厂 (100 × 216 MW = 21.6 GW), so it beats what it consumes without
+beating it by an order of magnitude, and the real selling point is that it needs no fuel line.
+
+**The panel is `AlloySliderPatches`' seventh mode and its first three-row one** — two picker rows
+plus a slider row. `LayoutRow` already switches per row, so nothing in the panel needed changing.
+It also reads the live output power off `generateCurrentTick` (**not** `capacityCurrentTick`: the
+two diverge exactly when fuel runs short, which is the moment the player needs to see it), because
+a mega building's 30 slots and its fuel bay are both invisible — `MegaStationWindowPatches` reports
+`stationId` as 0 so the recipe window opens instead of the station window.
+
+
+**Two things break the moment a building is also a generator, and both were found by launching,
+not by reading.** They are recorded together because they have the same shape: a vanilla assumption
+that no vanilla building violates.
+
+**(1) A fourth window joins the fight over one click.** `UIGame.OnPlayerInspecteeChange` tests the
+component ids as a run of independent sequential `if`s, each opening with `ShutAllFunctionWindow()`,
+so **the last match wins** — and the order is `assemblerId` @00A7, then `powerGenId` @0182, then
+`stationId` @01AA. Giving the plant a generator therefore made 燃料厂 open the *power generator*
+window, which promptly threw `NullReferenceException at UIPowerGeneratorWindow._OnOpen`.
+Reconstructing the DMD offset (that method has two short branches before 0x50, +3 bytes each) puts
+the throw on `ldfld powerNetworkDesc` @0046 / `callvirt ManualBehaviour::_Open()` @004B — a child
+widget of that window that is simply not wired up for this building. **The fix is not to make that
+window work; it is to not open it**, exactly as `stationId` has been filtered since the first mega
+building. `MegaStationWindowPatches` now filters that id too.
+
+**And fixing it opened the same hole one door down, which is the part worth remembering.** Giving
+the plant `isPowerNode` (see the next finding) also gives it a `powerNodeId`, and `OpenNodeWindow()`
+@0640 likewise sits *after* `OpenAssemblerWindow()` @0361 — so the power-node window took over from
+the generator window and the symptom merely changed from "clicking it crashes" to "it opens with no
+recipe button". **The lesson is not "add another id", it is that this family has to be enumerated
+once and counted.** That method holds 23 component-id tests; the test is *which components does
+this entity actually have*, not *which windows do I want*. A mega building hits five —
+`assemblerId`, `stationId`, `powerConId`, `powerGenId`, `powerNodeId` — of which the consumer opens
+no window and the other three must all be suppressed. The transpiler now rewrites all three and
+loud-fails on any count other than 3.
+
+**(2) `NewGeneratorComponent` does not connect the generator to anything, and the asymmetry is the
+proof.** Enumerating every write to `PowerNetwork.generators` across the assembly returns exactly
+one adder — `PowerSystem.OnNodeAdded`, at IL 04DD, doing
+`list_sorted_add(net.generators, node.genId)` — and `OnNodeAdded`'s only caller is
+`NewNodeComponent`. Compare the neighbouring path: `NewConsumerComponent` **does** call
+`OnConsumerAdded`. So a consumer built inside an existing supply area joins its network
+immediately, while **a generator only ever reaches the grid through a `PowerNetworkStructures.Node`**
+— which is to say `isPowerGen` means "it can generate" and **`isPowerNode` is what means "it is
+attached to the grid"**. Every vanilla power plant carries both; that is the little connection line
+under it. Our prefab is cloned from 物流运输站, a pure consumer, so the node half had to be added.
+
+The symptom is the worst kind this repo keeps running into: **every step succeeds and the feature is
+absent.** The assembler ran, the recipe produced, power was consumed, fuel was moved into the bay —
+and `networkId` stayed 0, so not one joule reached the grid, with nothing logged anywhere.
+
+`MegaBuildingRegistry.ApplyGridHookup` copies `isPowerNode` / `powerConnectDistance` /
+`powerCoverRadius` off a **real vanilla power plant's prefab at runtime** (`connectFromItemId`,
+default 2204) rather than hardcoding them — those live in `resources.assets` and cannot be read
+offline, the same reason the accumulator and generator clones take multipliers instead of absolutes.
+It copies the cover radius too, so the plant does not quietly become a substation.
+
+**Note this needs a rebuild of any plant placed before the fix** — `prefabDesc` is trap 1, it only
+affects newly built entities. `RedoxBurnerPatches.ReportOnce` prints the whole chain on one line
+(recipe id vs expected, `powerGenId`, `networkId`, fuel bay, capacity and actual output) precisely
+so the next "it produces but does not generate" costs one log line instead of five rounds — the
+courier-chain lesson applied before it was needed a second time.
+
+**Three smaller findings from the same building, each a "the data is right and the screen is
+wrong" shape.**
+
+- **`prefabDesc` holding a value is not the same as the tooltip showing it.** `ItemProto.GetPropValue`
+  really does have a branch computing `prefabDesc.genEnergyPerTick * 60` (switch case 5, IL
+  02F0–0309), but **it is only ever reached if that field id appears in `ItemProto.DescFields`** —
+  a per-item list of which rows to draw. The plant's item proto is cloned from the assembler
+  template, whose list naturally has no generator row, so a 30 GW power plant showed 工作功率 and
+  待机功率 and no generation row at all. `MegaBuildingRegistry.MergeDescFields` unions in the field
+  ids of a **real vanilla power plant** rather than hardcoding `5`: that also picks up the
+  neighbouring fuel-consumption row, and it survives a game update renumbering the switch.
+- **"Actual output" and "maximum output" are different numbers and only showing one of them reads
+  as a bug.** The panel printed `generateCurrentTick` alone, so a plant configured for 30 GW read
+  **0.03 GW** and looked like a units error. It was not: the grid only ever draws what it needs, so
+  an idle plant generates almost nothing. But *low demand* and *out of fuel* produce the same
+  reading and want opposite responses — the second also drops `capacityCurrentTick`. The panel now
+  prints `actual / capacity`.
+- **A recipe registered in `PreAddDataAction` cannot name this mod's own items yet**, so both input
+  slots hold a placeholder vanilla solid. The machine is correct from the first tick (the pair is a
+  per-building `recipeExecuteData` edit) — but **the replicator draws the `RecipeProto`**, so it
+  advertised 石矿 ×8 + 石矿 ×8. `RedoxRegistry.ApplyDefaultToProto` rewrites `Items` / `ItemCounts`
+  / `Results` / `ResultCounts` (values, never lengths) in `PostAddDataAction`, which is free:
+  LDBTool calls `RecipeProto.InitRecipeItems` **after** that action, exactly as the Universe
+  Matrix's seventh ingredient relies on. It must re-`Preload` the icon by **dataArray index**,
+  because `MegaBuildingRegistry.ProtoPreload` has already run by then.
+
 ### Advanced miner & water pumps — `src/Patches/AdvancedMiner/`
 
 `MinerComponent` is shared by 大型采矿机 (protoId 2316), water pumps (`type == EMinerType.Water`) and oil extractors (`type == EMinerType.Oil`); `IsBoosted` covers all three, and `GetCapacity` gives them the same 10M internal buffer via the already-transpiled `productCount >= 50` gates (three sites, one per branch).
@@ -628,8 +808,11 @@ output slot, which stalls a multi-product assembler outright. Say the deviation 
 pretend the equation balances.
 
 **Why it is a feedstock and not a fuel.** DSP’s component model can express "burn X for power"
-(`PowerGeneratorComponent` + fuel) and "turn X into Y" (`AssemblerComponent`), but **not "turn X
-into Y while generating power"** — so magma had to be one or the other. Fuel loses on three
+(`PowerGeneratorComponent` + fuel) and "turn X into Y" (`AssemblerComponent`) — so magma had to be
+one or the other. (**This paragraph used to add "but not both at once", and that half was wrong**:
+one *component* cannot, but one *entity* carrying two components can, which is what the
+氧化还原燃烧厂 does. The retraction is recorded in full in that building's own section. It does not
+change the verdict for magma, which rests on the three counts below.) Fuel loses on three
 counts: 地热发电站 already occupies "power from a lava planet" (both `PowerSystem` methods gate on
 `waterItemId == -1`, i.e. geothermal *only* works there); the honest energy density is ~1.9 MJ/kg
 against coal’s ~27, which by this repo’s own coal anchor puts a magma item near 0.19 MJ — an order
@@ -1351,13 +1534,36 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
-The nineteen configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, and whether a pump may draw 岩浆 from a lava ocean), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch).
+The twenty configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, and whether a pump may draw 岩浆 from a lava ocean), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
 **LDBTool re-binds proto IDs from its own config, after your code sets them.** `LDBTool.PreAddProto` → `Bind` → `IdBind` / `GridIndexBind` records every mod proto's ID and GridIndex in `BepInEx/config/LDBTool/LDBTool.CustomID.cfg` and `LDBTool.CustomGridIndex.cfg`, **keyed by the proto's display name**, and on every later launch it writes those stored values *back onto the proto*. So changing an ID in this repo's JSON has **no effect** on a proto that has already been registered once — the first ID a proto is ever given is sticky until that cfg entry is deleted. Cobalt sat on 电磁矩阵's 6001 through three config edits because of this. When an ID looks ignored, check that cfg before anything else, and delete the entry (both files) to let the new value take. `OreRegistry.VerifyIds` now checks the post-registration reality and names the file.
 
-**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)**, **6641–6643 (沸石催化剂 / 待生沸石催化剂 / 丙烯)**, **6644–6645 (尿素 / 乌洛托品)**, **6646–6647 (丙烯腈 / 聚丙烯腈)**, **6648–6651 (苯 / 异丙苯 / 苯酚 / 丙酮)**, **6652 (硫磺)**, **6653–6654 (石脑油 / 蜡油)**, **6506 (熔岩冷却厂)**, **6507 (催化反应器)** and **6508 (综合化学厂)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**, **6507**, **6648–6653 (catalyst synthesis / regeneration, three type-14 reactor recipes, propylene carbothermic)** **6654–6656 (urea / hexamine / urea-formaldehyde resin → vanilla plastic)** **6657–6659 (acrylonitrile / PAN / PAN carbonisation → vanilla carbon nanotube)** **6660–6664 (benzene ×2 routes / cumene / cumene cleavage / phenolic resin → vanilla plastic)** **6665–6667 (catalytic reforming / residue HDS / contact-process sulfuric acid)** and **6668 (hydrocracking)**. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs 703, 704, **707**, 708 and 723–727 (mega buildings), 705, 709, 714–715, 717–719 (cloned machines) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂), 13 is 熔岩处理 (熔岩冷却厂) 14 is 催化 (催化反应器) and **16 is 综合化学 (综合化学厂)** — a type with **no recipes of its own**, it is only the key of the multi-type compatibility table. **14 is not a ceiling** — see the `ERecipeType` paragraph under *Cloned buildings*; 16 and up are equally usable.
+**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)**, **6641–6643 (沸石催化剂 / 待生沸石催化剂 / 丙烯)**, **6644–6645 (尿素 / 乌洛托品)**, **6646–6647 (丙烯腈 / 聚丙烯腈)**, **6648–6651 (苯 / 异丙苯 / 苯酚 / 丙酮)**, **6652 (硫磺)**, **6653–6654 (石脑油 / 蜡油)**, **6506 (熔岩冷却厂)**, **6507 (催化反应器)**, **6508 (综合化学厂)**, **6509 (氧化还原燃烧厂)** and **6655–6657 (双元推进剂 / 金属浆料燃料 / 固体复合推进剂)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**, **6507**, **6648–6653 (catalyst synthesis / regeneration, three type-14 reactor recipes, propylene carbothermic)** **6654–6656 (urea / hexamine / urea-formaldehyde resin → vanilla plastic)** **6657–6659 (acrylonitrile / PAN / PAN carbonisation → vanilla carbon nanotube)** **6660–6664 (benzene ×2 routes / cumene / cumene cleavage / phenolic resin → vanilla plastic)** **6665–6667 (catalytic reforming / residue HDS / contact-process sulfuric acid)** **6668 (hydrocracking)**, **6509 (the plant itself)** and **6669 (药柱压制)**. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs **702**, 703, 704, **707**, 708 and 723–727 (mega buildings), **701, 705, 709, 714, 715, 717, 718, 719** (cloned machines — pinned to measured values, see the cascade note below) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂), 13 is 熔岩处理 (熔岩冷却厂) 14 is 催化 (催化反应器), **16 is 综合化学 (综合化学厂)** and **17 is 氧化还原燃烧 (氧化还原燃烧厂)** — a type with **no recipes of its own**, it is only the key of the multi-type compatibility table. **14 is not a ceiling** — see the `ERecipeType` paragraph under *Cloned buildings*; 16 and up are equally usable.
+
+
+**Model IDs drift silently whenever a building is inserted above them, and it has already happened
+once.** `ResolveModelId` scans **down** from `dataArray.Length + 64 - 1` for the first free id, and
+mega buildings register before `machines.json`. So 1.6.5 giving 综合化学厂 id 707 displaced
+可燃性液体发电厂, which took 电化学厂's configured 719, which took 综合物流枢纽's 718 — a clean
+seven-deep rotation, every machine stealing the next one's slot:
+
+```
+可燃性液体发电厂 707 → 719    锂电池能量枢纽 714 → 709
+电化学厂         719 → 718    风力发电机集群  709 → 705
+综合物流枢纽      718 → 715    碳化硅能量枢纽  705 → 701
+锂电池蓄电器      715 → 714
+```
+
+**Model ids go into saves**, so this is not cosmetic: an entity built before the shift keeps its
+baked `modelIndex` and will render as whatever now owns that number. The registry warns per
+building ("期望的模型 ID X 不可用，改用 Y") and the warning's own advice is the fix — those seven are
+now **pinned to their measured values** in `machines.json`, with a `//` at the top of the file
+saying why. Adding another building above them no longer moves them.
+
+The general rule: **a resolver that logs "I picked a different value than you configured" is
+reporting an unstable id, not a successful fallback.** Pin it the first time you see the line.
 
 **PowerShell scripts for IL inspection must be pure ASCII.** Windows PowerShell reads `.ps1` as ANSI, so a heredoc-written script containing Chinese characters gets mangled into parser errors that look nothing like an encoding problem (`unexpected token 'case'`, `missing string terminator`).
 
