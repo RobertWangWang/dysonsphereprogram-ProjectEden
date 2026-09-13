@@ -406,6 +406,18 @@ namespace ProjectEden.Utils
         /// <summary>图标从哪个<b>原版物品</b>改色而来。填 0 且没配 icon 则用本矿种的锭图标</summary>
         public int iconFrom;
 
+        /// <summary>
+        /// 这条配方的产物<b>每件带多少品质分</b>（0 = 不带，绝大多数配方都是 0）。
+        ///
+        /// 品质的唯一来源是提纯工序，所以只有提纯配方会填它。注入发生在产物落进提纯厂
+        /// 自己的物流站槽位时——见 <c>QualityRefineryPatches</c>，不在这里。
+        ///
+        /// <b>写「每件多少分」而不是「一炉注入多少点」</b>：后者是中间量，
+        /// 要跟着产量一起改；前者就是玩家最终看到的那个数，也是效果层直接插值的那个数
+        /// （满分 100 对应顶尖 +30%）。
+        /// </summary>
+        public int quality;
+
         public RecipeItemEntry[] items;
         public RecipeItemEntry[] results;
     }

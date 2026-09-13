@@ -2021,6 +2021,79 @@ def _sieve(body, pore_fill, pore_edge, pore_gloss, side_pore, lumps=()):
     return d
 
 
+def refinery_plant():
+    """同位提纯厂：**一排电解槽 + 一根区域熔炼杆，杆腰上一圈亮环**。
+
+    前十张里已经有细高精馏塔、圆顶罐、对撞环、温室、矮胖燃烧筒，所以这一张的识别点
+    不放在剪影的胖瘦上，放在**那圈亮环**——熔区沿着锭子往下爬是区域熔炼独有的画面,
+    整套图标里没有第二个会发光的环。
+
+    电解槽画成矮方槽而不是圆罐：圆的这套里太多了，方的一眼就分得开；
+    槽口那层青蓝是电解液，也是「湿法」这条线的颜色。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6659)   # 主色跟着 megabuildings.json 的 tint 走
+    liquid = _pal("#39b6d8")
+
+    # 底座
+    _prism(d, 0, 33, 43, 9, dark)
+    _prism(d, 0, 25, 38, 8, p, gloss=0.18)
+
+    # 右后：区域熔炼杆。全图最细的竖直件，顶天立地
+    d.append(dw.Rectangle(12.0, -40, 9.0, 52, fill=p[1], stroke=dark[3], stroke_width=1.3))
+
+    # 熔区：杆腰上那一圈。**画成横带而不是圆环**——80px 下圆环会糊成一个点
+    d.append(dw.Rectangle(10.4, -14, 12.2, 7.5, fill="#ffc061", stroke=dark[3], stroke_width=1.1))
+    d.append(dw.Rectangle(10.4, -12.4, 12.2, 2.4, fill="#fff0c8"))
+
+    # 杆顶的夹头
+    d.append(dw.Rectangle(9.6, -44, 13.8, 5.0, fill=p[0], stroke=dark[3], stroke_width=1.2))
+
+    # 前排：三只电解槽。高度错开，等高会读成一段栏杆
+    for x, h in ((-30, 13), (-16, 16), (-2, 11)):
+        d.append(dw.Rectangle(x - 6.2, 16 - h, 12.4, h, fill=p[1], stroke=dark[3], stroke_width=1.2))
+        # 槽口的电解液
+        d.append(dw.Ellipse(x, 16 - h, 6.2, 6.2 * ISO, fill=liquid[0], stroke=dark[3], stroke_width=1.0))
+        # 阴极板：插在液里的一片，露出一截
+        d.append(dw.Rectangle(x - 1.1, 16 - h - 6.5, 2.2, 7.0, fill=p[0], stroke=dark[3],
+                              stroke_width=0.9))
+
+    return d
+
+
+def electrolyte():
+    """电解液：**一槽深蓝溶液，两片电极插在里面**。
+
+    它是溶液不是分子，所以<b>不画球棍式</b>——那会把一锅混合物画成一个化合物，
+    和本仓库「配比按质量分数、不写配平方程」是同一件事的两种表达。
+
+    深蓝来自硫酸铜溶液的真实颜色；两片电极一浅一深，浅的那片是正在长铜的阴极。
+    """
+    d = canvas()
+
+    body = _pal("#2f6f8f")
+    liquid = _pal("#1b6fa8")
+    steel = _pal("#9aa6b5")
+
+    # 槽体：梯形，上宽下窄，像个真的电解槽
+    d.append(dw.Lines(-30, -20, 30, -20, 24, 28, -24, 28, close=True,
+                      fill=body[2], stroke=body[3], stroke_width=2.2))
+
+    # 液面
+    d.append(dw.Ellipse(0, -20, 30, 30 * ISO, fill=liquid[0], stroke=body[3], stroke_width=1.8))
+    d.append(dw.Ellipse(-7, -23, 11, 11 * ISO * 0.7, fill="#57b6e0", opacity=0.55))
+
+    # 两片电极：一深一浅，浅的那片挂着刚长出来的铜
+    for x, fill in ((-12, steel[1]), (12, "#d98a4a")):
+        d.append(dw.Rectangle(x - 4.0, -34, 8.0, 44, fill=fill, stroke=body[3], stroke_width=1.6))
+
+    # 导电排：把两片电极连起来，一眼看出是通电的
+    d.append(dw.Rectangle(-16.5, -38, 33, 5.0, fill=steel[0], stroke=body[3], stroke_width=1.4))
+
+    return d
+
+
 def zeolite_catalyst():
     """沸石催化剂：淡青灰的块体，孔洞是通的、深的、排得整整齐齐。
 
@@ -2688,6 +2761,10 @@ if __name__ == "__main__":
     render(lava_cooler(), "lava-cooler")
     render(omni_chem(), "omni-chem")
     render(redox_burner(), "redox-burner")
+    render(refinery_plant(), "refinery-plant")
+
+    # 提纯线的耗材
+    render(electrolyte(), "electrolyte")
 
     # 三档药柱：氧化还原燃烧厂压出来的燃料
     render(bipropellant(), "bipropellant")

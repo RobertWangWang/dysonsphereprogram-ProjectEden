@@ -65,7 +65,7 @@
       "workEnergyPerTick": 375000,
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。装配线是横着铺开的，宽而低。",
       "modelScale": 0.68,
-      "modelHeightScale": 0.90,
+      "modelHeightScale": 0.9,
       "tintR": 0.8941,
       "tintG": 0.6631,
       "tintB": 0.4918
@@ -85,7 +85,7 @@
       "workEnergyPerTick": 375000,
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。方正的炉体，标准体量。",
       "modelScale": 0.64,
-      "modelHeightScale": 1.00,
+      "modelHeightScale": 1.0,
       "tintR": 0.5327,
       "tintG": 0.6616,
       "tintB": 0.9686
@@ -105,7 +105,7 @@
       "workEnergyPerTick": 375000,
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。三只立罐，该细高。",
       "modelScale": 0.58,
-      "modelHeightScale": 1.30,
+      "modelHeightScale": 1.3,
       "tintR": 0.9882,
       "tintG": 0.9181,
       "tintB": 0.5435
@@ -126,10 +126,10 @@
       "idleEnergyPerTick": 75000,
       "workEnergyPerTick": 375000,
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。低矮机身加龙门架，压扁。",
-      "modelScale": 0.70,
+      "modelScale": 0.7,
       "modelHeightScale": 0.85,
-      "tintR": 0.8800,
-      "tintG": 0.4840,
+      "tintR": 0.88,
+      "tintG": 0.484,
       "tintB": 0.5282
     },
     {
@@ -149,8 +149,8 @@
       "modelScale": 0.74,
       "modelHeightScale": 0.78,
       "tintR": 0.6085,
-      "tintG": 0.4840,
-      "tintB": 0.8800
+      "tintG": 0.484,
+      "tintB": 0.88
     },
     {
       "//": "第六座。它和前五座不同的地方在于**配方类型是本 mod 自己的 11 号（生化培养）**——前五座借的都是原版类型（1 熔炉 / 2 化工 / 4 组装 / 5 粒子），所以原版机器也做得了那些配方；11 号只有这一座做得了，三条配方是它的专属。ERecipeType 是 int 枚举，(ERecipeType)11 不需要有名字就合法，原版占了 1~8 和 15，本 mod 已用 9（电化学）、10（氧化还原），11 是接着往下取的。",
@@ -173,8 +173,8 @@
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。温室就是一大片平铺的顶棚。",
       "modelScale": 0.72,
       "modelHeightScale": 0.75,
-      "tintR": 0.4840,
-      "tintG": 0.8800,
+      "tintR": 0.484,
+      "tintG": 0.88,
       "tintB": 0.5598
     },
     {
@@ -201,7 +201,7 @@
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。结晶塔略高于标准。",
       "modelScale": 0.62,
       "modelHeightScale": 1.05,
-      "tintR": 0.8800,
+      "tintR": 0.88,
       "tintG": 0.7219,
       "tintB": 0.6725
     },
@@ -231,7 +231,7 @@
       "modelHeightScale": 1.45,
       "tintR": 0.6194,
       "tintG": 0.8394,
-      "tintB": 0.8800
+      "tintB": 0.88
     },
     {
       "//": "第九座，也是**第一座能跑多种配方类型的机器**。化学（2）、电化学（9）、氧化还原（10）三类它全接，速度还是 10000 倍。",
@@ -249,7 +249,11 @@
       "description": "把化工、电化学与氧化还原三套反应塔并进一个壳子里的巨构。三类反应对温度、压力和电极的要求本来互不相容，能塞进同一台机器靠的是内部分区——每一区各自控温控压，共用同一套进出料与冷却回路。代价是它吃电吃得惊人，而且造一台要拆掉一千台燔石化工厂。",
       "iconName": "omni-chem",
       "recipeType": 16,
-      "acceptsRecipeTypes": [2, 9, 10],
+      "acceptsRecipeTypes": [
+        2,
+        9,
+        10
+      ],
       "machineTypeName": "综合化学设备",
       "gridRow": 1,
       "gridCol": 10,
@@ -257,29 +261,29 @@
       "//power-knob": "**这个数是平衡旋钮，不是推出来的。** 按「它顶三台燔石化工厂」推出来是 72 MW，那也是先前的值；现在这一档是那个数的五倍，理由是平衡而不是物理：它是三类化学配方**唯一的** 10000 倍速通路，建造门槛（1000 台燔石化工厂）是一次性的，长期制衡只能落在电价上。本仓库的规矩是旋钮就说是旋钮，别硬套一个推导。",
       "idleEnergyPerTick": 1000000,
       "workEnergyPerTick": 6000000,
-      "recipeItems": [6002, 6502],
-      "recipeItemCounts": [1000, 1000],
+      "recipeItems": [
+        6002,
+        6502
+      ],
+      "recipeItemCounts": [
+        1000,
+        1000
+      ],
       "recipeTimeSpend": 600,
       "//shape": "体量旋钮。**不给这两个数的话，Place 会把每座都缩放到填满原版占地、再用原版高度封顶，九座的体量就被归一化成同一个盒子**——细节画得再不同也会被抹平。精馏塔顶着，比催化反应器还高一线。",
       "modelScale": 0.56,
-      "modelHeightScale": 1.50,
-      "tintR": 0.8800,
-      "tintG": 0.4840,
+      "modelHeightScale": 1.5,
+      "tintR": 0.88,
+      "tintG": 0.484,
       "tintB": 0.8188
     },
     {
       "//": "第十座，也是**第一台既是组装机又是发电机的建筑**。它把还原剂和氧化剂压成药柱（组装机那一侧），再把刚压出来的药柱直接烧掉发电（发电机那一侧），中间不经过传送带。",
-
       "//the-retraction": "CLAUDE.md 长期写着「DSP 的组件模型表达不了『边转化边发电』」——**那句话只对了一半，这一座就是订正**。一个组件确实做不到；但一台实体挂两个组件做得到：CreateEntityLogicComponents 里 isPowerGen(IL 059E) 和 isAssembler(IL 1122) 是两个完全独立的顺序 if，EntityData 也有各自的 powerGenId / assemblerId / stationId / powerConId 四个字段。先例是综合物流枢纽同时挂 station 和 dispenser。",
-
       "//how-it-self-feeds": "PowerGeneratorComponent.SetNewFuel(itemId, count, inc) 是公开方法，自己会从 LDB 取 HeatValue 填 fuelHeat；EnergyCap_Fuel 只看 fuelCount > 0，**烧的时候不查 fuelMask**（掩码只是传送带取料的过滤器）。所以「把自己的产物搬进自己的燃料舱」是一次普通方法调用，零 transpiler。搬运挂在 MegaAssemblerPatches.MegaTick 上。",
-
       "//recipeType": "17。ERecipeType 没有上限（枚举没有 Max 哨兵、没有数组按它下标、两个 switch 超范围都落 default、productionMask 不是按类型置位），推导记在 CLAUDE.md。16 是综合化学厂那张兼容表的键，往下取 17。",
-
       "//model": "702。703~727 已被巨型建筑、克隆机器和矿脉排满，而 728 会被 ResolveModelId 拒绝（上限 dataArray.Length + 64 - 1 = 727），所以只能继续往下取。**启动日志里会打出实际分配到的模型 ID——如果不是 702，就把这里改成日志里那个数**，模型 ID 是进存档的。",
-
       "//slot": "建造栏第 1 行第 11 槽。1~10 已满（其中第 7 槽是 machines.json 里的风力发电机集群，两个文件共用同一片槽位空间）。**第 11 槽超出了子项行的 10 个按钮**，所以启动时 BuildMenuSlotGuardPatches 会照例报一条 WARNING——那是预期的，建筑仍然可以横向滚动到（电化学厂在 BuildIndex 511 上已经验证过同一件事）。",
-
       "itemId": 6509,
       "modelId": 702,
       "recipeId": 6509,
@@ -291,11 +295,9 @@
       "gridRow": 1,
       "gridCol": 11,
       "slot": 11,
-
       "//power-in": "组装机那一侧照常耗电：待机 30 MW、工作 180 MW。和它自己发的 30 GW 比是千分之六——一座电厂当然要净输出，这两个数存在只是为了让「断电就停产」这条规则对它同样成立。",
       "idleEnergyPerTick": 500000,
       "workEnergyPerTick": 3000000,
-
       "//generator": "发电段。genEnergyPerTick × 60 = 30 GW。",
       "//eta": "0.636 = 3000 ℃ 火焰按 combustibles.json 那套算出来的（0.7 × 卡诺，冷端 298.15 K）。**顺带一个反直觉的测算结果：卡诺在这里已经饱和了**——2000 ℃ 的氨是 0.6082，再高一千度只多三个百分点。所以这座建筑卖的不可能是效率，只能是功率密度：燃料自带氧化剂、不吸空气、没有烟气体积，同一套汽轮机吞得下的功率高一个量级。",
       "//power-knob": "**30 GW 是平衡旋钮，锚在它自己的建造配方上。** 造它要拆 100 台可燃性液体发电厂（100 × 216 MW = 21.6 GW），所以 30 GW 的意思是「比拆掉的那些强，但不是强一个数量级」——真正的卖点是它不需要外接燃料线、只占一格地、一个电网接口。按仓库的规矩，旋钮就说是旋钮。",
@@ -306,20 +308,49 @@
         "fuelMask": 32,
         "connectFromItemId": 2204
       },
-
       "//recipeItems": "6625 = 可燃性液体发电厂（machines.json 里那座），6002 = 能量矩阵。",
-      "recipeItems": [6625, 6002],
-      "recipeItemCounts": [100, 1000],
+      "recipeItems": [
+        6625,
+        6002
+      ],
+      "recipeItemCounts": [
+        100,
+        1000
+      ],
       "recipeTimeSpend": 600,
-
       "//shape": "体量旋钮。宽而不高：一排压机加一座矮胖的燃烧室和排气塔，和精馏塔顶着的综合化学厂（0.56/1.50）刚好相反。",
       "modelScale": 0.82,
       "modelHeightScale": 0.9,
-
       "//tint": "橙红。饱和度 0.45 封顶、明度 0.88 保底——_Color 是乘在生成的图集上的（PlateLight 196/200/208），压太深整座建筑就发黑。",
       "tintR": 0.95,
       "tintG": 0.564,
       "tintB": 0.4845
+    },
+    {
+      "//": "第十一台，也是**品质的唯一来源**。设计稿第 5.2 节：品质不是采出来的，是炼出来的——采矿站出的矿品质为 0，只有跑过这里的提纯配方才带品质。",
+      "//how": "它不需要任何新管线：提纯配方的产物落进这台建筑**自己的物流站 Supply 槽位**时，QualityRefineryPatches 按配方声明的「每件品质分」注入到 StationStore.qua。而 StationStore.qua 早就是主干道载荷、早就进存档、早就能在站点面板上看见。",
+      "//why-not-recipe-side": "让原版装配逻辑把品质带到产物上是做不到的：AssemblerComponent 只有输入侧有品质（incServed），产物侧连 incProduced 都没有，没有可孪生的字段。补那一块是阶段 3 的活。",
+      "//recipeType": "18。ERecipeType 没有上限（CLAUDE.md 已核实：枚举没有 Max 哨兵、没有按它下标的数组、两个 switch 都走 default、productionMask 不是按类型给位），9~14 和 16、17 已占，顺取 18。",
+      "//model": "700。702~727 全被占了，700 是 664~727 这段自由区里仅剩的一个。**模型 ID 进存档**，所以启动日志里要是说「期望的模型 ID 700 不可用，改用 X」，就得把 X 写回来这里钉死。",
+      "//slot": "建造栏第 1 类第 12 槽。和第 11 槽一样超出界面的 10 个按钮，启动时会有一条 WARNING，靠滚动到得了——BuildMenuSlotGuardPatches 的那条提示说的就是这个。",
+      "itemId": 6659,
+      "modelId": 700,
+      "recipeId": 6671,
+      "displayName": "同位提纯厂",
+      "description": "把「够用」和「极纯」之间那道坎工业化的地方。三条工艺各走各的路——电解精炼靠电流一个原子一个原子地搬，区域熔炼靠一圈熔区把杂质赶到锭子尾巴上，羰基提纯靠一氧化碳只牵得动铁这一件事。共同点是都要扔掉大半的料：纯度从来不是省出来的，是挑出来的。",
+      "iconName": "refinery-plant",
+      "recipeType": 18,
+      "machineTypeName": "提纯设备",
+      "gridRow": 1,
+      "gridCol": 12,
+      "slot": 12,
+      "idleEnergyPerTick": 500000,
+      "workEnergyPerTick": 3000000,
+      "modelScale": 0.58,
+      "modelHeightScale": 1.35,
+      "tintR": 0.62,
+      "tintG": 0.78,
+      "tintB": 0.88
     }
   ],
   "//replicatorPages": "合成器（Ctrl+替换/制造界面）横向翻页的总页数，每页 14 列。原版每个分页是 8 行 × 14 列、第 1 页几乎满了；开了之后底部会出现一根横向滚动条，可以左右拉动看后面几页。1 = 维持原版、不加滚动条。注意第 9 行及以后原版根本不画（RefreshRecipeIcons 里 row >= 8 直接跳过），所以扩容只能往列上走。",
