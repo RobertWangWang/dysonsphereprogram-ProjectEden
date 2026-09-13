@@ -434,8 +434,8 @@ namespace ProjectEden.Preloader
                             + " / 作废 " + string.Join(",", dead.Select(v => "V_" + v.Index).ToArray()));
 
                 foreach (Stmt st in stmts)
-                    r.Notes.Add($"[dbg]   IL_{code[st.From].Offset:X4}-{code[st.To].Offset:X4} "
-                                + $"{(st.Synth ? "合成 " : "")}{st.Core}");
+                    r.Notes.Add($"[dbg]   IL_{code[st.TrueFrom].Offset:X4}/{code[st.From].Offset:X4}"
+                                + $"-{code[st.To].Offset:X4} {(st.Synth ? "合成 " : "")}{st.Core}");
             }
 
             // 2) 逐语句匹配
@@ -689,8 +689,13 @@ namespace ProjectEden.Preloader
                 bool isMerge = merge;
 
                 start = i + 1;
-                hard = i + 1;
                 merge = false;
+
+                // **汇合点切出来的那一截不算「栈意义上的语句」**，所以它不能推进 hard。
+                // 推进了的话，`storage[k].inc = 条件 ? a : b` 里那条只有一个 nop 的空语句
+                // 会把 hard 顶到 stfld 自己身上，于是目的地对象再也找不回来——
+                // 表现是整族「拼不出来」，而对象就在四条指令之前。
+                if (!isMerge) hard = i + 1;
 
                 if (!HasMainline(code, from, to, twin)) continue;
 
@@ -719,6 +724,7 @@ namespace ProjectEden.Preloader
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
             "call:get_Value ldfld:PAY stloc",
             "ldfld:PAY mul sub stloc",
+            "ldfld:PAY div mul ldc add stloc",
             "call:split_inc stloc",  // local = split_inc(ref n, ref m, p)
         }, StringComparer.Ordinal);
 
@@ -1018,6 +1024,15 @@ namespace ProjectEden.Preloader
 
                 if (code[to].OpCode == OpCodes.Ldarga || code[to].OpCode == OpCodes.Ldarga_S)
                     return p == null ? null : new List<Instruction> { Instruction.Create(OpCodes.Ldarg, p) };
+
+                // 托管指针存在局部里（`ref` 局部）：取它的值要解引用，宽度按指向的类型。
+                if (IsLdloc(code[to]) && VarOf(ctx.Method, code[to]) is VariableDefinition rv
+                    && rv.VariableType is ByReferenceType bt)
+                    return new List<Instruction>
+                    {
+                        Instruction.Create(OpCodes.Ldloc, rv),
+                        Instruction.Create(DerefFor(bt.ElementType)),
+                    };
             }
 
             // 字段地址：把地址表达式原样重放再解引用。地址表达式是纯取值，重放没有副作用。
@@ -1172,6 +1187,19 @@ namespace ProjectEden.Preloader
             }
 
             return null;
+        }
+
+        /// <summary>按指向的类型挑解引用指令——宽度错了读出来的是别的字节。</summary>
+        private static OpCode DerefFor(TypeReference t)
+        {
+            switch (t.MetadataType)
+            {
+                case MetadataType.SByte: return OpCodes.Ldind_I1;
+                case MetadataType.Byte: return OpCodes.Ldind_U1;
+                case MetadataType.Int16: return OpCodes.Ldind_I2;
+                case MetadataType.UInt16: return OpCodes.Ldind_U2;
+                default: return OpCodes.Ldind_I4;
+            }
         }
 
         private static bool IsLdind(Instruction i) =>
@@ -1360,6 +1388,21 @@ namespace ProjectEden.Preloader
             return v != null && !carriers.Contains(v);
         }
 
+        /// <summary>这个方法体里有没有新建<paramref name="t"/> 的容器（<c>newarr</c>/<c>newobj</c>）。</summary>
+        private static bool AllocatesFresh(MethodDefinition m, TypeReference t)
+        {
+            foreach (Instruction i in m.Body.Instructions)
+            {
+                if (i.OpCode == OpCodes.Newarr && i.Operand is TypeReference at
+                    && at.FullName == t.FullName) return true;
+
+                if (i.OpCode == OpCodes.Newobj && i.Operand is MethodReference mr
+                    && mr.DeclaringType.FullName == t.FullName) return true;
+            }
+
+            return false;
+        }
+
         /// <summary>这一段里有没有 <c>BinaryReader</c> 的读调用——即「值来自存档」。</summary>
         private static bool ReadsSave(IList<Instruction> code, int from, int to)
         {
@@ -1534,17 +1577,31 @@ namespace ProjectEden.Preloader
                 {
                     if (tf == null) return null;
 
+                    // 从存档读进来、而且两个版本分支各读一种宽度：值那一侧是个 phi，
+                    // 往回数实参会撞上分支目标，重放也会把读操作做第二遍。
+                    // 这一族的品质本来就是 0（写侧还没进存档），所以只要把目的地对象
+                    // 重放出来就够——对象在汇合**之前**压栈，从 TrueFrom 往后找。
+                    // 判据是这条语句里真的有 BinaryReader 调用，不是「拼不出来就当 0」。
+                    // 往回多看一小段：版本分支把语句切碎了，TrueFrom 只落在 stfld 自己身上,
+                    // 而那条 BinaryReader 调用就在前面几条指令。窗口写死，宁可看不见也不乱认。
+                    if (ReadsSave(code, Math.Min(job.TrueFrom, job.From - 16), job.To))
+                    {
+                        List<Instruction> z = ZeroInto(ctx, code, job, tf);
+
+                        if (z != null) return z;
+
+                        // 目的地对象拼不回来（值那一侧是版本分支的 phi，栈上的对象在汇合之前
+                        // 就压好了，后向回溯跨不过去）。**但这里确实什么都不用做**：
+                        // 这个方法自己 newarr 出了容器，每个元素的孪生字段天生就是 0。
+                        // 这是核实过的依据，不是「拼不出来就当没事」——核实不了就照样报缺口。
+                        if (AllocatesFresh(ctx.Method, tf.DeclaringType)) return new List<Instruction>();
+
+                        return null;
+                    }
+
                     int[] a = ArgStarts(code, job.To, 2);
 
-                    // 从存档读进来、而且两个版本分支各读一种宽度：值那一侧是个 phi，
-                    // 往回数实参会撞上分支目标。这一族的品质本来就是 0（写侧还没进存档），
-                    // 所以只要把目的地对象重放出来就够——对象在汇合**之前**压栈，
-                    // 从 TrueFrom 往后找。判据是这条语句里真的有 BinaryReader 调用，
-                    // 不是「拼不出来就当 0」。
-                    if (a == null)
-                        return ReadsSave(code, job.TrueFrom, job.To)
-                            ? ZeroInto(ctx, code, job, tf)
-                            : null;
+                    if (a == null) return null;
 
                     int objFrom = a[0], valFrom = a[1];
 
@@ -1694,10 +1751,19 @@ namespace ProjectEden.Preloader
             // 所以这里只取载荷那一半：`incServedQua[i] = 0`。
             case "ldfld:PAY ldc dup stloc stelem stelem":
             {
-                int inner = job.To - 1;
+                // **内层那条 stelem 不一定在 To-1。** `served[i] = (incServed[i] = 0)` 的尾巴是
+                // `stelem.i4 ; ldloc 副本 ; stelem.i4`——按 To-1 找会落在中间那条 ldloc 上。
+                var inner = -1;
 
-                if (code[inner].OpCode != OpCodes.Stelem_I4 && code[inner].OpCode != OpCodes.Stelem_Any)
-                    return null;
+                for (int k = job.From; k < job.To; k++)
+                    if (code[k].OpCode.Name.StartsWith("stelem", StringComparison.Ordinal))
+                    {
+                        inner = k;
+
+                        break;
+                    }
+
+                if (inner < 0) return null;
 
                 int[] ea = ArgStarts(code, inner, 3);
 
@@ -1835,6 +1901,7 @@ namespace ProjectEden.Preloader
                 case "call:get_Value ldfld:PAY stloc":   // V = kvp.Value.inc（取值器已核实是纯读字段）
                 case "calc stloc":                       // V = 件数 × 每件品质分（纯算术）
                 case "ldfld:PAY mul sub stloc":          // V = X.inc - 等级 × 件数
+                case "ldfld:PAY div mul ldc add stloc":   // V = (点数/件数) × 新件数 + 0.5（自动集装机）
                 {
                     VariableDefinition dst = VarOf(ctx.Method, store);
 
@@ -2089,6 +2156,19 @@ namespace ProjectEden.Preloader
         /// </summary>
         private static List<Instruction> TwinValue(Ctx ctx, IList<Instruction> code, int from, int to)
         {
+            // (0.1) 收尾的转换指令原样带走：`X.inc ; conv.r4` 的品质版就是 `X.qua ; conv.r4`。
+            // 自动集装机那条是浮点算式（`inc / stack * newStack + 0.5f`），不放行就整条拼不出来。
+            if (to > from && code[to].OpCode.Name.StartsWith("conv.", StringComparison.Ordinal))
+            {
+                List<Instruction> inner = TwinValue(ctx, code, from, to - 1);
+
+                if (inner == null) return null;
+
+                inner.Add(Clone(code[to]));
+
+                return inner;
+            }
+
             // (0) split_inc(ref n, ref m, p) 这个**表达式**的品质版。
             //
             // 放在 TwinValue 里而不是各写一个发射器，是因为它出现在五种不同的目的地上
@@ -2210,7 +2290,7 @@ namespace ProjectEden.Preloader
                    || n.StartsWith("ldsfld", StringComparison.Ordinal)
                    || n.StartsWith("ldelem", StringComparison.Ordinal)
                    || n.StartsWith("ldc", StringComparison.Ordinal)
-                   || n == "dup" || n == "conv.i4" || n == "conv.u1" || n == "conv.i2"
+                   || n == "dup" || n.StartsWith("conv.", StringComparison.Ordinal)
                    // 解引用是纯读：`*count` 这种实参在 split_inc 的第三个位置上很常见,
                    // 不放行的话整条 split 都拼不出来。
                    || n.StartsWith("ldind.", StringComparison.Ordinal)
@@ -2427,6 +2507,7 @@ namespace ProjectEden.Preloader
             // 表达式递归（加减乘除）打通的几种：取值器前缀、两个载荷相加、按系数缩放
             "call:get_Value ldfld:PAY stloc",
             "calc stloc",
+            "ldfld:PAY div mul ldc add stloc",
             "call:get_package ldc stfld:PAY",
             "ldfld:PAY ldfld:PAY add stfld:PAY",
             "ldfld:PAY mul sub stloc",
