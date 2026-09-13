@@ -152,14 +152,16 @@ namespace ProjectEden.Patches
             label.raycastTarget = false;
             label.enabled = false;
 
-            // **颜色要在两种底色上都读得出来。** 条的填充是浅色、未填充部分是深色,
-            // 而这个标签会随着填充推进从深底变成浅底。暖色加一圈黑描边,
-            // 两种底色下都不会消失——只挑一种颜色的话，总有一半时间看不见。
-            label.color = new Color(1f, 0.72f, 0.22f);
+            // 黑字（所有者指定）。
+            //
+            // **描边跟着翻成浅色，这不是装饰。** 这个标签所在的位置，底色会随着填充推进
+            // 从深变浅：纯黑字在浅色填充上很清楚，在未填充的深色段上会直接消失。
+            // 浅色描边只在深底那一半起作用，浅底那一半几乎看不出来。
+            label.color = new Color(0.05f, 0.06f, 0.08f);
 
             var outline = go.GetComponent<Outline>() ?? go.AddComponent<Outline>();
 
-            outline.effectColor = new Color(0f, 0f, 0f, 1f);
+            outline.effectColor = new Color(0.92f, 0.95f, 1f, 0.9f);
             outline.effectDistance = new Vector2(1.5f, -1.5f);
 
             if (!_reported)
