@@ -181,49 +181,70 @@ namespace ProjectEden.Compatibility
         /// <summary>
         /// 把对<b>原版字节签名</b>的调用换成本类的垫片。
         ///
-        /// 判据是「方法名对上 + 参数里有 Byte」——加宽之后游戏里真正存在的那个签名
-        /// 一个 Byte 都没有，所以这个判断不会误伤到已经好的调用。
+        /// <b>判据是「操作数为 null」，这一点和直觉相反，是实测逼出来的。</b>
+        /// 第一版按「方法名 + 参数里有 Byte」匹配，一处都没命中，而且让 Harmony 当场炸：
+        /// <code>
+        ///   Failed to patch ...: ArgumentNullException: Invalid argument for callvirt NULL
+        /// </code>
+        /// 原因是 Harmony 读 IL 时要把每条 MemberRef 解析成 <c>MethodInfo</c>，
+        /// 而这条 MemberRef 指向的签名<b>已经被 preloader 改掉、不存在了</b>——
+        /// 解析不出来，<c>operand</c> 就是 <c>null</c>。于是
+        /// <c>ins.operand as MethodInfo</c> 永远是 null、永远不匹配，
+        /// 那条 <c>callvirt null</c> 原样留下，Harmony 写回时抛异常。
+        ///
+        /// CLAUDE.md 里记的是这个错误的<b>另一半</b>——「<b>我们自己</b>把 null 当操作数发射出去」。
+        /// 这次是反过来：<b>Harmony 读进来就是 null</b>。同一个异常，来源相反。
+        ///
+        /// 所以改成：找那条<b>操作数为 null 的调用</b>。身份信息已经在解析时丢了，
+        /// 但离线实测早就确定了每个方法各自调的是哪一个（一个方法一处），
+        /// 所以按 <paramref name="original"/> 的所属类型分派，并且<b>断言正好一处</b>——
+        /// 多了少了都说明 UXAssist 变了，那时宁可不改。
         /// </summary>
-        private static IEnumerable<CodeInstruction> Reroute(IEnumerable<CodeInstruction> instructions)
+        private static IEnumerable<CodeInstruction> Reroute(
+            IEnumerable<CodeInstruction> instructions, MethodBase original)
         {
-            MethodInfo shimInsert = AccessTools.Method(typeof(UXAssistCompat), nameof(ShimTryInsertItem));
-            MethodInfo shimInto = AccessTools.Method(typeof(UXAssistCompat), nameof(ShimInsertInto));
+            var code = new List<CodeInstruction>(instructions);
 
-            var hits = 0;
+            string owner = original?.DeclaringType?.Name ?? "?";
 
-            foreach (CodeInstruction ins in instructions)
+            MethodInfo shim =
+                owner == "BeltSignalsForBuyOut"
+                    ? AccessTools.Method(typeof(UXAssistCompat), nameof(ShimTryInsertItem))
+                    : owner == "ProtectVeinsFromExhaustion"
+                        ? AccessTools.Method(typeof(UXAssistCompat), nameof(ShimInsertInto))
+                        : null;
+
+            if (shim == null)
             {
-                var mr = ins.operand as MethodInfo;
+                ProjectEdenPlugin.Log.LogWarning($"UXAssist 兼容：不认识的宿主类型 {owner}，不改");
 
-                if (mr != null && HasByte(mr))
-                {
-                    if (mr.Name == "TryInsertItem" && mr.DeclaringType == typeof(CargoPath))
-                    {
-                        // 就地改写而不是换对象：原指令上可能挂着跳转标签
-                        ins.opcode = OpCodes.Call;
-                        ins.operand = shimInsert;
-
-                        hits++;
-                    }
-                    else if (mr.Name == "InsertInto" && mr.DeclaringType == typeof(PlanetFactory))
-                    {
-                        ins.opcode = OpCodes.Call;
-                        ins.operand = shimInto;
-
-                        hits++;
-                    }
-                }
-
-                yield return ins;
+                return code;
             }
 
-            _patched += hits;
-        }
+            var spots = new List<int>();
 
-        private static bool HasByte(MethodInfo m) =>
-            m.GetParameters().Any(p =>
-                p.ParameterType == typeof(byte) ||
-                (p.ParameterType.IsByRef && p.ParameterType.GetElementType() == typeof(byte)));
+            for (var i = 0; i < code.Count; i++)
+                if ((code[i].opcode == OpCodes.Call || code[i].opcode == OpCodes.Callvirt) &&
+                    code[i].operand == null)
+                    spots.Add(i);
+
+            if (spots.Count != 1)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"UXAssist 兼容：{owner} 里解析不出来的调用有 {spots.Count} 处，期望正好 1 处——" +
+                    "UXAssist 的实现可能变了，这次不改（它仍会抛 MissingMethodException）");
+
+                return code;
+            }
+
+            // 就地改写而不是换对象：原指令上可能挂着跳转标签
+            code[spots[0]].opcode = OpCodes.Call;
+            code[spots[0]].operand = shim;
+
+            _patched++;
+
+            return code;
+        }
 
         // ── 垫片：字节进、字节出，中间走加宽后的真实 API ──
         //

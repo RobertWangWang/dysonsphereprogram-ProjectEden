@@ -2195,6 +2195,24 @@ forwarder would be transpiled too and the same logic would run twice; other mods
 strategies are not knowable at all. (CLAUDE.md already records `AmbiguousMatchException`
 from name-based patching of overloads as a crash that takes the whole mod down.)
 
+**A transpiler over another mod's broken call cannot match on the method — because Harmony
+hands it a `null` operand.** Harmony's `MethodBodyReader` resolves every MemberRef to a
+`MethodInfo` while reading the body; a MemberRef naming a signature the preloader has
+already changed **cannot be resolved**, so `CodeInstruction.operand` is null. Matching on
+`operand as MethodInfo` therefore never fires, the `callvirt null` survives the transpiler,
+and Harmony's writer throws:
+
+```
+Failed to patch ...: ArgumentNullException: Invalid argument for callvirt NULL
+```
+
+This file already records that exception — from the **opposite direction**, where *we*
+emitted a null operand by resolving a `MethodInfo` that came back null. Same exception,
+reversed cause. The matcher must therefore key on **"a call whose operand is null"**, and
+since resolution has destroyed the identity, on which *method is being patched* for the
+rest: measured offline, each of the two UXAssist methods has exactly one such call, so the
+transpiler asserts exactly one and refuses to touch anything otherwise.
+
 **The measurement method matters here, because the first attempt got it wrong.** Comparing
 pre/post signatures by *name + parameter count* reports 1277 changes — almost all of them
 overload pairs like `VectorLF3::.ctor(Single,Single,Single)` vs `(Double,Double,Double)`
