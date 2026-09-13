@@ -228,5 +228,23 @@ namespace ProjectEden.Utils
 
         /// <summary>单座建筑的建造耗时（帧）。0 = 沿用全局</summary>
         public int recipeTimeSpend;
+
+        /// <summary>
+        /// 这一座的体量缩放，覆盖顶层的 <c>modelScale</c>。0 = 沿用全局。
+        ///
+        /// <b>它和下面那个高度倍率一起，是「九座长得都差不多」的解药。</b>
+        /// <c>MeshKit.Place</c> 会把每座都缩放到填满原版占地，所以体量本来是被归一化的——
+        /// 细节画得再不同，一归一化就全抹平了。
+        /// </summary>
+        public float modelScale;
+
+        /// <summary>
+        /// 允许这一座长到原版包围盒高度的几倍。0 = 1 倍（原版行为）。
+        ///
+        /// 精馏塔、提升管那种就该细高（1.4~1.5），对撞机、温室那种就该矮宽（0.75~0.85）。
+        /// 不给这个旋钮的话，细高的设计会被高度封顶连带把占地一起压小，
+        /// 最后和矮胖的设计落到同一个体量上。
+        /// </summary>
+        public float modelHeightScale;
     }
 }

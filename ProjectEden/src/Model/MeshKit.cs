@@ -309,7 +309,18 @@ namespace ProjectEden.Model
         ///
         /// 水平方向只按 X/Z 算比例、再用高度封顶，是因为玩家在意的是占地，不是高度。
         /// </summary>
-        public void Place(Bounds reference, float scaleMul)
+        /// <summary>
+        /// 把生成的形体摆进原版的包围盒。
+        ///
+        /// <b><c>heightMul</c> 是后加的，而它修的是「九座长得都差不多」这个问题的根因。</b>
+        /// 原先的逻辑是：先按填满原版占地定缩放，再拿原版高度封顶——于是一个细高的设计
+        /// 会被压两次（高度封顶把缩放压下来，占地跟着一起缩），最后和一个矮胖的设计
+        /// 落到几乎一样的体量上。细节画得再不一样，体量一归一化就全抹平了。
+        ///
+        /// 现在每座可以自己声明允许多高（相对原版包围盒）：精馏塔那种就该细高，
+        /// 对撞机那种就该矮宽。
+        /// </summary>
+        public void Place(Bounds reference, float scaleMul, float heightMul = 1f)
         {
             if (_verts.Count == 0) return;
 
@@ -323,8 +334,11 @@ namespace ProjectEden.Model
 
             float scale = Mathf.Min(reference.size.x / sx, reference.size.z / sz);
 
-            // 高度封顶：细高的造型不能因为占地够宽就顶到天上去
-            if (sy * scale > reference.size.y) scale = reference.size.y / sy;
+            // 高度封顶：细高的造型不能因为占地够宽就顶到天上去。
+            // heightMul 让每座自己定这个上限——默认 1 就是原版包围盒的高度
+            float maxHeight = reference.size.y * Mathf.Max(0.2f, heightMul);
+
+            if (sy * scale > maxHeight) scale = maxHeight / sy;
 
             scale *= Mathf.Max(0.05f, scaleMul);
 

@@ -829,6 +829,53 @@ Units are metres: `OnNodeAdded`/`OnConsumerAdded` project positions onto a spher
 
 **Every material write is guarded by `HasProperty`.** LODs need not share a shader, and Unity silently ignores a write to a property that does not exist — which would make "set it but saw nothing" indistinguishable from "there is no such property".
 
+**Two reasons the buildings rendered dark, and the tint one is entirely self-inflicted.**
+Reported as 「建模大多呈现为黑色而且用到的细节都差不多」, and both halves measured out rather than
+guessed at.
+
+*(a) `_Color` multiplies the generated atlas, and the tints were tuned for a world that no longer
+exists.* The nine `tintR/G/B` triples date from when all the mega buildings shared **one** vanilla
+mesh and tinting was the only way to tell them apart — so they were pushed to saturation 0.6–0.83.
+Now each building has its own generated mesh **and** its own light-grey detail atlas (the dominant
+`PlateLight` cell is 196/200/208), and `material.SetColor("_Color", …)` multiplies that. Computing
+`atlas × tint` for all nine: **six of them land below luminance 110**, 熔岩冷却厂 at 60 and 观微对撞机
+at 52. That is the reported black. The rule now is **hue carries the identity, the atlas carries the
+light**: saturation capped at 0.45, value floored at 0.88, which lifts every building to ≥ 108 and
+most above 130 without touching a single hue.
+
+*(b) `_MS_Tex` still samples vanilla's map through our completely different UVs*, which is
+arbitrary metalness on top of an already dark albedo. The switch stays **off** by default — that is
+the retraction recorded above, and it stands — but `BuildingTexture.MeasuredMetalSmooth` no longer
+fills the constant with an invented `(70,150,0,150)`. It **reads vanilla's own map and takes the
+whole-image mean** (Blit → RenderTexture → ReadPixels, the `IconTinter` technique). The channel
+packing is still unknown and **still does not need to be known**: a mean of the real texture lands
+inside the range vanilla itself uses, so the worst case is "looks like an ordinary vanilla surface"
+rather than "the building is invisible". If the read fails it returns null and the caller falls back
+to vanilla's map with a WARNING.
+
+**And the silhouettes were being normalised away by `MeshKit.Place` itself.** It scaled every
+generated shape to *fill the reference footprint* (`min(refX/sx, refZ/sz)`) and only then capped
+height against the reference — so a tall design was squashed **twice**: the height cap pulled the
+scale down, and the footprint shrank with it. A distillation column and a particle ring came out as
+the same squat block no matter how differently they were authored. **No amount of extra detail
+vocabulary fixes that**, which is why "the details all look alike" was really a proportions problem.
+`Place` now takes a `heightMul`, and each building declares its own `modelScale` /
+`modelHeightScale` in `megabuildings.json` — 观微对撞机 0.74/0.78 (widest, flattest) through
+综合化学厂 0.56/1.50 (narrowest, tallest).
+
+**And the icon colour is now derived from the tint instead of being a second hand-kept copy.**
+Reported as 「外观的主色调和 icon 的颜色不同步」. Measuring the two sets showed the **hues had
+never drifted** (0–12° apart across all nine) — what had drifted was saturation and value, and it
+drifted the moment the tints were re-tuned above: buildings went to sat ≤ 0.45 / value ≥ 0.88 while
+`make_icons.py` still held nine hardcoded hexes at sat 0.30–0.83 / value 0.42–0.99. Two hand-kept
+copies of the same fact will always separate; the only question is when.
+
+`make_icons.py` now **reads `megabuildings.json` itself**. `building_color(itemId)` returns
+`PlateLight × tint` — the colour the building actually renders as, since `_Color` multiplies the
+atlas — and `building_pal` derives the light/dark ramp from it. The nine hex literals are gone, so
+the build-bar icon is now a preview of the finished building rather than an approximation of it.
+Making the icons punchier again is one `mul` argument in one function, not nine edits.
+
 **Budget: 788–2036 triangles per building** (≈ 2.4k–6.1k vertices), the same order as a vanilla building. Face subdivision is capped at 6 per edge precisely so one large flat wall cannot explode.
 
 ### Extra recipes — `src/ExtraRecipeRegistry.cs`

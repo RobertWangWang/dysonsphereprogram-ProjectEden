@@ -722,6 +722,51 @@ def _pal(base):
     return _shade(base, 1.18), _shade(base, 0.82), _shade(base, 0.58), _shade(base, 0.34)
 
 
+
+# ── 建筑主色：从 megabuildings.json 算，不手写 ──────────────
+# <b>图标的颜色和建筑的颜色必须是同一个数，否则它们一定会走散。</b>
+# 在这之前两边是两份手工维护的副本：图标这里写死九个十六进制，建筑那边写 tintR/G/B。
+# 实测色相还对得上（差 0~12°），但饱和度和明度已经分家了——建筑那九个数为了不发黑
+# 被压到饱和 ≤0.45、明度 ≥0.88，图标这边还停在饱和 0.30~0.83、明度 0.42~0.99。
+# 报上来的就是「外观主色调和 icon 的颜色不同步」。
+#
+# 现在只有一个源：<b>建筑在游戏里的实际颜色</b>。游戏里 _Color 是**乘**在自绘图集上的，
+# 所以那个颜色 = 图集主钢板 × tint。图标直接用它，看到的就是建成之后的样子。
+
+_MEGA_JSON = pathlib.Path(__file__).resolve().parent.parent / "ProjectEden" / "data" / "megabuildings.json"
+
+# BuildingTexture.PlateLight —— 图集里占面积最大的那一格。改那边要同步改这里
+_PLATE = (196, 200, 208)
+
+_MEGA_TINT = {}
+
+
+def _load_mega_tints():
+    if _MEGA_TINT:
+        return _MEGA_TINT
+
+    import json
+
+    for b in json.loads(_MEGA_JSON.read_text(encoding="utf-8"))["buildings"]:
+        _MEGA_TINT[b["itemId"]] = (b["tintR"], b["tintG"], b["tintB"])
+
+    return _MEGA_TINT
+
+
+def building_color(item_id, mul=1.0):
+    """这座建筑在游戏里的实际主面颜色，返回 #rrggbb。"""
+    tint = _load_mega_tints()[item_id]
+
+    return "#%02x%02x%02x" % tuple(min(255, int(_PLATE[i] * tint[i] * mul + 0.5)) for i in range(3))
+
+
+def building_pal(item_id):
+    """(主色四档, 暗色四档)。暗色取主色的 0.62——和原先九个手写值的实测比例一致。"""
+    base = building_color(item_id)
+
+    return _pal(base), _pal(_shade(base, 0.62))
+
+
 # 等距：顶面菱形的半高 / 半宽。和 ingot() 那块保持一致（19/37）
 ISO = 0.51
 
@@ -786,8 +831,7 @@ GLOW = "#bfe8ff"
 def sky_assembler():
     """天工装配厂：三层收口台座 + 中央塔柱。"""
     d = canvas()
-    p = _pal("#e3843b")
-    dark = _pal("#8d5327")
+    p, dark = building_pal(6500)   # 主色跟着 megabuildings.json 的 tint 走
 
     _prism(d, 0, 24, 38, 9, p)
     _prism(d, 0, 8, 29, 9, p)
@@ -815,8 +859,7 @@ def sky_assembler():
 def lysis_tower():
     """冶铸熔炉：细高塔 + 环形散热鳍。五座里唯一的竖向轮廓。"""
     d = canvas()
-    p = _pal("#4f80f7")
-    dark = _pal("#2b4a94")
+    p, dark = building_pal(6501)   # 主色跟着 megabuildings.json 的 tint 走
 
     _prism(d, 0, 30, 34, 8, dark)
     _cyl(d, 0, -24, 13, 50, p, cap_gloss=0.32)
@@ -839,8 +882,7 @@ def lysis_tower():
 def chem_plant():
     """燔石化工厂：三只立罐 + 横管 + 细烟囱。"""
     d = canvas()
-    p = _pal("#fcdb2b")
-    dark = _pal("#9a8213")
+    p, dark = building_pal(6502)   # 主色跟着 megabuildings.json 的 tint 走
 
     _prism(d, 0, 28, 38, 7, dark)
 
@@ -864,8 +906,7 @@ def chem_plant():
 def mega_assembler():
     """锤锻精工厂：低矮机身 + 龙门架。"""
     d = canvas()
-    p = _pal("#d94a59")
-    dark = _pal("#7d2833")
+    p, dark = building_pal(6503)   # 主色跟着 megabuildings.json 的 tint 走
 
     _prism(d, 0, 22, 38, 12, p, gloss=0.26)
     _prism(d, 0, 6, 30, 8, p)
@@ -884,8 +925,7 @@ def mega_assembler():
 def particle_collider():
     """观微对撞机：圆环 + 中央靶室。五座里唯一的圆形轮廓。"""
     d = canvas()
-    p = _pal("#6f55a8")
-    dark = _pal("#3b2c5c")
+    p, dark = building_pal(6504)   # 主色跟着 megabuildings.json 的 tint 走
 
     _prism(d, 0, 30, 38, 7, dark)
 
@@ -911,8 +951,7 @@ def bio_greenhouse():
     没有它，穹顶在小尺寸下就是一坨果冻，看不出是玻璃房。
     """
     d = canvas()
-    p = _pal("#46b95c")
-    dark = _pal("#1b5c2c")
+    p, dark = building_pal(6505)   # 主色跟着 megabuildings.json 的 tint 走
     glass = "#93efb6"
 
     _prism(d, 0, 30, 38, 8, dark)
@@ -1797,10 +1836,9 @@ def lava_cooler():
     **冷与热的对比就是这张图的全部信息**，别的都可以糊掉。
     """
     d = canvas()
-    p = _pal("#6b5347")          # 冷玄武岩：池壁与机身
-    dark = _pal("#3a2c25")       # 底盘
-    tower = _pal("#8f7362")      # 塔身比池壁亮一档，免得糊成一团
-    tower_bk = _pal("#54423a")   # 后两座压暗
+    p, dark = building_pal(6506)   # 主色跟着 megabuildings.json 的 tint 走
+    tower = _pal(_shade(building_color(6506), 1.34))      # 塔身比池壁亮一档，免得糊成一团
+    tower_bk = _pal(_shade(building_color(6506), 0.79))   # 后两座压暗
     melt = "#ff9d1c"
     melt_hi = "#ffdc63"
     ring = "#d98b2b"
@@ -2016,8 +2054,7 @@ def catalytic_reactor():
     分开的东西——燔石化工厂那张已经占了「几只立罐 + 横管」，不能再撞。
     """
     d = canvas()
-    p = _pal("#6b9198")          # 建筑 tint：分子筛的灰青
-    dark = _pal("#3d565c")       # 底盘与管道
+    p, dark = building_pal(6507)   # 主色跟着 megabuildings.json 的 tint 走
     pipe = dark[2]
 
     _prism(d, 0, 32, 38, 7, dark)
@@ -2403,8 +2440,7 @@ def omni_chem():
     """
     d = canvas()
 
-    p = _pal("#cd52ba")          # 品红：八座里没有的色相，和观微对撞机的紫（259°）分得开
-    dark = _pal("#7a2d6e")
+    p, dark = building_pal(6508)   # 主色跟着 megabuildings.json 的 tint 走
     steel = _pal("#8e94a3")
 
     # 宽底座：比三只塔的跨度还要宽出一截，它们才读得出是「被装进去的」

@@ -70,15 +70,35 @@ namespace ProjectEden.Model
         }
 
         /// <summary>
-        /// 一张常量值的「金属度 / 光滑度」图。
+        /// 一张常量值的「金属度 / 光滑度」图，<b>常量是从原版那张图上量出来的，不是写死的</b>。
         ///
-        /// 换了 UV 之后再让 <c>_MS_Tex</c> 沿用原版那张，会按新 UV 取到毫不相干的数值，
-        /// 表面会斑驳。常量值不管那张图的通道怎么打包都不会制造花纹——
-        /// 最坏情况是整体偏哑光，而不是脏。
+        /// 换了 UV 之后再让 <c>_MS_Tex</c> 沿用原版那张，会按新 UV 取到毫不相干的数值。
+        /// 常量图不管通道怎么打包都不会制造花纹——但<b>前提是那个常量本身站得住</b>。
+        ///
+        /// <b>上一版栽在这一点上：常量 <c>(70,150,0,150)</c> 是凭空写的，结果整座建筑完全不可见。</b>
+        /// 着色器是 <c>VF Shaders/Forward/PBR Standard</c>，它把哪个通道当什么用我们并不知道，
+        /// 而某个通道写 0 恰好落在控制不透明度的那一路上就会全透。当时的辩护是
+        /// 「最坏也只是偏哑光」——那句话本身就是猜测的一部分，不是猜测的边界。
+        ///
+        /// <b>现在不猜了：直接读原版那张图，取全图平均。</b> 通道怎么打包仍然不知道，
+        /// 但<b>不需要知道</b>——平均值天然落在原版自己用过的取值范围里，
+        /// 最坏情况是「看起来像一面普通的原版表面」，不可能是全透。
+        /// 原版贴图不能 <c>GetPixels</c>，所以走 Blit 到 RenderTexture 再 ReadPixels
+        /// （和 <c>IconTinter</c> 同一个办法）。读不出来就返回 null，调用方退回原版那张。
         /// </summary>
-        internal static Texture2D NeutralMetalSmooth()
+        internal static Texture2D MeasuredMetalSmooth(Texture source)
         {
             if (_ms != null) return _ms;
+
+            Color32 mean;
+
+            if (!MeanOf(source, out mean))
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    "巨型建筑贴图：读不出原版 _MS_Tex，无法量出中性值——本次退回原版那张");
+
+                return null;
+            }
 
             var tex = new Texture2D(4, 4, TextureFormat.RGBA32, false)
             {
@@ -89,14 +109,82 @@ namespace ProjectEden.Model
 
             var px = new Color32[16];
 
-            for (var i = 0; i < px.Length; i++) px[i] = new Color32(70, 150, 0, 150);
+            for (var i = 0; i < px.Length; i++) px[i] = mean;
 
             tex.SetPixels32(px);
             tex.Apply(false);
 
             _ms = tex;
 
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑贴图：原版 _MS_Tex 全图平均 = ({mean.r}, {mean.g}, {mean.b}, {mean.a})，" +
+                "已用它填一张常量图。**这四个数是量出来的，不是猜的**——" +
+                "上一版写死的 (70,150,0,150) 让整座建筑不可见");
+
             return tex;
+        }
+
+        /// <summary>
+        /// 原版贴图不可 CPU 读取，先 Blit 进 RenderTexture 再 ReadPixels。
+        /// 失败一律返回 false，让调用方退回原版那张，不要拿一个瞎猜的值往上写。
+        /// </summary>
+        private static bool MeanOf(Texture source, out Color32 mean)
+        {
+            mean = new Color32(128, 128, 128, 255);
+
+            if (source == null) return false;
+
+            RenderTexture temp = RenderTexture.GetTemporary(
+                source.width, source.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+
+            RenderTexture previous = RenderTexture.active;
+            Texture2D readable = null;
+
+            try
+            {
+                Graphics.Blit(source, temp);
+                RenderTexture.active = temp;
+
+                readable = new Texture2D(temp.width, temp.height, TextureFormat.RGBA32, false)
+                {
+                    hideFlags = HideFlags.HideAndDontSave,
+                };
+
+                readable.ReadPixels(new Rect(0, 0, temp.width, temp.height), 0, 0);
+                readable.Apply(false);
+
+                Color32[] px = readable.GetPixels32();
+
+                if (px.Length == 0) return false;
+
+                long r = 0, g = 0, b = 0, a = 0;
+
+                foreach (Color32 c in px)
+                {
+                    r += c.r;
+                    g += c.g;
+                    b += c.b;
+                    a += c.a;
+                }
+
+                mean = new Color32((byte)(r / px.Length), (byte)(g / px.Length),
+                                   (byte)(b / px.Length), (byte)(a / px.Length));
+
+                return true;
+            }
+            catch (System.Exception e)
+            {
+                ProjectEdenPlugin.Log.LogWarning($"巨型建筑贴图：读原版 _MS_Tex 失败——{e.Message}");
+
+                return false;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(temp);
+
+                if (readable != null) Object.Destroy(readable);
+            }
         }
 
         /// <summary>某一格在 0..1 UV 空间里的矩形（已内缩）。</summary>

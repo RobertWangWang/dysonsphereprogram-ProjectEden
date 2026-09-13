@@ -56,6 +56,20 @@ namespace ProjectEden
         }
 
         /// <summary>LDBTool.PreAddDataAction：注册新 proto。</summary>
+        /// <summary>按物品 ID 找回配置项。程序化建模那边要读单座的体量旋钮。</summary>
+        internal static MegaBuildingEntry EntryOf(int itemId)
+        {
+            MegaBuildingEntry[] all = Config?.buildings;
+
+            if (all == null) return null;
+
+            for (var i = 0; i < all.Length; i++)
+                if (all[i] != null && all[i].itemId == itemId)
+                    return all[i];
+
+            return null;
+        }
+
         internal static void OnPreAddData()
         {
             // 集装科技的解锁值要在这个阶段改：物流站面板的滑条上限按 UnlockValues 现算

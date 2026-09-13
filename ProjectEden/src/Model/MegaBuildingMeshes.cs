@@ -1,3 +1,4 @@
+using ProjectEden.Utils;
 using UnityEngine;
 using S = ProjectEden.Model.BuildingTexture;
 
@@ -503,7 +504,15 @@ namespace ProjectEden.Model
 
             Bounds reference = ReferenceBounds(ref desc);
 
-            kit.Place(reference, MegaBuildingRegistry.Config.modelScale);
+            MegaBuildingEntry entry = MegaBuildingRegistry.EntryOf(itemId);
+
+            float scale = entry != null && entry.modelScale > 0f
+                ? entry.modelScale
+                : MegaBuildingRegistry.Config.modelScale;
+
+            float height = entry != null && entry.modelHeightScale > 0f ? entry.modelHeightScale : 1f;
+
+            kit.Place(reference, scale, height);
 
             Mesh mesh = kit.ToMesh("projecteden-" + debugName);
 
@@ -526,7 +535,7 @@ namespace ProjectEden.Model
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"巨型建筑「{debugName}」已换用程序化模型：{kit.VertexCount} 顶点 / {kit.TriangleCount} 三角形，" +
-                $"缩放系数 {MegaBuildingRegistry.Config.modelScale:0.##}；" +
+                $"缩放系数 {scale:0.##}（高度上限 ×{height:0.##}）；" +
                 $"原版包围盒 尺寸{reference.size} 中心{reference.center} 底{reference.min.y:0.##} 顶{reference.max.y:0.##}");
 
             return true;
@@ -540,13 +549,42 @@ namespace ProjectEden.Model
         /// 所以换成常量图「最坏也只是偏哑光」。<b>实际结果是整座建筑完全不可见。</b>
         /// 那个常量 <c>(70,150,0,150)</c> 是猜的——着色器是 <c>VF Shaders/Forward/PBR Standard</c>，
         /// 它把哪个通道当什么用我们并不知道，而 B=0 落在某个控制不透明度的通道上就会全透。
-        /// <b>「斑驳」是推测，「看不见」是观测</b>，所以默认退回原版那张；
-        /// 想再试就开 <c>megabuildings.json</c> 的 <c>overrideMetalSmoothTex</c>。
+        /// <b>「斑驳」是推测，「看不见」是观测</b>，所以默认退回原版那张。
+        ///
+        /// <b>那个常量现在不是猜的了</b>：<c>BuildingTexture.MeasuredMetalSmooth</c> 改成
+        /// 读原版那张图取全图平均——通道怎么打包仍然不知道，但不需要知道，
+        /// 平均值天然落在原版自己用过的取值范围里，最坏是「像一面普通的原版表面」。
+        /// 开关默认仍然关着，要试就开 <c>megabuildings.json</c> 的
+        /// <c>overrideMetalSmoothTex</c>；量不出来会自动退回原版那张并打一行 WARNING。
         ///
         /// 每个属性都先 <c>HasProperty</c> 再写：不同 LOD 的材质用的着色器未必一样，
         /// 写一个不存在的属性 Unity 只会静默忽略，那就分不清「写了没生效」和「压根没这属性」。
         /// 首次调用把着色器名字和属性有无报一行，省得下次又靠猜。
         /// </summary>
+        /// <summary>
+        /// 原版材质上那张金属度/光滑度图。任取第一份有它的即可——九座共用同一个源建筑。
+        /// </summary>
+        private static Texture FindVanillaMetalSmooth(ref PrefabDesc desc)
+        {
+            if (desc.lodMaterials == null) return null;
+
+            foreach (Material[] lod in desc.lodMaterials)
+            {
+                if (lod == null) continue;
+
+                foreach (Material mat in lod)
+                {
+                    if (mat == null || !mat.HasProperty("_MS_Tex")) continue;
+
+                    Texture t = mat.GetTexture("_MS_Tex");
+
+                    if (t != null) return t;
+                }
+            }
+
+            return null;
+        }
+
         private static void ApplyTextures(ref PrefabDesc desc, string debugName)
         {
             if (desc.lodMaterials == null) return;
@@ -556,7 +594,16 @@ namespace ProjectEden.Model
             bool overrideMain = MegaBuildingRegistry.Config.overrideMainTex;
             bool overrideMs = MegaBuildingRegistry.Config.overrideMetalSmoothTex;
 
-            Texture2D ms = overrideMs ? BuildingTexture.NeutralMetalSmooth() : null;
+            // 中性值要从原版那张图上量，所以先找一份带 _MS_Tex 的材质
+            Texture2D ms = null;
+
+            if (overrideMs)
+            {
+                ms = BuildingTexture.MeasuredMetalSmooth(FindVanillaMetalSmooth(ref desc));
+
+                // 量不出来就当没开这个开关：宁可斑驳，也不要再来一次「整座看不见」
+                if (ms == null) overrideMs = false;
+            }
 
             var touched = 0;
             string shaderName = null;
