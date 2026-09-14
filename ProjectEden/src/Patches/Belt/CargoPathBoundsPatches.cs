@@ -81,16 +81,34 @@ namespace ProjectEden.Patches
                 hits++;
             }
 
-            if (hits != 1)
+            // 第二处：缓冲区整体前移那一次 Array.Copy，长度可能是负数。
+            var copies = 0;
+            var safeCopy = AccessTools.Method(typeof(CargoPathBoundsPatches), nameof(SafeCopy));
+
+            if (safeCopy != null)
+                for (var i = 0; i < code.Count; i++)
+                {
+                    if (code[i].opcode != OpCodes.Call) continue;
+                    if (!(code[i].operand is System.Reflection.MethodInfo mi)) continue;
+                    if (mi.DeclaringType != typeof(System.Array) || mi.Name != nameof(System.Array.Copy)) continue;
+                    if (mi.GetParameters().Length != 5) continue;
+
+                    // 就地改，不换对象——标签会丢
+                    code[i].operand = safeCopy;
+                    copies++;
+                }
+
+            if (hits != 1 || copies != 1)
             {
                 ProjectEdenPlugin.Log.LogError(
-                    $"传送带回扫越界保护：匹配到 {hits} 处，期望 1 处。原版 IL 形状可能变了。" +
-                    "在确认之前，请把 belts.json 里的速度调回 5 以内");
+                    $"传送带越界保护：回扫命中 {hits} 处（期望 1）、Array.Copy 命中 {copies} 处（期望 1）。" +
+                    "原版 IL 形状可能变了。在确认之前，请把 belts.json 里的速度调回 5 以内");
 
                 return code;
             }
 
-            ProjectEdenPlugin.Log.LogInfo("传送带回扫越界保护已生效（CargoPath.Update 1 处），高速传送带可用");
+            ProjectEdenPlugin.Log.LogInfo(
+                "传送带越界保护已生效（CargoPath.Update：回扫 1 处 + 缓冲区前移 1 处），高速传送带可用");
 
             return code;
         }
@@ -106,5 +124,49 @@ namespace ProjectEden.Patches
         /// </summary>
         internal static int ReadOrOccupied(byte[] buffer, int index) =>
             (uint)index < (uint)buffer.Length ? buffer[index] : 1;
+
+        private static int _clamped;
+
+        /// <summary>
+        /// 缓冲区整体前移那一次拷贝，<b>长度可能是负数</b>。
+        ///
+        /// 原版（IL 03F5）是
+        /// <code>
+        /// Array.Copy(buffer, at, buffer, at + shift, size - shift);
+        /// </code>
+        /// 前面只判过 <c>shift &gt; 0</c>，<b>没有任何地方保证 shift &lt;= size</b>。
+        /// <c>shift</c> 正比于传送带速度，所以原版速度 ≤ 5 时这个不变量永远成立；
+        /// 提速之后它会破，表现是并行的 <c>FactoryCargoPath</c> 阶段抛
+        /// <c>ArgumentOutOfRangeException: Value has to be &gt;= 0. Parameter name: length</c>。
+        /// 和上面那处回扫是同一个形状：<b>原版靠速度小让漏写的边界检查永远碰不到</b>。
+        ///
+        /// <b>钳到 0 是正确语义，不是把错误吞掉</b>：移动距离比待移动区还大，
+        /// 意味着这一段里没有任何东西需要留下来——要拷的就是 0 字节。
+        ///
+        /// 真的钳过一次就报一行。这条不是常设机制而是速度调过头的信号，
+        /// 说明 <c>belts.json</c> 的速度已经顶到原版这块代码的假设之外了。
+        /// </summary>
+        internal static void SafeCopy(System.Array src, int srcIndex, System.Array dst, int dstIndex, int length)
+        {
+            if (src == null || dst == null || srcIndex < 0 || dstIndex < 0) return;
+
+            if (srcIndex + length > src.Length) length = src.Length - srcIndex;
+            if (dstIndex + length > dst.Length) length = dst.Length - dstIndex;
+
+            if (length <= 0)
+            {
+                // 抢占要在拼字符串之前：这条路跑在 _cargo_path_parallel 的工作线程上
+                if (System.Threading.Interlocked.Exchange(ref _clamped, 1) != 0) return;
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    "传送带缓冲区前移的拷贝长度算出来是负数，已按 0 处理（正确语义：没有东西要移）。" +
+                    "这说明传送带速度已经顶到原版这块代码的假设之外——功能正常，但 belts.json 的速度" +
+                    "再往上调要实测。这一行整局只打一次。");
+
+                return;
+            }
+
+            System.Array.Copy(src, srcIndex, dst, dstIndex, length);
+        }
     }
 }
