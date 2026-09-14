@@ -128,7 +128,8 @@ namespace ProjectEden.Patches
             if (done == 3)
                 ProjectEdenPlugin.Log.LogInfo(
                     "UIGame.OnPlayerInspecteeChange：已接管巨型建筑的窗口选择"
-                    + "（stationId / powerGenId / powerNodeId 三处）");
+                    + "（stationId / powerGenId / powerNodeId 三处）；"
+                    + "物流站窗口改由 MegaBothWindowsPatches 自己开，不走原版的记账");
             else
                 ProjectEdenPlugin.Log.LogError(
                     $"UIGame.OnPlayerInspecteeChange：只改写了 {done} 处，应为 3 处"
