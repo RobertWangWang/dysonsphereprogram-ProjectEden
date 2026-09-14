@@ -116,8 +116,21 @@ namespace ProjectEden.Patches
                 //
                 // 一开始我以为是无碰撞关掉了碰撞体对象池（那确实会废掉建造工具的射线取点），
                 // 但把池子拆成独立开关、恢复之后问题照旧——**真凶是这里**。
-                // 教训：同一个字段在不同工具下语义相反，不能按「字段」一刀切，要按工具分。
-                if (!(tool is BuildTool_Path) &&
+                //
+                // **而「按工具排除」是错的，这一条是第二次报障换来的。**
+                // 原先写的是 `!(tool is BuildTool_Path)`——可蓝图粘贴里的传送带
+                // <b>不走 BuildTool_Path</b>，它走 BuildTool_BlueprintPaste。
+                // 于是上面那条传送带保护在「框选复制 + 粘贴」这条路上整个失效：
+                // 带子各自独立成段，挨着却不连通，而分拣器因此找不到要挂的那条带——
+                // 玩家报的原话是「分拣器没有挂到传送带上」，指向的地方和病因隔着两层。
+                //
+                // 正确的判据是<b>这个预览是什么</b>，不是<b>哪把工具在跑</b>：
+                // 对传送带，coverObjId 是「接到这条上去」；对分拣器，它是「替换这台已有的」
+                // （CreatePrebuilds IL 016F：coverObjId 非零就不建新 prebuild）。
+                // 这两类的连接语义都藏在这个字段里，清掉就是断链。
+                ReportConnection(tool, preview);
+
+                if (!IsConnectionCarrier(preview) &&
                     ShouldUncover(preview) &&
                     (preview.coverObjId != 0 || preview.willRemoveCover || preview.willReconstructCover))
                 {
@@ -187,6 +200,48 @@ namespace ProjectEden.Patches
         /// 无条件建造也要清，但采矿机除外——那一条由 advancedminer.json 的
         /// <c>allowMinerOverlap</c> 单独管，两边都动会分不清是谁放行的。
         /// </summary>
+        private static int _connReported;
+
+        /// <summary>
+        /// 分拣器/传送带预览拿到的连接信息，打前几条。
+        ///
+        /// <b>为什么要有这一行。</b> 「分拣器挂没挂上传送带」这件事，
+        /// 在日志里<b>一个字都看不到</b>——补丁全都正常接管、零异常，而结果只在屏幕上。
+        /// 于是每改一次就得请玩家进一次游戏用眼睛判断，改错了也说不清错在哪一环。
+        /// 这条打出来之后，「有没有拿到连接对象」直接可查：
+        /// <c>inputObjId</c> / <c>outputObjId</c> 为 0 就是没挂上，非 0 就是挂上了
+        /// （负数是本批蓝图里的另一个预览，正数是已经存在的实体）。
+        /// </summary>
+        private static void ReportConnection(BuildTool tool, BuildPreview preview)
+        {
+            if (_connReported >= 6 || preview?.desc == null || !preview.desc.isInserter) return;
+
+            _connReported++;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"无碰撞·分拣器连接 #{_connReported}（{tool?.GetType().Name}）：" +
+                $"input={preview.inputObjId} output={preview.outputObjId} " +
+                $"cover={preview.coverObjId} 条件={preview.condition}。" +
+                "input/output 有一个是 0 就是没挂上；负数表示接的是本批蓝图里的另一个预览。");
+        }
+
+        /// <summary>
+        /// 这个预览的 <c>coverObjId</c> 是不是<b>连接语义</b>而不是障碍物。
+        ///
+        /// 传送带：「接到这条已有的带子上」；分拣器：「替换这台已有的分拣器」。
+        /// 两者清掉都会断链，而且症状离病因很远——传送带那次表现为「接不上前半截」，
+        /// 分拣器这次表现为「挂不到传送带上」。
+        ///
+        /// <b>按预览的 prefab 判，不按工具判</b>：同一类东西可以由点建、拖拽、
+        /// 蓝图粘贴三条路造出来，按工具排除必然漏掉其中一条（实测漏的就是蓝图粘贴）。
+        /// </summary>
+        private static bool IsConnectionCarrier(BuildPreview preview)
+        {
+            PrefabDesc desc = preview?.desc;
+
+            return desc != null && (desc.isBelt || desc.isInserter);
+        }
+
         private static bool ShouldUncover(BuildPreview preview)
             => Config.noCollision || (Config.noConditionBuild && !IsMiner(preview));
 
