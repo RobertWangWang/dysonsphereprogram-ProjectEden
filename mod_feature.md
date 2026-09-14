@@ -90,7 +90,9 @@ Three of the first four borrow **vanilla recipe types** (Assemble / Smelt / Chem
 those recipes too — the mega versions are merely much faster. The ones in bold are different: their recipe type is a
 number this mod allocated itself, and those recipes **can be run by nothing else**.
 
-There is one thing on this tab that is not an assembler (slot 7) — the **Wind Turbine Cluster**. See section X.
+There are two things on this tab that are not assemblers — the **Wind Turbine Cluster** (slot 7) and the
+**Fixed-Rate Miner** (slot 13). Both are in section X. Slot 13 has no button of its own on screen; scroll the
+child row to reach it.
 
 ### About "10000x"
 
@@ -407,7 +409,7 @@ mega buildings' **code-generated 3D meshes and textures**.
 | Ore icons | Iron ore icon, recoloured | Cobalt hue 226° / sat ×1.3; aluminium saturation crushed to ×0.12 (near cold white); gypsum hue 42° / sat ×0.38; spodumene hue 285° / sat ×0.5, value ×1.15 |
 | The small icon on vein labels | Iron vein icon, recoloured | Same palette as each ore (it tints the *vein* icon, not the ore icon) |
 | Cobalt Ingot icon | Iron Ingot icon, recoloured | Same as cobalt ore |
-| New building icons | Each source building's icon, recoloured | Electrochemical Plant cold blue, Redox Chemical Plant violet, Integrated Logistics Hub amber, lithium accumulator and exchanger purple, Wind Turbine Cluster teal |
+| New building icons | Each source building's icon, recoloured | Electrochemical Plant cold blue, Redox Chemical Plant violet, Integrated Logistics Hub amber, lithium accumulator and exchanger purple, Wind Turbine Cluster teal, Fixed-Rate Miner warm orange |
 
 **41 icons are drawn from scratch** (`tools/make_icons.py`, `drawsvg` → SVG → `resvg` → PNG):
 
@@ -912,7 +914,7 @@ something has to occupy 15.
 
 ## X. New Buildings
 
-Six of them, each a **whole-building clone of a vanilla one** with a few fields changed. Configured in
+Seven of them, each a **whole-building clone of a vanilla one** with a few fields changed. Configured in
 `machines.json`.
 
 ### Electrochemical Plant
@@ -1177,6 +1179,123 @@ A thousand wind turbines pressed into one tower array.
 > So multiplying the power is the entire implementation.
 > Conversely, those "which kind of generator is this" booleans have to be copied explicitly: miss one and the clone
 > is **a power plant that generates nothing**, silently.
+
+### Fixed-Rate Miner
+
+**A mining machine whose output is nailed down.** It is not a smaller Advanced Mining Machine; it is
+a **different curve**:
+
+| | Advanced Mining Machine | Fixed-Rate Miner |
+|---|---|---|
+| Output | climbs with the Mineral Utilisation techs | **a flat 10,000 ore/min** |
+| Effect of vein count | more veins under it, more output | **none** |
+| Prerequisite | needs research | **none; 1 Iron Ingot + 1 Copper Ingot, hand-crafted in 1 s** |
+| Power | scales with speed squared, can get extreme | **a flat 1 MW** |
+| Vein depletion | none (this mod already changed that) | none |
+
+So this is **the opening machine**: buildable in the first minute, with predictable output and a
+fixed power bill — and it never gets any faster, so the Advanced Mining Machine leaves it far behind
+later on. It is also what you want on a poor planet when you need a number you can plan around.
+
+It carries its own logistics slot (the whole Advanced Mining Machine is cloned), 100,000 capacity,
+and planetary logistics drones fetch from it exactly as they do from the vanilla one. It sits in slot
+13 of the "Mega Structures" tab — the first twelve are full, so you scroll the child row to reach it.
+
+#### Nailing the rate down is the entire difficulty
+
+Vanilla accumulates, per tick:
+
+```
+time += power × speedDamper × speed × miningSpeed × veinCount
+```
+
+and yields one ore per `period`. Of those, `miningSpeed` has been scaled up by research and
+`veinCount` is how many veins the machine covers — **neither is a constant**. So "just write the
+speed into the building's stats" cannot do this: what you get is a correct-looking number on the
+panel and an output that climbs with research — the very "the UI and the logic read different
+sources" trap that recurs throughout this guide.
+
+The real answer is to solve for the rate every tick, dividing both terms out so they cancel when
+vanilla multiplies them back in.
+
+**And what must be solved for is `miningSpeed`, not `speed`** — this was computed, not guessed:
+`speed` is an integer, so pushing the whole ratio through it means the more veins and the better the
+research, the smaller the quotient and the worse the truncation — about 10% low at "12 veins and
+maxed research". A machine whose selling point is a nailed-down rate cannot drift 10% with vein
+count. So `speed` is pinned at 10000 (the field's unit is hundredths, so the mining panel reads
+**100% mining speed**, which is exactly right for a constant-rate machine) and the float
+`miningSpeed` carries the ratio.
+
+Measured, with 12 veins underneath and research already at 1.5×:
+
+```
+period=600000, 12 veins, research mining rate 1.5 (replaced outright),
+speed pinned at 10000 (panel 100%), solved miningSpeed=13.88889, i.e. 10000 ore/min
+```
+
+#### The panel needs a second, separate fix, because it reads a different source
+
+Getting the solve right is not enough — the panel still reports the wrong number. A machine actually
+producing 10,000 shows **1080** on its panel, because the panel has **its own formula**, and that
+formula goes around the very term we replace:
+
+```
+panel = 60 × (600000/period) × (speed/10000) × speedDamper × power
+      × GameMain.history.miningSpeedScale        ← reads the FIELD
+      × veinCount
+```
+
+The settlement line reads the **parameter** (`ldarg.s miningSpeed`, `InternalUpdate` IL 0049), and
+that parameter is exactly what we replace — so the panel, reading the field, **can never see the
+replacement**. What it prints is "100% × research 1.5 × 12 veins = 1080": the output an ordinary
+mining machine would have under the same conditions.
+
+Fortunately the two formulas are **term for term identical** apart from that one factor, so
+substituting it with the value this machine actually uses is the whole fix — nothing else has to be
+recomputed. Three sites: the mining panel, the vein-collector panel, and the same row in the control
+panel.
+
+**"Reference speed" and "theoretical output" need a second, different fix, because the multiplier is
+hoisted out of the loop.** Those two do not read the research multiplier off the miner: they hoist it
+into a local **before** the miner loop, shared by every miner on the planet. Substituting at the read
+would therefore apply this machine's value to all the others; the substitution has to happen **inside**
+the loop, where the individual miner is in hand. Each has three branches (vein / oil / water) of
+identical shape, with the miner one instruction away:
+
+```
+ldc.r8 3600 ; ldloc miner ; ldfld period ; conv.r8 ; div
+ldloc researchMultiplier      ← insert after this
+mul
+ldloc miner ; ldfld speed ...
+```
+
+That miner local is measured to be a `MinerComponent&`, so **copying its `ldloc` verbatim onto the
+stack** is a ready-made `ref` argument — no counting which local it is, no deciding whether it holds a
+value or a managed pointer, which is exactly where this kind of rewrite goes silently wrong. Each
+method matches 3 sites; any other count abandons the rewrite.
+
+Two implementation choices worth recording:
+
+- **The solve is written once** and shared by the tick path and the panel. What the panel displays
+  and what the machine produces are the same fact; two hand-kept copies of one formula always drift.
+- **Each panel reads `miningSpeedScale` twice, and only one of them may be changed.** The other sits
+  in the "estimated hours remaining" block, where the mining rate is a **divisor** — substituting
+  there would shrink the estimate by an order of magnitude. The discriminator comes from the formula
+  itself rather than from position: the throughput block opens with `ldc.r8 0.0001` (i.e.
+  `speed/10000`) and the estimate block has no such constant. Each panel matches exactly once; any
+  other count abandons the rewrite and logs an error.
+
+#### Two known inconsistencies, stated rather than hidden
+
+- **Moissanite's drill-bit cost does not apply to it.** That rule targets "mining machines this mod
+  has boosted", and this one runs its own path. Making it consume bits too is possible; it simply
+  has not been done.
+- **Placement follows vanilla rules**: it needs ore and flat ground, and it does not get the
+  overlapping-and-oil-seep freedoms the Advanced Mining Machine has here. It is an ordinary mining
+  machine whose speed happens to be locked.
+
+All four numbers live in the `miner` block of its `machines.json` entry: `oresPerMinute`,
+`workEnergyWatt`, `stationCapacity`, `consumeVeins`.
 
 ---
 
@@ -2132,9 +2251,22 @@ These are **unavoidable side effects** of the changes above, not bugs:
 - **The vanilla Chemical Plant can also run "Crude Oil X-Ray Cracking"** — recipes work by type, not by building
 - **Mining machines can no longer be rebuilt/replaced in place** — stacking requires clearing the "cover and
   rebuild" flag, and those are two sides of the same thing
-- **A mega building's 30 storage slots are neither visible nor adjustable** — clicking one opens the recipe panel,
-  not the station panel (the two panels displace each other and only one can stay). The layout is automatic from the
-  current recipe (inputs as Demand, products as Supply), so there is nothing to configure anyway
+- **Clicking a mega building opens two panels side by side**: the assembler panel on the left (pick the recipe) and
+  the station panel on the right (all 30 storage slots). Vanilla has these two displace each other — each opens with
+  `ShutAllFunctionWindow()` and the later one wins — so the station panel is now opened and closed by this mod itself,
+  following the assembler panel's visibility, with vanilla's own window bookkeeping left entirely out of it. **A slot's Demand / Storage / Supply setting is now
+  yours to change**: the automatic layout only decides which slot holds which item (that follows the recipe), and the
+  direction is written once when the slot is first assigned. Want to feed it by belt? Set the input slot to Storage
+  and both the drones and the virtual logistics will leave it alone. (Drone count, delivery amount and charge are
+  still forced automatically and will be written back if you change them.)
+  **Changing the recipe gives everything back to you and leaves nothing in the machine** — the storage slots, the
+  ingredients already fed in but not yet consumed, and the products not yet moved out, all emptied, via the recipe
+  panel and via copy/paste alike. **The mecha's inventory filling up is the normal case, not the exception**: a mega
+  building's slot holds ten million and the mecha holds roughly thirty-six thousand, so whatever does not fit **drops
+  at your feet** for you to walk over and pick up — stacked to the item's stack size (90,000 ore is about 300 drops,
+  not 90,000) and it **does not expire**. Empty your inventory first and you keep more of it directly. Nothing is
+  transmuted either: produce 100 circuit boards, switch to the gear recipe, and those 100 circuit boards do not
+  become 100 gears
 - **Sorter speed (how fast the arm swings) is unchanged** — what changed is stack level and belt speed; a sorter
   carries more per swing, but a swing takes just as long as in vanilla
 - **The small vein icons on the map (M) are still iron's** — that path copies icons into a shared atlas with
@@ -3632,7 +3764,7 @@ described in section XIV.
 | `power.json` | Power node coverage radius |
 | `belts.json` | Speed of the three belt tiers |
 | `ores.json` | The custom vein table: per-ore IDs, vein density, recolour parameters, recipe lists; extra items (phase, heat value, icon); and the gases injected into gas giants |
-| `machines.json` | The eight new buildings: which vanilla building to clone from, parameters for the five `kind`s (assembler / station / accumulator / exchanger / generator), tint, build recipe |
+| `machines.json` | The nine new buildings: which vanilla building to clone from, parameters for the six `kind`s (assembler / station / accumulator / exchanger / generator / miner), tint, build recipe |
 | `metals.json` | The four-axis property table (hardness / toughness / corrosion / conductivity) |
 | `alloys.json` | Per-building alloy ratios: adjustable slots, total parts, property weights, yield and time multiplier bands |
 | `cheats.json` | **Cheat switches**, all on by default: instant build / build without condition / no build collision / collider pool off / no power spacing / pump anywhere |
