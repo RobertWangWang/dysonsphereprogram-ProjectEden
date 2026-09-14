@@ -591,6 +591,12 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // **调用前先把侧信道清零。** preloader 把 TryAddItemToPackage 改写成了
+            // 「从侧信道读品质」，协议是调用方在调用前写；不写的话它消费的是上一个
+            // 调用者留下的值，品质凭空长出来。produced[] 没有品质孪生字段可读，
+            // 所以这里是**丢**而不是送——和忘传一个参数的后果一致，有界。
+            if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+
             int added = w.player.TryAddItemToPackage(products[index], have, 0, false, 0, false);
 
             w.factorySystem.assemblerPool[w.assemblerId].produced[index] = have - added;

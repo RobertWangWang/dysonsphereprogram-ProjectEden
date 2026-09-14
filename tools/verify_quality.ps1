@@ -422,7 +422,13 @@ if (Test-Path $plugin) {
         "StorageComponent::TakeTailItemsFiltered", "StorageComponent::Sort",
         "CargoPath::TryPickItem", "CargoPath::TryPickItemAtRear", "CargoPath::TryPickFuel",
         "CargoPath::TryUpdateItemAtHeadAndFillBlank", "CargoTraffic::TryPickItemAtRear",
-        "CargoContainer::AddCargo", "CargoContainer::AddItemStackToCargo"
+        "CargoContainer::AddCargo", "CargoContainer::AddItemStackToCargo",
+        # Added after it was found missing: the transform's BuildForwardToCallee
+        # writes the channel before the game's own calls to this one (see the
+        # "ldfld:PAY ldc ldc call:TryAddItemToPackage stloc" cases), so the body
+        # reads it and every caller of ours must write it too. Two of our call
+        # sites had been ungated since they were written.
+        "Player::TryAddItemToPackage"
     )
 
     # Declared and reviewed: each of these sits behind QualityAccess.ClearChannel /
@@ -437,7 +443,15 @@ if (Test-Path $plugin) {
     # if a second such mechanism ever appears, this check goes blind for it too.
     $declared = @(
         "HubCourierPatches::Drain", "HubCourierPatches::TopUp",
-        "InstantBuildPatches::Pay"
+        "InstantBuildPatches::Pay",
+        # Returning a mega building's leftovers to the mecha on a recipe change.
+        # This one WRITES the real quality (both ends have quality slots).
+        "MegaRecipeReturnPatches::GiveBack",
+        # These two CLEAR instead: neither source carries quality (couriers have
+        # none; produced[] has no twin to read), so they lose it rather than
+        # invent it - the same bounded failure as forgetting a parameter.
+        "HubCourierSlotPatches::TakeOut",
+        "MultiProductUIPatches::TakeProduct"
     )
 
     $found = @()

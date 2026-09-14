@@ -42,7 +42,7 @@ namespace ProjectEden.Patches
     /// 而<b>催化剂槽恰恰要在空的时候存在</b>（空着才是在向物流网要货）。
     /// 每 tick 被我们自己的代码擦掉一次，症状是「反应器永远等不到催化剂」，
     /// 病因却在一个名字里没有「催化剂」三个字的方法里。所以这里提供
-    /// <see cref="LayoutSlots"/>，让它成为布局的一部分，而不是去和布局抢。
+    /// <see cref="ClaimSlots"/>，让它成为布局的一部分，而不是去和布局抢。
     ///
     /// <b>3. 只在真的产出了的 tick 才扣活性。</b> 断电、缺料、产物槽满这三种情况下
     /// 原版本来就不结算，跟着扣的话就是「机器停着、催化剂照烧」——
@@ -118,16 +118,51 @@ namespace ProjectEden.Patches
         /// 返回是否改动过。<b>必须沿用调用方的 <c>changed</c> 语义</b>——
         /// <c>RefreshStationTraffic</c> 要遍历整颗行星的物流站，只能在真的变了时调。
         /// </summary>
-        internal static bool LayoutSlots(StationComponent station, ref int cursor, int length)
+        internal static bool ClaimSlots(StationComponent station, int length, ref long claimed)
         {
             if (!Ready) return false;
 
             var changed = false;
 
-            changed |= SetSlot(station, ref cursor, length, CatalystId, ELogisticStorage.Demand, Config.slotCapacity);
-            changed |= SetSlot(station, ref cursor, length, SpentId, ELogisticStorage.Supply, Config.slotCapacity);
+            Claim(station, length, CatalystId, ELogisticStorage.Demand, ref claimed, ref changed);
+            Claim(station, length, SpentId, ELogisticStorage.Supply, ref claimed, ref changed);
+
+            AssertCapacity(station, length);
 
             return changed;
+        }
+
+        /// <summary>
+        /// 和配方那两类货走同一套认领规则：先认已经放着这种货的格子（位置不动），
+        /// 再占一个没有存货的格子。<b>绝不覆盖还有存货的格子</b>——那是「换配方会让
+        /// 物品变质」那个 bug 的根，催化剂这两格没有理由成为例外。
+        /// </summary>
+        private static void Claim(StationComponent station, int length, int itemId,
+            ELogisticStorage logic, ref long claimed, ref bool changed)
+        {
+            if (MegaStationPatches.ClaimExisting(station, length, itemId, logic, ref claimed, ref changed)) return;
+
+            MegaStationPatches.ClaimFree(station, length, itemId, logic, ref claimed, ref changed);
+        }
+
+        /// <summary>
+        /// 容量每 tick 重申一次。
+        ///
+        /// <b>这一步不能省，而且必须在认领之后。</b> 认领那边对一个新占的格子会把 max
+        /// 设成物流站的一千万——催化剂槽是本地需求，一千万的需求会让第一座反应器
+        /// 把全网的催化剂吸光，表现是「我别的反应器全停了」，而病因指向完全无关的地方。
+        /// 「每 tick 重申」比「相信没人来动」便宜得多：一次 int 比较，
+        /// 而赌错的代价是整条催化线静默失效。
+        /// </summary>
+        private static void AssertCapacity(StationComponent station, int length)
+        {
+            for (var i = 0; i < length; i++)
+            {
+                if (!OwnsSlot(station.storage[i].itemId)) continue;
+
+                if (station.storage[i].max != Config.slotCapacity)
+                    station.storage[i].max = Config.slotCapacity;
+            }
         }
 
         /// <summary>
@@ -137,27 +172,6 @@ namespace ProjectEden.Patches
         /// </summary>
         internal static bool OwnsSlot(int itemId) =>
             Ready && itemId > 0 && (itemId == CatalystId || itemId == SpentId);
-
-        private static bool SetSlot(StationComponent station, ref int cursor, int length,
-            int itemId, ELogisticStorage logic, int max)
-        {
-            if (cursor >= length) return false;
-
-            int i = cursor++;
-
-            bool changed = station.storage[i].itemId != itemId || station.storage[i].localLogic != logic;
-
-            station.storage[i].itemId = itemId;
-            station.storage[i].localLogic = logic;
-            station.storage[i].remoteLogic = ELogisticStorage.None;
-
-            // 容量每 tick 重申一次。StationCapacityPatches 现在会跳过这两格，
-            // 但「每 tick 重申」比「相信没人来动」便宜得多——一次 int 比较而已，
-            // 而赌错的代价是整条催化线静默失效。
-            if (station.storage[i].max != max) station.storage[i].max = max;
-
-            return changed;
-        }
 
         // ── tick：装料、失活、吐料、停转 ──────────────────────
 

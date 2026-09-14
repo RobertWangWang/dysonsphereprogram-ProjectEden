@@ -10,6 +10,7 @@
 // Released under GPL-3.0; see LICENSE and NOTICE at the repository root.
 
 using System.Collections.Concurrent;
+using System.Threading;
 using ProjectEden.Utils;
 
 namespace ProjectEden.Patches
@@ -41,7 +42,7 @@ namespace ProjectEden.Patches
         ///
         /// 扩容没生效（配置关掉了）时退回 5，保持原来的行为。
         /// </summary>
-        private static int MaxSafeStorageKinds
+        internal static int MaxSafeStorageKinds
         {
             get
             {
@@ -298,8 +299,18 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// 把储物格排成「先原料后产物」，原料挂本地需求、产物挂本地供应。
-        /// 配方一换就跟着重排，玩家不需要手动配置储物格。
+        /// 按当前配方重排储物格：原料挂本地需求、产物挂本地供应。
+        ///
+        /// <b>这里不再是「从 0 号格往后顺次写」。</b> 那种写法有两个后果，都被玩家撞到了：
+        /// 直接覆盖 <c>itemId</c> 会让 100 个电路板当场变成 100 个齿轮（物品变质）；
+        /// 改成「先把旧货搬到空格」之后又变成「换个配方，旧货噌地跳到最后两格去了」。
+        ///
+        /// 真正的答案是<b>谁都别动</b>：旧货留在它原来的格子里，只把方向改成本地供应
+        /// 让运输机把它取走；新配方要的货优先落在已经放着这种货的格子上，
+        /// 剩下的去占**没有存货**的格子。于是变质结构上不可能发生，也没有任何东西会跳位置。
+        ///
+        /// 三遍的顺序是必须的：「已有的先占」要在「找空格」之前**全部**做完，
+        /// 否则先处理的那一种货可能占掉后一种货已经在用的那个空标签格。
         /// </summary>
         private static bool SyncStorageLayout(PlanetFactory factory, StationComponent station, int[] requires, int[] products)
         {
@@ -308,55 +319,181 @@ namespace ProjectEden.Patches
             int total = station.storage.Length;
             int length = total > MaxSafeStorageKinds ? MaxSafeStorageKinds : total;
 
-            var cursor = 0;
+            var claimed = 0L;
             var changed = false;
 
-            for (var i = 0; i < requires.Length && cursor < length; i++, cursor++)
-                changed |= SetSlot(station, cursor, requires[i], ELogisticStorage.Demand);
+            // 第一遍：本配方要的货，优先落在**已经放着这种货的格子**上——位置一格都不动。
+            var reqPlaced = 0L;
+            var prodPlaced = 0L;
 
-            for (var i = 0; i < products.Length && cursor < length; i++, cursor++)
-                changed |= SetSlot(station, cursor, products[i], ELogisticStorage.Supply);
+            for (var i = 0; i < requires.Length && i < 63; i++)
+                if (ClaimExisting(station, length, requires[i], ELogisticStorage.Demand, ref claimed, ref changed))
+                    reqPlaced |= 1L << i;
+
+            for (var i = 0; i < products.Length && i < 63; i++)
+                if (ClaimExisting(station, length, products[i], ELogisticStorage.Supply, ref claimed, ref changed))
+                    prodPlaced |= 1L << i;
+
+            // 第二遍：其余的占一个**没有存货**的格子。
+            for (var i = 0; i < requires.Length && i < 63; i++)
+                if ((reqPlaced & (1L << i)) == 0)
+                    ClaimFree(station, length, requires[i], ELogisticStorage.Demand, ref claimed, ref changed);
+
+            for (var i = 0; i < products.Length && i < 63; i++)
+                if ((prodPlaced & (1L << i)) == 0)
+                    ClaimFree(station, length, products[i], ELogisticStorage.Supply, ref claimed, ref changed);
 
             // 催化反应器还要两格：催化剂（需求）和待生催化剂（供应）。
             //
             // <b>它必须排在这里，而不是由那边自己去填。</b> 下面那个清理循环会把
-            // cursor 之后的格子全清掉，唯一的赦免是 count > 0——而催化剂槽恰恰
+            // 没被认领的格子清掉，唯一的赦免是 count > 0——而催化剂槽恰恰
             // 要在**空的时候**存在（空着才是在向物流网要货）。从别处填的话，
             // 每 tick 都会被这里擦掉一次，症状是「反应器永远等不到催化剂」，
             // 而病因在一个名字里根本没有「催化剂」三个字的方法里。
             if (CatalystBedPatches.IsReactor(factory, station.entityId))
-                changed |= CatalystBedPatches.LayoutSlots(station, ref cursor, length);
+                changed |= CatalystBedPatches.ClaimSlots(station, length, ref claimed);
 
-            // 多出来的格子清空，免得换配方后残留旧物品的需求。
-            // 这里要一直清到数组末尾而不是 length：早先版本按 12 格建过站点，
-            // 那些建筑的 storage 数组已经存进存档，只改 prefabDesc 不会缩短它，
-            // 残留在第 5 格之后的物品照样会让简要信息面板越界。
-            for (; cursor < total; cursor++)
+            // 第三遍：没被本配方认领的格子。
+            //
+            // 还有存货的——那是旧配方剩下的东西——**位置不动**，只改挂本地供应让运输机取走；
+            // 取空之后下一轮自然会走到下面那个分支被清掉。
+            //
+            // 要一直走到数组末尾而不是 length：早先版本按 12 格建过站点，那些建筑的
+            // storage 数组已经存进存档，只改 prefabDesc 不会缩短它，残留在后面的物品
+            // 照样会让简要信息面板越界。
+            for (var i = 0; i < total; i++)
             {
-                if (station.storage[cursor].itemId == 0) continue;
-                if (station.storage[cursor].count > 0) continue;
+                if (i < length && (claimed & (1L << i)) != 0) continue;
+                if (station.storage[i].itemId == 0) continue;
 
-                station.storage[cursor].itemId = 0;
-                station.storage[cursor].localLogic = ELogisticStorage.None;
-                station.storage[cursor].remoteLogic = ELogisticStorage.None;
+                if (station.storage[i].count > 0)
+                {
+                    // **只把「需求」翻成「供应」，仓储和供应一律不碰。**
+                    // 一个还挂着需求的旧格子会继续向物流网要一种本配方根本不用的货，
+                    // 那必须停掉；而「仓储」是玩家自己设的（比如他想用传送带喂料、
+                    // 不让运输机插手），翻掉它就是又一次和玩家抢方向盘。
+                    if (station.storage[i].localLogic != ELogisticStorage.Demand) continue;
+
+                    station.storage[i].localLogic = ELogisticStorage.Supply;
+                    changed = true;
+
+                    ReportLeftover(station.storage[i].itemId, station.storage[i].count, i);
+
+                    continue;
+                }
+
+                station.storage[i].itemId = 0;
+                station.storage[i].localLogic = ELogisticStorage.None;
+                station.storage[i].remoteLogic = ELogisticStorage.None;
                 changed = true;
             }
 
             return changed;
         }
 
-        private static bool SetSlot(StationComponent station, int index, int itemId, ELogisticStorage logic)
+        /// <summary>已经放着这种货的格子，原地认领。找到返回 true。</summary>
+        internal static bool ClaimExisting(StationComponent station, int length, int itemId,
+            ELogisticStorage logic, ref long claimed, ref bool changed)
         {
-            if (station.storage[index].itemId == itemId && station.storage[index].localLogic == logic) return false;
+            if (itemId <= 0) return false;
+
+            for (var i = 0; i < length; i++)
+            {
+                if ((claimed & (1L << i)) != 0 || station.storage[i].itemId != itemId) continue;
+
+                claimed |= 1L << i;
+                changed |= Apply(station, i, itemId, logic);
+
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 占一个**没有存货**的格子。有存货的一律不碰——那正是「不许变质」这条规矩本身。
+        /// 一个都找不到时什么也不做：机器会因为 <see cref="FindSlot"/> 找不到格子而停着等，
+        /// 那是看得见、把货取走就能恢复的故障，而变质是不可逆的。
+        /// </summary>
+        internal static bool ClaimFree(StationComponent station, int length, int itemId,
+            ELogisticStorage logic, ref long claimed, ref bool changed)
+        {
+            if (itemId <= 0) return false;
+
+            for (var i = 0; i < length; i++)
+            {
+                if ((claimed & (1L << i)) != 0 || station.storage[i].count > 0) continue;
+
+                claimed |= 1L << i;
+                changed |= Apply(station, i, itemId, logic);
+
+                return true;
+            }
+
+            ReportNoFreeSlot(itemId);
+
+            return false;
+        }
+
+        /// <summary>
+        /// 写下这一格的物品和方向。<b>只会写到「本来就是这种货」或者「一件存货都没有」
+        /// 的格子上</b>（两个认领方法各自保证了这一点），所以这里不可能把 A 变成 B。
+        ///
+        /// <b>方向只在这一格刚被指派给这种货的时候写一次，之后归玩家。</b>
+        /// 原先是每 tick 强制写回去的，后果是物流站面板上那三个「需求 / 仓储 / 供应」
+        /// 按钮成了摆设——点下去、松手就弹回来，而玩家完全看不出为什么。
+        /// 有人想走传送带喂料，就得把原料格从「需求」改成「仓储」让运输机别再送；
+        /// 这是个合理的玩法，不该被自动布局锁死。
+        ///
+        /// 自动布局仍然负责「哪一格放哪种货」——那是跟着配方走的，玩家改不了也不需要改。
+        /// </summary>
+        private static bool Apply(StationComponent station, int index, int itemId, ELogisticStorage logic)
+        {
+            bool fresh = station.storage[index].itemId != itemId;
 
             station.storage[index].itemId = itemId;
-            station.storage[index].localLogic = logic;
-            // 只做行星内物流，不参与星际配送
-            station.storage[index].remoteLogic = ELogisticStorage.None;
+
+            if (fresh)
+            {
+                station.storage[index].localLogic = logic;
+                // 默认不参与星际配送；玩家想开就自己开。
+                station.storage[index].remoteLogic = ELogisticStorage.None;
+            }
 
             if (station.storage[index].max <= 0) station.storage[index].max = Config.stationMaxItemCount;
 
-            return true;
+            return fresh;
+        }
+
+        private static int _leftoverReported;
+        private static int _noFreeSlotReported;
+
+        private static void ReportLeftover(int itemId, int count, int slot)
+        {
+            // 抢占要在拼字符串之前：这条路跑在 _assembler_parallel 上。
+            if (Interlocked.Exchange(ref _leftoverReported, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑换配方：旧配方剩下的 {count} 个「{ItemName(itemId)}」留在原来的第 {slot} 格，" +
+                "只把方向改成了本地供应，等物流运输机取走——**位置不动，也不会变成新配方的产物**。" +
+                "这一行整局只打一次。");
+        }
+
+        private static void ReportNoFreeSlot(int itemId)
+        {
+            if (Interlocked.Exchange(ref _noFreeSlotReported, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogWarning(
+                $"巨型建筑：「{ItemName(itemId)}」排不进储物格——每一格都还有存货。" +
+                "这一格暂时空着，机器会停着等；把旧货取走之后它自己就恢复。" +
+                "（宁可停产也不让物品变质。）");
+        }
+
+        private static string ItemName(int itemId)
+        {
+            ItemProto proto = LDB.items.Select(itemId);
+
+            return proto != null ? proto.name : itemId.ToString();
         }
     }
 }

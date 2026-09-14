@@ -402,6 +402,11 @@ namespace ProjectEden.Patches
 
             if (VFInput.shift || VFInput.control)
             {
+                // **调用前先把侧信道清零。** preloader 把 TryAddItemToPackage 改写成了
+                // 「从侧信道读品质」，协议是调用方在调用前写；不写的话它消费的是上一个
+                // 调用者留下的值，品质凭空长出来。配送运输机本来就没有品质，所以清零即可。
+                if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+
                 int added = player.TryAddItemToPackage(CourierItemId, count, 0, false, 0, false);
 
                 UIItemup.Up(CourierItemId, added);
