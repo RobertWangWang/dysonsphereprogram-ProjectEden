@@ -30,10 +30,10 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.8.0";
+        public const string VERSION = "1.8.1";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
-        private const int SaveVersion = 4;
+        private const int SaveVersion = 5;
 
         internal static ManualLogSource Log;
 
@@ -480,6 +480,7 @@ namespace ProjectEden
             SlotDataStore.Export(w);
             AlloyRatioStore.Export(w);
             CatalystBedStore.Export(w);
+            QualityBuildStore.Export(w);
         }
 
         public void Import(BinaryReader r)
@@ -504,6 +505,9 @@ namespace ProjectEden
             // 催化剂床是版本 4 才追加的一块。读更老的档时流到这里就结束了，**不能再读**——
             // 这个字节流是位置相关的，多读一个 int 就会把后面全部错位。
             if (version >= 4) CatalystBedStore.Import(r);
+
+            // 版本 5 起：每座建筑是用什么品质的材料造的（效果层的唯一输入）
+            if (version >= 5) QualityBuildStore.Import(r);
             else CatalystBedStore.Clear();
 
             // **必须在这里再贴一次。** AlloyRatioPatches 挂在 GameData.Import 上的那个后置
@@ -523,6 +527,7 @@ namespace ProjectEden
             SlotDataStore.Clear();
             AlloyRatioStore.Clear();
             CatalystBedStore.Clear();
+            QualityBuildStore.Clear();
         }
     }
 }
