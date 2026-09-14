@@ -3625,10 +3625,23 @@ different item.**
 This is the deepest change in the mod so far — a preloader adds **29 twin fields** to the game so that
 quality flows along the whole item highway exactly the way vanilla's proliferator points do.
 
-> **Current state: quality can be produced, moved, saved and seen — but it has no effect yet.**
-> The effect layer (quality settling into buildings, +30% at the top) is the next step and is not written.
-> Running this line today buys you metal with a nice number on it and nothing else. **This is stated
-> deliberately — please don't report it as a bug.**
+> **Current state: the effect layer has its first slice, and one link in the chain is still missing.**
+>
+> **Working today**: a building made from quality material **draws less power** — up to −30% at the
+> top, interpolated linearly, written **once at build time** (forcing it every tick fights the station
+> panel's charge slider, and the field is saved, so re-applying on load would compound). Nearly every
+> building has a power consumer, so this one axis covers all of them from a single implementation.
+>
+> **Not working yet**: for quality to reach a building it must first pass from the metal into the
+> *building item*, i.e. through one crafting step. **Only hand-crafting carries it today**:
+> `AssemblerComponent` has `served`/`incServed`/`quaServed`, so inputs bring quality into the machine,
+> but the product side has **only `produced` and no `incProduced`** — vanilla products carry no
+> proliferator points, so the twin transform had nothing to mirror. Adding a twin field for the product
+> is preloader work and is not done.
+>
+> **Also not done**: the per-class axes (assembler speed, mining speed, inserter swing, turret damage —
+> one per building class, +30% at the top). **All of this is stated deliberately; please don't report it
+> as a bug.**
 
 ### What quality is: a property of a stack, not a new item
 
