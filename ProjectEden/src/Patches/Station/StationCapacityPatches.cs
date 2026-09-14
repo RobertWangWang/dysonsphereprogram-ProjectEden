@@ -34,10 +34,39 @@ namespace ProjectEden.Patches
         /// <summary>需要放大容量的建筑 protoId。</summary>
         private static readonly HashSet<int> TargetProtoIds = new HashSet<int>();
 
+        /// <summary>每种物流站在本 mod 改动<b>之前</b>的单格容量。见 BootstrapCapacity。</summary>
+        private static readonly Dictionary<int, int> VanillaSlotMax = new Dictionary<int, int>();
+
+        /// <summary>
+        /// 已经引导过的站点。<b>必须是并发容器</b>——<c>PlanetTransport.GameTick</c> 跑在
+        /// 约 31 个工作线程上，每个线程一颗星球（本仓库第 4 号坑）。
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int PlanetId, int StationId), byte>
+            Bootstrapped = new System.Collections.Concurrent.ConcurrentDictionary<(int, int), byte>();
+
         /// <summary>需要改写最大充能功率的建筑 protoId → 原版值与目标值。</summary>
         private static readonly Dictionary<int, ChargeTarget> ChargePowerByProto = new Dictionary<int, ChargeTarget>();
 
         /// <summary>一个站点原版的充能功率，以及我们希望它至少达到的值。</summary>
+        private static int _bootstrapReported;
+
+        /// <summary>
+        /// <b>把「它是默认值不是锁死值」说出来。</b> 玩家看到面板能改了才知道这是有意的；
+        /// 而在此之前这条一直是「改了没反应」，没人会去猜是每 tick 被压回去了。
+        /// </summary>
+        private static void ReportBootstrapOnce()
+        {
+            if (System.Threading.Interlocked.Exchange(ref _bootstrapReported, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物流站单格容量：配置里的 {Config.slotCapacity:N0} 是**默认值**，不是锁死值——" +
+                "新建的站点直接拿到它，老存档里还停在原版值上的格子会被抬一次，" +
+                "之后每一格都由玩家在面板上自己定，本 mod 不再回写。");
+        }
+
+        /// <summary>换存档时要清，否则新存档里同号的站点会被当成已经引导过。</summary>
+        internal static void ClearBootstrapped() => Bootstrapped.Clear();
+
         private struct ChargeTarget
         {
             public long vanilla;
@@ -131,6 +160,10 @@ namespace ProjectEden.Patches
             int before = model.prefabDesc.stationMaxItemCount;
             int beforeKinds = model.prefabDesc.stationMaxItemKinds;
 
+            // 记下原版默认值：引导已建成的站点时要靠它分辨
+            // 「这一格还停在原版值上」和「玩家自己调过了」。
+            if (before > 0) VanillaSlotMax[itemId] = before;
+
             model.prefabDesc.stationMaxItemCount = Config.slotCapacity;
 
             // 巨型建筑的格数由 megabuildings.json 单独控制，这里只改配置列出的物流站
@@ -190,7 +223,24 @@ namespace ProjectEden.Patches
 
                 int protoId = entityPool[entityId].protoId;
 
-                if (fixCapacity && TargetProtoIds.Contains(protoId))
+                // **一次性引导，不是每 tick 强制。**
+                //
+                // 这个 max 正是物流站面板上那个「每格库存上限」输入框写的字段。
+                // 原先这里每 tick 都把它压回配置值，于是玩家改完一松手就弹回去——
+                // 和当年「最大充能功率」滑条被压回去<b>是同一个字段级的错误</b>，
+                // 那一条就在这个文件下面几十行的地方写着，而 max 没跟着改。
+                //
+                // 配置里那个数的正确身份是<b>默认值</b>：新建的站点由 prefabDesc 直接拿到它，
+                // 已经建成的（老存档）在这里被抬一次。抬过之后这一格就归玩家了。
+                //
+                // 两道闸都要：<b>每座站点只引导一次</b>（否则玩家把上限设成正好等于原版默认值时，
+                // 会被每 tick 抢一次方向盘），而且<b>只抬还停在原版值或 0 上的格子</b>
+                // （否则读档时会把玩家调小过的上限又顶回去）。
+                if (fixCapacity && TargetProtoIds.Contains(protoId) &&
+                    Bootstrapped.TryAdd((factory.planetId, i), 0))
+                {
+                    VanillaSlotMax.TryGetValue(protoId, out int vanillaMax);
+
                     for (var s = 0; s < station.storage.Length; s++)
                     {
                         // 催化剂床那两格有自己的容量（见 catalyst.json 的 //slotCapacity）。
@@ -203,8 +253,16 @@ namespace ProjectEden.Patches
                         // 单独配了容量，这是同一个坑换了座建筑。
                         if (CatalystBedPatches.OwnsSlot(station.storage[s].itemId)) continue;
 
-                        if (station.storage[s].max != capacity) station.storage[s].max = capacity;
+                        int current = station.storage[s].max;
+
+                        // 0 = 还没铺过的格子；等于原版默认 = 老存档里没人动过的格子。
+                        // 其余一律不碰——那是玩家自己设的。
+                        if (current == 0 || (vanillaMax > 0 && current == vanillaMax))
+                            station.storage[s].max = capacity;
                     }
+
+                    ReportBootstrapOnce();
+                }
 
                 if (!fixCharge || consumerPool == null) continue;
                 if (!ChargePowerByProto.TryGetValue(protoId, out ChargeTarget charge)) continue;

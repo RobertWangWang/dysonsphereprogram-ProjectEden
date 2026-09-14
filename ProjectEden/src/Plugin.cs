@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.8.1";
+        public const string VERSION = "1.8.2";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -528,6 +528,8 @@ namespace ProjectEden
             AlloyRatioStore.Clear();
             CatalystBedStore.Clear();
             QualityBuildStore.Clear();
+            // 站点号在新存档里会重复使用，不清的话那些站点会被当成「已经引导过容量」
+            Patches.StationCapacityPatches.ClearBootstrapped();
         }
     }
 }
