@@ -183,6 +183,19 @@ namespace ProjectEden.Utils
         /// 采矿时消耗矿脉储量吗。<c>false</c> = 矿脉永不枯竭。
         /// </summary>
         public bool consumeVeins;
+
+        /// <summary>
+        /// 排查开关：每 10 秒打一行这台机器的实测状态。
+        ///
+        /// <b>为什么要有它。</b> 「产量不对」这条链有好几段——前置有没有跑、写进去的
+        /// <c>miningSpeed</c> 有没有到达那一行乘法、<c>time</c> 有没有在涨、产出有没有
+        /// 被仓位堵住——每一段出问题的表现都是同一个「数不对」。生产统计是全星球汇总，
+        /// 分不开同星球上的第二台采矿机，所以必须有一条**逐台**的状态行。
+        /// 这是 <c>courierDebugLog</c> 同一个形状、同一个理由。
+        ///
+        /// 默认 <c>false</c>；开着时每台每 10 秒一行，不影响产量。
+        /// </summary>
+        public bool debugLog;
     }
 
     internal class MachineGeneratorEntry

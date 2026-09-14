@@ -451,7 +451,9 @@
         "oresPerMinute": 10000,
         "workEnergyWatt": 1000000,
         "stationCapacity": 100000,
-        "consumeVeins": false
+        "consumeVeins": false,
+        "//debugLog": "排查开关：每 10 秒打一行这台机器的实测状态（真实产量、power/damper/speed/矿脉数、每 tick 真正累加的 time、仓位）。生产统计是全星球汇总，同一颗星上有第二台采矿机就分不开，所以要有逐台的状态行。查完改回 false。",
+        "debugLog": false
       },
       "recipeId": 6534,
       "//recipeHandcraftOnly": "只能手搓，而且没有前置科技：配方 Type 设成 0(None)，合成器照样列得出来，而配方选择器按 filter != recipe.Type 过滤，没有哪台机器的 assemblerRecipeType 会等于 0。「无需科技即可解锁」由注册时的 UnlockKey = -1 保证，和这一条是两件事。",
