@@ -1,6 +1,6 @@
 {
   "name": "ProjectEden",
-  "version_number": "1.8.1",
+  "version_number": "1.8.2",
   "website_url": "https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden",
   "description": "把戴森球计划的后期产线整体拉满：十一座万倍速巨型建筑、九种新矿脉、随货物流动的物品品质、会在射线里自愈的活性透镜、从煤和水通到有机化学与炼油的完整化工链、逐台可调配比的合金、5000 层集装（带 preloader）。每个数值都是从真实化学与物理推出来的，全在 JSON 里可调。",
   "dependencies": [

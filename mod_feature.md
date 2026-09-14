@@ -344,6 +344,10 @@ Research mode has no products and takes no part in shipping.
 > If you want sorters to be able to take from labs as well, set `outputReserveItems` in `lab.json` to a few hundred —
 > that many items are held back in each output slot, so virtual shipping and physical extraction can coexist.
 
+> **Clicking a lab does not open a station panel** — a lab carries no station component at all (`stationId` is 0),
+> so this is not the same thing as a mega building, which really does have one and opens both panels side by side.
+> The paragraph below is why.
+
 > This is *virtual* supply: **you will not see drones flying**. Labs were not given a real logistics station because
 > labs stack — every level would grow its own station and its own fleet, and it would only affect newly built labs,
 > leaving existing saves to be rebuilt by hand. Virtual supply works on labs that already exist, immediately.
@@ -2647,15 +2651,43 @@ it takes to hold that output. So switching liquids is invisible on the power gri
 >
 > The further down the column, the heavier and the denser in energy — and also the more sulfur and metal, and the less heat the hot gas path will tolerate. **The two ladders run strictly opposite**, and they are four things separated out of one barrel.
 
-Of the twelve liquids, **naphtha, vacuum gas oil and vanadium residue oil** all come from one recipe —
+Of the thirteen liquids, **naphtha, vacuum gas oil and vanadium residue oil** all come from one recipe —
 **Atmospheric and Vacuum Distillation** (Refinery: crude oil ×10 → naphtha ×2 + refined oil ×3 + gas oil ×3 +
 residue oil ×2), covered in section XI. It **does not dominate vanilla Plasma Refining**: if all you want is
 refined oil, that route is strictly better (1.0 per barrel against 0.3, and it yields hydrogen too). This is
 simply the only way to get the other three cuts.
 
 **Gas oil and residue oil are the two this plant alone will accept** (heavy cuts need dedicated heating and
-atomisation, which an ordinary boiler cannot provide). The other ten **still burn in the vanilla Thermal
+atomisation, which an ordinary boiler cannot provide). The other eleven **still burn in the vanilla Thermal
 Power Plant**: the combustible liquid fuel bit is OR-ed on, so nothing was taken away from them.
+
+#### Crude oil burns too, and it has to be the worst of them
+
+Crude is the only one of the thirteen you can **burn straight out of the ground** — so the moment it burns
+well, the whole refining line loses its reason to exist. It sits at **400 °C**, between algal oil (250) and
+vanadium residue oil (500).
+
+**Why below the residue**, by the same rule as above (the temperature tracks fouling and hot corrosion, not
+flame temperature): the residue concentrates vanadium and sulfur and looks dirtier, but it is a cut that has
+**already been desalted**; crude is the untreated whole barrel, carrying the same vanadium and sulfur **plus
+salt and water** — and sodium is the other half of the Na₂SO₄–V₂O₅ eutectic that drives hot corrosion, with
+light ends flashing on top of that. **Dirty in both, versus dirty in one.**
+
+**The trade was computed, not guessed**: distillation is 10 crude → 2 naphtha + 3 refined oil + 3 gas oil +
+2 residue oil, one item for one.
+
+| Route | Electricity |
+|---|---|
+| Burn 10 barrels of crude directly (4.05 MJ × η 0.390) | **15.8 MJ** |
+| Distil first, then burn each cut at its own temperature | **21.5 MJ** |
+
+**Refining once buys 36% more** — large enough to be worth the refinery, not so large that crude becomes
+worthless. Its role has the same shape as the Fixed-Rate Miner's: coarse, sufficient, and something you will
+eventually want to replace.
+
+The 4.05 MJ heat value is vanilla's, and it agrees with this design — `ores.json` already says crude sits
+"about 10% below the 4.5 a single CH₂ should carry, because it carries sulfur, nitrogen and ash".
+**The low heat value and the low temperature are two faces of the same fact**, not a balance fudge.
 
 ### Working temperature is not flame temperature
 
