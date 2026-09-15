@@ -72,26 +72,76 @@ namespace ProjectEden.Patches
         /// </summary>
         private static void Relax(BuildTool tool, ref bool result)
         {
-            if (!Any) return;
+            if (!Any || tool == null) return;
 
-            List<BuildPreview> previews = tool?.buildPreviews;
+            var cleared = false;
+            var allOk = true;
+            var seen = 0;
 
-            if (previews == null || previews.Count == 0) return;
+            // **蓝图粘贴的预览不在 buildPreviews 里，这一条是第三次报障换来的。**
+            //
+            // BuildTool_BlueprintPaste 把预览放在自己的 bpPool / bpCursor 上，基类那个
+            // buildPreviews 对它是空的——于是这整个后置<b>对蓝图粘贴从来没生效过</b>，
+            // 而且因为它一进来就 `Count == 0` 直接 return，连日志都不会留一行。
+            //
+            // 表现出来是「手动建得下去、蓝图粘不下去」：手动走 BuildTool_Click，那条用的是
+            // buildPreviews。玩家报的是「巨型建筑蓝图粘不了」，因为 TowerTooClose 只在
+            // <b>物流站之间</b>触发，而巨型建筑正是会被挨着摆的那一类——但病根和巨型建筑无关，
+            // 蓝图粘贴里<b>任何</b>被条件拦下的东西都一样放行不了。
+            //
+            // 注意 CursorText_Transpiler 那一半是<b>好的</b>：它是注入到方法体里的，
+            // 不依赖这个集合。所以光标提示被接管了、条件却没被清——
+            // 「看起来管了一半」正是这个 bug 难认的原因。
+            if (tool is BuildTool_BlueprintPaste paste && paste.bpPool != null)
+            {
+                int n = paste.bpCursor < paste.bpPool.Length ? paste.bpCursor : paste.bpPool.Length;
+
+                for (var i = 0; i < n; i++)
+                {
+                    if (paste.bpPool[i] == null) continue;
+
+                    seen++;
+                    RelaxOne(tool, paste.bpPool[i], ref cleared, ref allOk);
+                }
+            }
+
+            List<BuildPreview> previews = tool.buildPreviews;
+
+            if (previews != null)
+                for (var i = 0; i < previews.Count; i++)
+                {
+                    if (previews[i] == null) continue;
+
+                    seen++;
+                    RelaxOne(tool, previews[i], ref cleared, ref allOk);
+                }
+
+            if (seen == 0) return;
 
             if (Interlocked.Exchange(ref _logHook, 1) == 0)
                 ProjectEdenPlugin.Log.LogInfo(
                     $"作弊：建造条件放行已生效（无条件建造={Config.noConditionBuild}，无碰撞={Config.noCollision}，" +
                     $"发电无间距={Config.powerNoSpacing}，平地抽水={Config.waterPumpAnywhere}）");
 
-            var cleared = false;
-            var allOk = true;
+            // <b>只抬不压。</b> 返回值只在「确实放行过东西、而且放完之后全部 Ok」时才改成 true，
+            // 任何情况下都不把它改回 false。
+            //
+            // 这不是保守，是必须的：各个工具末尾判返回值时都有一条「不算失败」的豁免
+            // （蓝图粘贴放过 NotEnoughItem，点击建造放过 NeedConn，见 MinerBuildRulePatches），
+            // 照着 allOk 无脑覆盖会把那条豁免抹掉——粘一张材料不齐的蓝图本来能建一半，
+            // 结果一个都建不出来，而且表现是「装了作弊 mod 之后蓝图反而不好使了」。
+            if (cleared && allOk) result = true;
+        }
 
-            for (var i = 0; i < previews.Count; i++)
-            {
-                BuildPreview preview = previews[i];
-
-                if (preview == null) continue;
-
+        /// <summary>
+        /// 放行<b>一个</b>预览。拆出来是因为蓝图粘贴和其它工具的预览存放在两个不同的集合里，
+        /// 而这段逻辑必须一字不差地同时作用于两边——上一版正是因为只遍历了其中一个，
+        /// 蓝图粘贴整条路上的作弊开关都是哑的。
+        ///
+        /// 不用委托、不用闭包：这条每帧都跑。
+        /// </summary>
+        private static void RelaxOne(BuildTool tool, BuildPreview preview, ref bool cleared, ref bool allOk)
+        {
                 if (preview.condition != EBuildCondition.Ok && ShouldClear(preview))
                 {
                     ReportOnce(preview.condition);
@@ -142,16 +192,6 @@ namespace ProjectEden.Patches
                 }
 
                 if (preview.condition != EBuildCondition.Ok) allOk = false;
-            }
-
-            // <b>只抬不压。</b> 返回值只在「确实放行过东西、而且放完之后全部 Ok」时才改成 true，
-            // 任何情况下都不把它改回 false。
-            //
-            // 这不是保守，是必须的：各个工具末尾判返回值时都有一条「不算失败」的豁免
-            // （蓝图粘贴放过 NotEnoughItem，点击建造放过 NeedConn，见 MinerBuildRulePatches），
-            // 照着 allOk 无脑覆盖会把那条豁免抹掉——粘一张材料不齐的蓝图本来能建一半，
-            // 结果一个都建不出来，而且表现是「装了作弊 mod 之后蓝图反而不好使了」。
-            if (cleared && allOk) result = true;
         }
 
         private static bool ShouldClear(BuildPreview preview)
