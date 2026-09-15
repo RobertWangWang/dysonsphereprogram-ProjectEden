@@ -117,6 +117,192 @@ namespace ProjectEden
             return null;
         }
 
+        // ── 就地改原版配方 ──────────────────────────────────────────
+
+        /// <summary>
+        /// 在 <c>LDBTool.PostAddDataAction</c> 阶段调用：给<b>原版</b>配方追加原料。
+        ///
+        /// <b>为什么必须是 Post 而不是 Pre。</b> <c>RecipeProto.InitRecipeItems</c> 把整张
+        /// <c>recipeExecuteData</c> 表重建一遍（IL 0000 <c>newobj</c> + 0005 <c>stsfld</c>），
+        /// 而 LDBTool 在 <c>PostAddDataAction</c> <b>之后</b>才调它——所以这里改完
+        /// <c>Items</c> / <c>ItemCounts</c> 就会被它自动吸收成新的 <c>RecipeExecuteData</c>，
+        /// 我们一行刷新代码都不用写。宇宙矩阵加第七样原料靠的就是这个时序。
+        ///
+        /// <b>改原料条数对存档是安全的，这是读 IL 确认的，不是推测。</b>
+        /// <c>AssemblerComponent.Export</c> 每个数组都<b>先写自己的长度再写内容</b>
+        /// （IL 00E2 写 <c>requires</c> 长度、0109 写 <c>served</c> 长度，都是一个字节），
+        /// 于是字节流自带长度、能原样读回；<c>Import</c> 读完之后在 IL 040B–0446 按
+        /// <b>当前</b>配方 <c>Array.Resize</c>：
+        /// <code>
+        /// int n = recipeExecuteData.requires.Length;
+        /// if (served.Length != n) { Array.Resize(ref served, n); Array.Resize(ref incServed, n); }
+        /// </code>
+        /// 老存档里 2 长的 <c>served</c> 会被补成 3，旧值保留、新槽为 0。
+        /// <c>LabComponent.Import</c> 是同一套自愈。
+        ///
+        /// <b>这只对「全局改配方」成立。</b> 逐台建筑的 <c>recipeExecuteData</c> 克隆
+        /// （<c>AlloyRatioPatches</c> 那条路）改长度仍然会和存档打架，因为 <c>Import</c>
+        /// 是从 <c>RecipeProto</c> 的<b>静态字典</b>重新取的对象（IL 03F5 / 06AB），
+        /// 克隆的形状根本活不过一次读档。两者别混。
+        ///
+        /// <b>投料槽数不是问题。</b> 制造台这一侧全是 <c>ldlen</c> 循环——
+        /// <c>UpdateNeeds</c>、<c>InternalUpdate</c>、<c>UIAssemblerWindow.SyncServingStorage</c>
+        /// 都按数组长度走，本仓库的生物温室已经在跑四原料配方了。
+        /// 被写死成 6 槽的是<b>实验室</b>的产出模式，那条记在
+        /// <see cref="Patches.UniverseMatrixPatches"/> 里，和这里无关。
+        /// </summary>
+        internal static void OnPostAddData()
+        {
+            VanillaRecipeEditEntry[] edits = Config?.vanillaEdits;
+
+            if (edits == null || edits.Length == 0) return;
+
+            foreach (VanillaRecipeEditEntry entry in edits) ApplyEdit(entry);
+        }
+
+        private static void ApplyEdit(VanillaRecipeEditEntry entry)
+        {
+            if (entry?.add == null || entry.add.Length == 0) return;
+
+            int resultId = ResolveItem(entry.result, null);
+
+            if (resultId <= 0)
+            {
+                ProjectEdenPlugin.Log.LogError($"改原版配方：产物「{entry.result}」解析不出物品 ID，这条跳过");
+
+                return;
+            }
+
+            RecipeProto recipe = FindByResult(resultId, entry.type);
+
+            if (recipe == null) return; // FindByResult 自己报了原因
+
+            if (recipe.Items == null || recipe.ItemCounts == null
+                || recipe.Items.Length != recipe.ItemCounts.Length)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"改原版配方：配方 {recipe.ID}「{recipe.Name}」的 Items/ItemCounts 形状不对，这条跳过");
+
+                return;
+            }
+
+            string before = Describe(recipe);
+            var added = 0;
+
+            foreach (RecipeItemEntry item in entry.add)
+            {
+                if (item == null) continue;
+
+                int id = ResolveItem(item.@ref, item);
+
+                if (id <= 0)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"改原版配方：配方 {recipe.ID}「{recipe.Name}」要加的原料「{item.@ref}」解析不出 ID，这一项跳过");
+
+                    continue;
+                }
+
+                // **幂等**：PostAddDataAction 热重载时会重跑，已经有了就不要再加一遍
+                if (Array.IndexOf(recipe.Items, id) >= 0)
+                {
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"改原版配方：配方 {recipe.ID}「{recipe.Name}」里已经有 "
+                        + $"{LDB.items.Select(id)?.name ?? id.ToString()} 了，跳过");
+
+                    continue;
+                }
+
+                int count = item.count > 0 ? item.count : 1;
+
+                recipe.Items = Grow(recipe.Items, id);
+                recipe.ItemCounts = Grow(recipe.ItemCounts, count);
+                added++;
+            }
+
+            if (added == 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"改原版配方：{recipe.ID}「{recipe.Name}」加了 {added} 样原料。"
+                + $"改前 {before}；改后 {Describe(recipe)}。"
+                + "（原料条数变了，老存档由原版自己的 Array.Resize 兜住，新槽从 0 开始）");
+        }
+
+        /// <summary>
+        /// 按产物找配方。<b>不写死配方号</b>——原版配方号在 <c>resources.assets</c> 里，
+        /// 离线枚举不到，写错一个数字就是悄悄改了别的配方。
+        ///
+        /// 匹配到多条而 <c>type</c> 又没点名时，<b>一条都不改</b>并把候选全列出来。
+        /// 随便挑第一条改，在装了别的内容 mod（它们会给同一产物加替代配方）时就是
+        /// 「改中了哪条全看运气」，而且不会报错。
+        /// </summary>
+        private static RecipeProto FindByResult(int resultId, int type)
+        {
+            RecipeProto[] all = LDB.recipes?.dataArray;
+
+            if (all == null) return null;
+
+            RecipeProto found = null;
+            var hits = 0;
+            var names = new StringBuilder();
+
+            foreach (RecipeProto recipe in all)
+            {
+                if (recipe?.Results == null || Array.IndexOf(recipe.Results, resultId) < 0) continue;
+                if (type > 0 && recipe.Type != (ERecipeType)type) continue;
+
+                hits++;
+
+                if (found == null) found = recipe;
+
+                if (names.Length > 0) names.Append("、");
+
+                names.Append($"{recipe.ID}「{recipe.Name}」({recipe.Type})");
+            }
+
+            string what = LDB.items.Select(resultId)?.name ?? resultId.ToString();
+
+            if (hits == 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"改原版配方：没找到产出「{what}」" + (type > 0 ? $"且类型为 {(ERecipeType)type}" : "") + " 的配方，这条跳过");
+
+                return null;
+            }
+
+            if (hits > 1)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"改原版配方：产出「{what}」的配方有 {hits} 条（{names}），"
+                    + "分不清改哪条，**一条都没改**。在 recipes.json 的这条 vanillaEdits 上加 type 点名。");
+
+                return null;
+            }
+
+            return found;
+        }
+
+        /// <summary>
+        /// 解析一个物品引用。<c>id</c> 是原版号，<c>ref</c> 走
+        /// <see cref="OreRegistry.FindItemIdByRef"/>（items 段的 key、
+        /// 「矿种key.ore」/「.ingot」，或者 <c>vanilla:中文名</c>）。
+        /// </summary>
+        private static int ResolveItem(string @ref, RecipeItemEntry entry)
+        {
+            if (entry != null && entry.id > 0) return entry.id;
+
+            return string.IsNullOrEmpty(@ref) ? 0 : OreRegistry.FindItemIdByRef(@ref);
+        }
+
+        private static int[] Grow(int[] array, int value)
+        {
+            var next = new int[array.Length + 1];
+            Array.Copy(array, next, array.Length);
+            next[array.Length] = value;
+
+            return next;
+        }
+
         /// <summary>把配方的进出料拼成人话，方便对着日志核对确实克隆对了。</summary>
         private static string Describe(RecipeProto recipe)
         {
@@ -148,6 +334,34 @@ namespace ProjectEden
     internal class ExtraRecipesConfig
     {
         public ExtraRecipeEntry[] recipes;
+
+        /// <summary>就地改原版配方（只加料）。见 <see cref="VanillaRecipeEditEntry"/>。</summary>
+        public VanillaRecipeEditEntry[] vanillaEdits;
+    }
+
+    /// <summary>
+    /// 给一条<b>原版</b>配方追加原料。和 <see cref="ExtraRecipeEntry"/> 是两件事：
+    /// 那个是「加一条新配方」，这个是「原版那条本身要多吃点东西」。
+    ///
+    /// 只能加料。删料和改份数没做——需要什么再加什么，别先把没人要的开关铺出来。
+    /// </summary>
+    [Serializable]
+    internal class VanillaRecipeEditEntry
+    {
+        /// <summary>
+        /// 认哪条配方：按<b>产物</b>找，不写配方号。语法同 ores.json 的 <c>ref</c>，
+        /// 常用的是 <c>vanilla:中文名</c>。
+        /// </summary>
+        public string result;
+
+        /// <summary>
+        /// 同一产物有多条配方时用它点名（ERecipeType）。留 0 表示不限；
+        /// <b>不限而又匹配到多条时一条都不改</b>，并把候选列进日志。
+        /// </summary>
+        public int type;
+
+        /// <summary>要追加的原料。已经在配方里的会被跳过（热重载幂等）。</summary>
+        public RecipeItemEntry[] add;
     }
 
     [Serializable]
