@@ -380,6 +380,28 @@ Hydrogen ×1.
 It exists so the mega chemical plant can make refined oil: the game's recipe picker filters on a **single recipe
 type** and a machine only ever accepts one, so chemical facilities could not do a refining job.
 
+### Vanilla recipes that were changed
+
+**Processor**: on top of its original ingredients, it now also eats **Electromagnetic Matrix ×2**.
+
+This is a **balance change, not something derived from chemistry**, so this document says so outright. The processor
+feeds a very wide downstream (quantum chips, plane filters, a long list of buildings), so hanging a matrix dependency
+on it effectively makes the research lab part of the production line much earlier — **that is intended, not a side
+effect**. If you do not want it, empty the `add` list on that `vanillaEdits` entry in `recipes.json` and drop the file
+into your profile as an override; no rebuild needed.
+
+> **Existing saves are fine, and that was confirmed by reading the IL rather than assumed.** Adding an ingredient takes
+> the recipe's input slots from 2 to 3, and `AssemblerComponent.Export` **writes each array's own length before its
+> contents**, while `Import` reads them back and then `Array.Resize`s to the current recipe — so a 2-long input array in
+> an old save is grown to 3 with **the old amounts kept and the new slot starting at 0**. An assembler already making
+> processors does not jam; it simply starts wanting matrices.
+
+The recipe is identified **by its product, never by a recipe id**: vanilla recipe ids live in `resources.assets` and
+cannot be enumerated offline, so a hardcoded number that turns out wrong would quietly edit a different recipe. If more
+than one recipe matches a product and the config did not name a type, **nothing is changed** and the candidates are
+listed in the log — with other content mods installed, "which one got edited is down to luck" is far worse than not
+applying. The startup log prints the **complete ingredient list before and after**.
+
 ---
 
 ## IX. Custom Ores and Gases
@@ -3796,6 +3818,91 @@ Rebuild after editing, or drop a same-named file into the profile to override it
 described in section XIV.
 
 
+## XXXII. Data Abnormality and Achievements: undoing a false positive
+
+Install this mod and the game decides your save has "abnormal data", then switches off **achievements**
+and **metadata** together. One switch in `abnormality.json`, **on by default**, suppresses that
+determination.
+
+### Why we trip it unavoidably
+
+This has nothing to do with cheating — **turn all six `cheats.json` switches off and it still fires.**
+
+The game has twenty `ABN_*` determinators. `ABN_ProtoData.CheckProto` is a single statement:
+
+```csharp
+if (!protoTable.Signature.Equals(ProtoSignature_0_10_30_3100.CalculateSignature(protoTable)))
+    abnormalData.TriggerAbnormality(protoId, 0, new long[] { protoType });
+```
+
+It computes a signature over `LDB.items` / `techs` / `recipes` / `veges` / `veins` and compares it against
+the one baked into the table. This mod puts nearly a hundred items into the item table, eighty-odd recipes
+into the recipe table and nine veins into the vein table, so none of those three signatures can possibly
+match. **Measurement added a fourth: the tech table** — nothing here adds a tech, but the stacking and
+research-speed techs have their `UnlockValues` rewritten in place, and a signature covers a table's
+**contents**, not its length, so **editing one proto trips the same check as adding one**. It hangs off `onGameBegin` and `beforeGameSave`, and its `minRecordVersion` is 0, so no version
+gate holds it back — **three hits on every load and three on every save**. Any content mod is the same.
+
+And it is not only achievements that get blocked. `NothingAbnormal()` has nine consumers:
+
+| Consumer | What it blocks |
+|---|---|
+| `AchievementLogic.active` | Achievements |
+| `PropertyLogic.active` | **Metadata** — for most players this hurts more than the Steam achievements |
+| `GameSave.SaveCurrentGame` | The Milky Way upload login on save |
+| `UIAchievementPanel` / `UIPropertyWindow` / `UIAbnormalityTip` / `UIAbnormalityCheckInfo` (twice) | The warning lines |
+| `TestAbnormalityCheck.Update` | The ninth — a test class the developers left behind, never run in a normal game |
+
+> **Sandbox mode is not a way around it.** `TriggerAbnormality`'s first instruction really is "return if
+> sandbox", but `AchievementLogic.get_active` checks `isSandboxMode` too — achievements are off in sandbox
+> regardless.
+
+### How: three patches, none of which touch the save
+
+1. **Prefix `TriggerAbnormality` and return.** All twenty determinators funnel through this one method
+   (enumerated, no exceptions), so one patch covers them and there is no need to disable them one by one.
+   This half means "nothing more gets written into the save".
+2. **Postfix `NothingAbnormal` to return true.** This half is what covers a save that is **already
+   flagged** — and every save that has ever run this mod already is, so **without it the feature does
+   nothing at all for an existing save**.
+3. **Postfix `IsAbnormalTriggerred` to return false.** The achievement panel asks per-entry as well as
+   overall; miss this and the panel contradicts itself.
+
+**Not one byte of the existing record in your save is touched.** `ClearAbnormality(0)` would wipe all 3000
+slots in one call and looks more thorough, but it rewrites something in your save **irreversibly**, while
+changing the return value covers all nine consumers just as completely and **reverts entirely the moment
+you turn the switch off**. If a return value solves it, do not go and edit someone else's data.
+
+> **Do not "just skip initialising the determinators".** `AbnormalityLogic.InitDeterminators` only creates
+> the dictionary in its first two instructions, so skipping it leaves that field null — and
+> `AbnormalityLogic.GameTick`'s second instruction asks that dictionary for an enumerator, i.e. a null
+> reference every tick. Even clearing it afterwards is **still incomplete**: the event-driven determinators
+> have already subscribed inside `Init`, and clearing the dictionary does not unsubscribe them — and
+> `ABN_ProtoData`, the one we know we trip, is exactly one of those.
+
+### The switch and the log
+
+Edit `BepInEx\config\ProjectEden\abnormality.json` (create it if it does not exist, copying the copy inside
+the DLL) and set `enabled` to false for vanilla behaviour, with no rebuild.
+
+**It writes a line to the log whether it is on or off**, because neither state is recognisable any other
+way: with it on the player never sees the game's own warning again, and with it off achievements and
+metadata simply stay greyed out with nothing saying who did it. Each kind of abnormality it intercepts also
+gets its own line (**once per kind**), so "which ones does this mod actually trip" stays answerable:
+
+```
+数据异常屏蔽：已开启（默认值）。改这里：...
+数据异常屏蔽：拦下一条 ...，判定器 ABN_ProtoData。**已拦下，没有写进存档，成就和元数据不受影响。**
+```
+
+> ⚠️ **With this on, achievements really do unlock and reach Steam.** If you want "unlock locally but do not
+> upload" (what PhantomGamers' AchievementsEnabler does), that needs `SteamAchievementManager` intercepted
+> as well, and **this switch does not do that layer**. If you do not want it, set `enabled` to false.
+>
+> One more side effect: on save, `NothingAbnormal()` being true also triggers the Milky Way statistics
+> upload login. The game does that for any clean save anyway — this only restores clean-save behaviour.
+
+
 ## Config Quick Reference
 
 | File | What it controls |
@@ -3805,7 +3912,7 @@ described in section XIV.
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
-| `recipes.json` | Extra recipes |
+| `recipes.json` | Extra recipes, plus `vanillaEdits`: **append ingredients to a vanilla recipe in place** (currently one entry: Processor + Electromagnetic Matrix ×2) |
 | `power.json` | Power node coverage radius |
 | `belts.json` | Speed of the three belt tiers |
 | `ores.json` | The custom vein table: per-ore IDs, vein density, recolour parameters, recipe lists; extra items (phase, heat value, icon); and the gases injected into gas giants |
@@ -3821,6 +3928,7 @@ described in section XIV.
 | `alienvein.json` | Alien vein: which vein consumes drill bits, the bit predicate's hardness margin and yield formula, and the miner's bit slot |
 | `redox.json` | Redox Combustion Plant: the reductant and oxidiser candidate lists with their per-item oxygen balance, the three grain tiers' heat values and density thresholds, and the oxidiser-ratio slider's range |
 | `lens.json` | Living Lens: power multiplier, photon multiplier (the two are independent), heal rate, and which vanilla catalyst counts as "the other lens" |
+| `abnormality.json` | **Suppresses the "abnormal data" determination**, on by default: the false positive any content mod trips unavoidably. With it off, achievements and metadata stay greyed out for good. A file of its own, same reason as `cargoprobe.json` |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 
 > Before adding an item or recipe to `ores.json`, read the standard in section XII — **properties are derived from
