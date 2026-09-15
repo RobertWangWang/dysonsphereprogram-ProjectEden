@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.8.2";
+        public const string VERSION = "1.8.3";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -64,6 +64,12 @@ namespace ProjectEden
         /// <summary>作弊类开关（cheats.json）。**默认全开**，开着的每条都会在日志里留一行</summary>
         internal static Patches.CheatsConfig CheatsConfig;
 
+        /// <summary>
+        /// 屏蔽「数据异常」判定（abnormality.json）。**默认开**。
+        /// 单独一个文件的理由写在那份 JSON 和 <see cref="Patches.AbnormalityConfig"/> 里。
+        /// </summary>
+        internal static Patches.AbnormalityConfig AbnormalityConfig;
+
         private Harmony _harmony;
 
         private void Awake()
@@ -84,6 +90,7 @@ namespace ProjectEden
             MetalsConfig = JsonHelper.Load<Patches.MetalsConfig>("metals");
             AlloysConfig = JsonHelper.Load<Patches.AlloysConfig>("alloys");
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
+            AbnormalityConfig = JsonHelper.Load<Patches.AbnormalityConfig>("abnormality");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             Patches.LensPatches.Config = JsonHelper.Load<Patches.LensConfig>("lens");
@@ -99,6 +106,7 @@ namespace ProjectEden
             I18N.Load();
 
             ReportCheats();
+            ReportAbnormality();
             ReportCargoProbe();
             Patches.CargoWidening.Report();
             Patches.QualityWidening.Report();
@@ -202,6 +210,12 @@ namespace ProjectEden
             // 必须排在生物矩阵之后：它要读 BioMatrixPatches.MatrixId
             LDBTool.PostAddDataAction += UniverseMatrixPatches.OnPostAddData;
 
+            // recipes.json 的 vanillaEdits：就地给原版配方加原料。
+            // 排在这里有两个理由——要等本 mod 的物品都进了 LDB（ref 才解析得出来），
+            // 又要赶在 EnergyAudit 之前（审计读的得是改完的配方）。
+            // 再往后 LDBTool 自己会调 InitRecipeItems 把改动吸收成 RecipeExecuteData。
+            LDBTool.PostAddDataAction += ExtraRecipeRegistry.OnPostAddData;
+
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，
             // 而原版热值改写、物品注册都得先完成
@@ -241,6 +255,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= MinerStationSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= BioMatrixPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= UniverseMatrixPatches.OnPostAddData;
+            LDBTool.PostAddDataAction -= ExtraRecipeRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= I18N.VerifyCoverage;
             LDBTool.PostAddDataAction -= ProtoArrayCheck.Verify;
 
@@ -300,6 +315,41 @@ namespace ProjectEden
             }
 
             Log.LogWarning($"以下作弊项已开启：{string.Join("、", on.ToArray())}。改这里：{where}");
+        }
+
+        /// <summary>
+        /// 报告「数据异常屏蔽」的状态。<b>关着也要打一行</b>，同 <see cref="ReportCheats"/>。
+        ///
+        /// 这一条比别的更需要这行日志：它开着的时候<b>玩家再也看不到游戏自己的那条警告</b>，
+        /// 关着的时候成就和元数据全程是灰的、也没有任何东西说明是谁干的。
+        /// 两种状态都得能在日志里一眼认出来。
+        /// </summary>
+        private static void ReportAbnormality()
+        {
+            string where = Utils.JsonHelper.OverridePath("abnormality");
+
+            if (AbnormalityConfig == null)
+            {
+                Log.LogError("数据异常屏蔽：abnormality.json 没读出来");
+
+                return;
+            }
+
+            if (!AbnormalityConfig.enabled)
+            {
+                Log.LogInfo(
+                    $"数据异常屏蔽：关闭。本 mod 的默认是**开**，所以走到这一行说明它是被显式关掉的（多半是 {where}）。" +
+                    "关着的后果：装了本 mod 的存档每次读档和存档都会被 ABN_ProtoData 记三笔"
+                        + "（物品/配方/矿脉三张表的签名都变了），**成就和元数据会一直是关着的**。");
+
+                return;
+            }
+
+            Log.LogWarning(
+                $"数据异常屏蔽：已开启（默认值）。改这里：{where}。" +
+                "拦掉 TriggerAbnormality 并让 NothingAbnormal 恒为真——成就、元数据和那几行警告都会恢复正常，" +
+                "**存档里已有的异常记录一个字节都不动**，关掉开关就全都回来。" +
+                "注意开着它成就会真的解锁并进 Steam；只想本地解锁不上传的话得另外拦 SteamAchievementManager，这里没做。");
         }
 
         /// <summary>

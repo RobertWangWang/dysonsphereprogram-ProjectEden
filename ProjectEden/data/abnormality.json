@@ -1,0 +1,19 @@
+{
+  "//": "屏蔽原版的「数据异常」判定，**默认开启**。单独一个文件、不并进 cheats.json，理由有两条：一是 JsonHelper 的磁盘覆盖是整文件生效的，为了翻这一个布尔值去影子掉整份作弊配置，以后对内嵌 cheats.json 的每一次修改都会被静默忽略（CLAUDE.md 记着的 LDBTool CustomID.cfg 同款陷阱，cargoprobe.json 已经为同一条理由单独成文件过一次）；二是性质不同——cheats.json 那六条是主动绕过游戏规则，这一条是修一个**我们装了内容就必然触发的误伤**，作弊全关它照样会响。",
+
+  "//how": "改这里：BepInEx/config/ProjectEden/abnormality.json（不存在就新建，内容照抄本文件）。改完重开游戏即可，不用重新编译。",
+
+  "//why": "我们必然触发，而且和作弊无关。原版的 ABN_ProtoData 判定器干的事是：对 LDB.items / techs / recipes / veges / veins 各算一个签名（ProtoSignature_0_10_30_3100.CalculateSignature），和表里烘死的 ProtoTable.Signature 比，不等就记一笔。注册时机是 onGameBegin 和 beforeGameSave。本 mod 往 items 塞了近百个物品、往 recipes 塞了八十多个配方、往 veins 塞了九种矿脉——这三张表的签名都不可能对上。**实测还有第四张：techs**，因为集装等级和研究速度那几条科技的 UnlockValues 是被就地改写的，而签名算的是表的**内容**不是长度——改一条和加一条触发的是同一道检查。所以每次读档、每次存档各响四次：物品(2)、科技(3)、配方(4)、矿脉(6)。这不是「你作弊了」，是「你装了内容 mod」，任何内容 mod 都一样。",
+
+  "//what": "被卡住的不只是成就。NothingAbnormal() 有九个消费方：AchievementLogic.active（成就）、PropertyLogic.active（**元数据**）、GameSave.SaveCurrentGame（存档时的银河系上传登录）、UIAchievementPanel / UIPropertyWindow / UIAbnormalityTip / UIAbnormalityCheckInfo 两处（那几行警告），外加官方留下的测试类 TestAbnormalityCheck（正常游戏不跑）。对玩家来说元数据那条多半比 Steam 成就更疼。",
+
+  "//how2": "做法是三处：(1) 前置 TriggerAbnormality 直接返回，二十个判定器全部收口在这一个方法上，不用逐个去关；(2) 后置 NothingAbnormal 返回 true，九个消费方一次覆盖；(3) 后置 IsAbnormalTriggerred 返回 false，成就面板的逐条查询。**存档里那份记录一个字节都不动**——GameAbnormalityData_0925.ClearAbnormality(0) 能一把洗掉全部 3000 格，但那是不可逆的，而后置返回值同样有效且开关一关就全都回来。",
+
+  "//scope": "开着它，成就会真的解锁并进 Steam。想要「本地解锁但不往 Steam 传」（PhantomGamers/AchievementsEnabler 的做法），得另外拦 SteamAchievementManager，本开关不做这件事。不想要就把 enabled 改成 false。",
+
+  "//note": "还有一条副作用值得知道：GameSave.SaveCurrentGame 里 NothingAbnormal() 为真会顺带调 milkyWayWebClient.SendUploadLoginRequest()，也就是存档时会去做银河系统计上传的登录。原版对一份干净存档本来就这么干，这里只是让它恢复成干净存档的行为。",
+
+  "//sandbox": "沙盒模式不是绕路：TriggerAbnormality 第一条指令确实是 isSandboxMode 就 return（沙盒下原版就不记异常），但 AchievementLogic.get_active 里同样查 isSandboxMode，沙盒下成就照样关着。",
+
+  "enabled": true
+}
