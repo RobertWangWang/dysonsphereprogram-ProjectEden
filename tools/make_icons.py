@@ -2844,6 +2844,51 @@ def composite_propellant():
     return d
 
 
+def refined_oil_fuel_rod():
+    """精炼油燃料棒：钛壳里灌着琥珀色的凝胶，侧面开一道观察窗。
+
+    <b>识别点是「金属壳 + 里面看得见的膏体」，不是又一根药柱。</b>
+    固体复合推进剂那张也是细高圆柱，所以这一张必须在别处分开：那根是土褐色的
+    裸药柱、端面开星孔（只让端面烧）；这根端面封死，识别信息全在侧面那道窗上。
+
+    窗里的琥珀色直接取自蜡油／精炼油那一族的体色——<b>一眼要看出「里面装的是油」</b>，
+    这是它和所有金属锭类图标的分界。窗里那三道纹**故意画成不水平的**：
+    凝胶是膏体不是液体，它立得住，所以不会形成液面。这一笔就是整个物品的设计。
+
+    剪影比药柱更细更高（半宽 15、高 54），因为它的卖点正是「装得多、占得少」。
+    """
+    d = canvas()
+
+    shell = _pal("#b9bec4")      # 钛：偏冷的银
+    band = _pal("#6c737b")
+    gel = "#b8752c"              # 琥珀，和蜡油／精炼油同族
+    gel_hi = "#e0a352"
+    gel_lo = "#7d4d18"
+
+    _cyl(d, 0, -26, 15, 54, shell, cap_gloss=0.3)
+
+    # 壳箍：上下各一道，说明这是个压力容器。**避开观察窗的纵向区间**，
+    # 否则箍和窗会互相穿过去，看着像画错了
+    for y in (-20.0, 19.0):
+        d.append(dw.Path(fill=band[2], stroke=band[3], stroke_width=1.1)
+                 .M(-15, y).L(15, y).L(15, y + 5).L(-15, y + 5).Z())
+
+    # 观察窗：先挖一条暗底的竖槽，再把胶体填进去
+    d.append(dw.Path(fill=gel_lo, stroke=band[3], stroke_width=1.3, stroke_linejoin="round")
+             .M(-8, -13).L(8, -13).L(8, 17).L(-8, 17).Z())
+    d.append(dw.Path(fill=gel)
+             .M(-6.4, -11.2).L(6.4, -11.2).L(6.4, 15.2).L(-6.4, 15.2).Z())
+
+    for y in (-4.5, 2.5, 9.5):
+        d.append(dw.Path(stroke=gel_lo, stroke_width=1.5, fill="none", stroke_linecap="round")
+                 .M(-5.2, y).C(-1.8, y - 2.2, 1.8, y + 2.0, 5.2, y - 0.6))
+
+    d.append(dw.Path(fill=gel_hi, fill_opacity=0.5)
+             .M(-6.4, -11.2).L(-3.0, -11.2).L(-4.6, 15.2).L(-6.4, 15.2).Z())
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -2905,6 +2950,9 @@ if __name__ == "__main__":
     render(electrorefining(), "electrorefining")
     render(zone_melting(), "zone-melting")
     render(carbonyl_refining(), "carbonyl-refining")
+
+    # 凝胶燃料棒：和三档药柱同为柱体，靠「金属壳 + 观察窗」分开
+    render(refined_oil_fuel_rod(), "refined-oil-fuel-rod")
 
     # 三档药柱：氧化还原燃烧厂压出来的燃料
     render(bipropellant(), "bipropellant")

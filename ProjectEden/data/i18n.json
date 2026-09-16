@@ -3,6 +3,10 @@
   "//collision": "注册时会**跳过原版已经有的键**并打 WARNING——不然会把原版那条翻译全局改掉。所以像「铁块」「钢材」「低速传送带」这类原版名字不必也不该写进来。",
   "//missing": "启动时会核对一遍：配置里出现过、但这里没有对应条目的中文串，会各报一次 WARNING。新加物品忘了配英文不会静默。",
   "strings": {
+    "精炼油燃料棒": "Refined Oil Fuel Rod",
+    "把炼好的油掺进聚合物增稠剂，搅成不再流淌的膏体，趁它还软灌进钛壳压实。液体燃料最麻烦的地方从来不是烧不动，而是装不住——凝成一根之后它不洒、不挥发、不需要泵，掰断一截就是一次点火。密度是它全部的意义：同样一格空间，它装得下六十桶油。": "Refined oil is worked together with a polymer thickener until it no longer flows, then packed into a titanium casing while it is still soft. The hard part about liquid fuel was never burning it — it was holding it. Set into a rod it does not spill, does not evaporate and needs no pump; snap off a length and that is one ignition. Density is the whole of its point: in the same one slot, it holds sixty barrels of oil.",
+    "精炼油燃料棒 · 凝胶成型": "Refined Oil Fuel Rod · Gel Forming",
+    "增稠剂一进罐，原本能泵能洒的油就慢慢立住了，搅拌桨在里头拖出不会合拢的沟。趁它还软，灌进钛壳压实封口。从此这桶油可以拿在手上、扔进背包、掰成两截——代价是它再也倒不出来了。": "The moment the thickener goes in, oil that could be pumped and poured begins to stand up on its own, and the impeller drags furrows through it that no longer close. While it is still soft it is packed into a titanium casing and sealed. From here that barrel can be held in a hand, dropped in a pack, snapped in two — at the price of never being poured again.",
     "活性透镜": "Living Lens",
     "在菌丝支架上长出来的活复眼。碳化硅按光波长的周期一层层析出，长成之后整枚都还是活的——射线照在上面，被打散的晶格会自己重新长回去；照不到的时候，它和别的活物一样只是老去。装在射线接收站里，它既把电离层的场引得更深，也让接收站自己睁开眼睛。": "A living compound eye grown on a mycelial scaffold. Silicon carbide precipitates layer by layer at the period of a light wavelength, and what comes out is alive all the way through — under the ray beam the lattice knocked apart by the radiation simply grows back; out of the beam it does what anything living does, and ages. Mounted in a ray receiver it draws the ionosphere's field in deeper, and opens the receiver's eye besides.",
     "活性透镜 · 晶格培养": "Living Lens · Lattice Culture",

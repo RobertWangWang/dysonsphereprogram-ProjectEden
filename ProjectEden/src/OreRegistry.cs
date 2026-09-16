@@ -683,7 +683,19 @@ namespace ProjectEden
         /// </summary>
         private static void ApplyFuel(ItemProto item, ExtraItemEntry entry)
         {
-            if (item == null || entry.fuelType == 0 && entry.heatValue == 0L) return;
+            if (item == null) return;
+
+            // 只配了 reactorInc 却不是燃料：机甲根本不会烧它，那个倍率乘在不存在的东西上。
+            // 和「只配一半」同类，所以一起吼出来而不是静默跳过
+            if (entry.fuelType == 0 && entry.heatValue == 0L)
+            {
+                if (entry.reactorInc != 0f)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        $"物品「{entry.name}」配了 reactorInc={entry.reactorInc} 却没配燃料，"
+                        + "机甲不会烧它，这个倍率没有作用对象，已忽略");
+
+                return;
+            }
 
             if (entry.fuelType == 0 || entry.heatValue <= 0L)
             {
@@ -697,8 +709,13 @@ namespace ProjectEden
             item.FuelType = entry.fuelType;
             item.HeatValue = entry.heatValue;
 
+            // 机甲功率倍率。和热值是两条独立的轴：这个只改放电速率，总量仍是 HeatValue，
+            // 所以倍率越高、同一份燃料撑得越短
+            if (entry.reactorInc != 0f) item.ReactorInc = entry.reactorInc;
+
             ProjectEdenPlugin.Log.LogInfo(
-                $"「{entry.name}」可作燃料：类型 {entry.fuelType}，热值 {entry.heatValue / 1000000.0:0.##} MJ");
+                $"「{entry.name}」可作燃料：类型 {entry.fuelType}，热值 {entry.heatValue / 1000000.0:0.##} MJ"
+                + $"，机甲功率 ×{item.ReactorInc + 1f:0.##}");
         }
 
         /// <summary>

@@ -23,6 +23,10 @@ namespace ProjectEden.Patches
     /// <c>genEnergyPerTick / useFuelPerTick</c> <b>就是能量利用率</b>。
     /// 火力发电厂看着是 1:1（煤 2.7 MJ ÷ 2.16 MW = 1.25 s），但那是从面板数字倒推的，
     /// 不是读出来的。</item>
+    /// <item><b>一种新燃料该插在哪一档。</b> 参照物全是原版物品，而
+    /// <c>HeatValue</c> / <c>ReactorInc</c> 和原版配方一样躺在 <c>resources.assets</c> 里，
+    /// 离线读不到——凭记忆写下来的档位就是猜。<see cref="DumpFuelLadder"/> 把整条阶梯
+    /// 连同每种燃料的<b>来源配方</b>一起打出来，后者是「几份原料压成一根」的锚。</item>
     /// </list>
     ///
     /// <b>它同时是 ABN_PowerGenerator 那条红线的参照物。</b>
@@ -46,6 +50,7 @@ namespace ProjectEden.Patches
 
             DumpFuelTypes();
             DumpGenerators();
+            DumpFuelLadder();
         }
 
         /// <summary>
@@ -180,6 +185,159 @@ namespace ProjectEden.Patches
 
             if (count == 0)
                 ProjectEdenPlugin.Log.LogWarning("  一座 isPowerGen 的建筑都没找到 —— 这不正常");
+        }
+
+        /// <summary>
+        /// 燃料能量阶梯：每件热值、机甲功率倍率、烧得了它的建筑，外加它自己的来源配方。
+        ///
+        /// <b>判据是 <c>FuelType != 0</c>，不是名字。</b> 起念头时只想打「那四根燃料棒」，
+        /// 而那要拿名字当判据——本仓库为「按名字挑就会按名字漏」已经付过五次账
+        /// （<c>_stack</c>、<c>itemInc</c>、<c>cacheCargoInc1</c>、自动属性的后备字段……）。
+        /// <c>FuelType != 0</c> 就是「这东西能不能烧」那个事实本身，顺带把整条阶梯摆出来，
+        /// 新燃料该插哪一档一眼看得见，还免了「是不是漏了一种没带棒字的燃料」这个问题。
+        ///
+        /// <b>热值降序排。</b> 要回答的问题是「插在谁和谁之间」，那就得让相邻两档挨着打。
+        /// </summary>
+        private static void DumpFuelLadder()
+        {
+            ItemProto[] items = LDB.items?.dataArray;
+
+            if (items == null) return;
+
+            // 先把发电建筑的掩码收一遍，下面按位反查「谁烧得了它」——
+            // 一次 O(建筑) 换掉每种燃料各扫一遍全表
+            var burners = new List<KeyValuePair<string, int>>();
+            var fuels = new List<ItemProto>();
+
+            foreach (ItemProto proto in items)
+            {
+                if (proto == null) continue;
+
+                if (proto.FuelType != 0) fuels.Add(proto);
+
+                PrefabDesc desc = proto.prefabDesc;
+
+                if (desc != null && desc.isPowerGen && desc.fuelMask != 0)
+                    burners.Add(new KeyValuePair<string, int>(proto.Name, desc.fuelMask));
+            }
+
+            if (fuels.Count == 0)
+            {
+                // 报无聊的那一面：没有燃料和这段代码没跑起来，看日志得能分清
+                ProjectEdenPlugin.Log.LogWarning("燃料阶梯：一件燃料都没有 —— 这不正常，原版至少有煤");
+                return;
+            }
+
+            fuels.Sort((a, b) => b.HeatValue.CompareTo(a.HeatValue));
+
+            ProjectEdenPlugin.Log.LogInfo(
+                "── 燃料能量阶梯（热值降序；机甲功率 = ReactorInc + 1，只改放电速率不改总能量）──");
+
+            foreach (ItemProto fuel in fuels)
+            {
+                var who = new StringBuilder();
+
+                for (var i = 0; i < burners.Count; i++)
+                {
+                    if ((burners[i].Value & fuel.FuelType) == 0) continue;
+
+                    if (who.Length > 0) who.Append('、');
+
+                    who.Append(burners[i].Key);
+                }
+
+                // 这一栏只统计**发电机**，所以空着有两种截然不同的含义，必须分开说：
+                // 蓄电器（满）这一族（位 8）是由「能量枢纽」放电的，
+                // PowerExchangerComponent 不是 PowerGenerator，没有 fuelMask 可扫；
+                // 而真正空着的那种是半对燃料——有热值、没人认、烧出来 0 电，
+                // 正是 ApplyFuel 要警告的错。一句「没有建筑烧得了它」把两者混成一个假结论
+                if (who.Length == 0)
+                    who.Append(fuel.FuelType == 8
+                        ? "没有发电机烧它（这一位由能量枢纽放电，不走发电机）"
+                        : "没有发电机烧它 —— 若它也不是机甲燃料，那就是半对燃料");
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"  {fuel.Name}({fuel.ID})  位 {fuel.FuelType}"
+                    + $"  {fuel.HeatValue / 1000000.0:0.###} MJ/件"
+                    + $"  机甲 ×{fuel.ReactorInc + 1f:0.##}"
+                    + (fuel.IsFluid ? "  流体" : "")
+                    + $"  可烧：{who}");
+
+                DumpSourceRecipes(fuel);
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"  共 {fuels.Count} 种。**机甲反应堆收哪几位不在这张表里**——它不是 prefab，"
+                + "没有 fuelMask 可读；ReactorInc 非 0 只能说明原版为它专门调过功率。");
+        }
+
+        /// <summary>
+        /// 打出产出这件燃料的全部配方。**这是压缩比的锚**——新做一种燃料棒时
+        /// 「几份原料压成一根」不该拍脑袋，照原版自己那条比例来。
+        ///
+        /// 按 <c>Results</c> 反查，而不是读 <c>ItemProto.maincraft</c>：后者可能是 null，
+        /// 而且一件东西可以有好几条产出路径（本 mod 的铝就有碳热和电解两条）。
+        /// 只打一条会把「还有别的路子」看成「只有这一条」。
+        /// </summary>
+        private static void DumpSourceRecipes(ItemProto fuel)
+        {
+            RecipeProto[] recipes = LDB.recipes?.dataArray;
+
+            if (recipes == null) return;
+
+            foreach (RecipeProto recipe in recipes)
+            {
+                if (recipe?.Results == null || recipe.ResultCounts == null) continue;
+
+                var makes = false;
+
+                for (var i = 0; i < recipe.Results.Length; i++)
+                    if (recipe.Results[i] == fuel.ID)
+                        makes = true;
+
+                if (!makes) continue;
+
+                var sb = new StringBuilder("      ← 配方「").Append(recipe.Name).Append("」");
+
+                // 原版类型直接用枚举名（Smelt/Chemical/…），自定义类型（9 起）没有名字，
+                // ToString 会打数字，再补上本 mod 注册的机器名
+                sb.Append(recipe.Type);
+
+                string machine = MachineRegistry.RecipeTypeMachineName((int)recipe.Type);
+
+                if (!string.IsNullOrEmpty(machine)) sb.Append('/').Append(machine);
+
+                sb.Append("  ");
+                AppendSide(sb, recipe.Items, recipe.ItemCounts);
+                sb.Append(" → ");
+                AppendSide(sb, recipe.Results, recipe.ResultCounts);
+
+                // TimeSpend 的单位是帧
+                sb.Append("  ").Append((recipe.TimeSpend / 60.0).ToString("0.##")).Append(" 秒");
+
+                ProjectEdenPlugin.Log.LogInfo(sb.ToString());
+            }
+        }
+
+        private static void AppendSide(StringBuilder sb, int[] ids, int[] counts)
+        {
+            if (ids == null || ids.Length == 0)
+            {
+                // 零投入配方是真实存在的（生物温室的光合育林），不是解析失败
+                sb.Append("（无投入）");
+                return;
+            }
+
+            for (var i = 0; i < ids.Length; i++)
+            {
+                if (i > 0) sb.Append(" + ");
+
+                ItemProto proto = LDB.items.Select(ids[i]);
+
+                sb.Append(proto != null ? proto.Name : ids[i].ToString())
+                  .Append('×')
+                  .Append(counts != null && i < counts.Length ? counts[i] : 0);
+            }
         }
     }
 }

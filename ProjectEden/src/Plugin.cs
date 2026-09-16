@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.9.0";
+        public const string VERSION = "1.9.1";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -201,11 +201,7 @@ namespace ProjectEden
             // 炮塔弹药白名单是同一族的另一张预加载期静态表，LDBTool 同样没有替我们重跑
             LDBTool.PostAddDataAction += RefreshTurretNeeds;
 
-            // 燃料普查：纯诊断，不改任何东西。
-            // FuelType 位和发电建筑的 prefab 参数都在 resources.assets 里，离线读不到
-            LDBTool.PostAddDataAction += FuelSurvey.OnPostAddData;
-
-            // 增产剂普查：同样是纯诊断。Ability / HpMax / incItemId 都在
+            // 增产剂普查：纯诊断，不改任何东西。Ability / HpMax / incItemId 都在
             // resources.assets 里，离线读不到；等级上限还要按集装层数现算
             LDBTool.PostAddDataAction += ProliferatorSurvey.OnPostAddData;
 
@@ -225,6 +221,18 @@ namespace ProjectEden
             // 又要赶在 EnergyAudit 之前（审计读的得是改完的配方）。
             // 再往后 LDBTool 自己会调 InitRecipeItems 把改动吸收成 RecipeExecuteData。
             LDBTool.PostAddDataAction += ExtraRecipeRegistry.OnPostAddData;
+
+            // 燃料普查：纯诊断，不改任何东西。FuelType 位、发电建筑的 prefab 参数、
+            // 原版的热值与 ReactorInc 都在 resources.assets 里，离线读不到。
+            //
+            // **它必须排在 vanillaEdits 后面**，而它原本排在前面，实测打出了一行陈旧的账：
+            // 燃料阶梯报「氢燃料棒 ← 钛块×1 + 氢×10」，而当局真正生效的是 ×56。
+            // 那张表存在的全部意义就是「这条燃料到底要花多少料」，报中间态等于没报——
+            // 和 VeinProtoArrayPatches 那条是同一条规矩：**验末态，不验自己那一步**。
+            //
+            // 只挪了它一个：另外两个普查读的是 proto 字段和 prefab，
+            // 后面没有任何一步会改，跟着一起挪就成了照搬。
+            LDBTool.PostAddDataAction += FuelSurvey.OnPostAddData;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，

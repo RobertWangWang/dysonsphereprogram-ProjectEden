@@ -162,7 +162,12 @@ namespace ProjectEden
 
         private static void ApplyEdit(VanillaRecipeEditEntry entry)
         {
-            if (entry?.add == null || entry.add.Length == 0) return;
+            if (entry == null) return;
+
+            var wantsAdd = entry.add != null && entry.add.Length > 0;
+            var wantsSet = entry.setCount != null && entry.setCount.Length > 0;
+
+            if (!wantsAdd && !wantsSet) return;
 
             int resultId = ResolveItem(entry.result, null);
 
@@ -188,6 +193,55 @@ namespace ProjectEden
 
             string before = Describe(recipe);
             var added = 0;
+            var retuned = 0;
+
+            // 改份数排在加料前面：点名的是**已有**原料，先改完再追加，
+            // 两个动作就互不干扰（追加进来的那样也不会被这一轮误认成「已有」）
+            if (wantsSet)
+                foreach (RecipeItemEntry item in entry.setCount)
+                {
+                    if (item == null) continue;
+
+                    int id = ResolveItem(item.@ref, item);
+
+                    if (id <= 0)
+                    {
+                        ProjectEdenPlugin.Log.LogError(
+                            $"改原版配方：配方 {recipe.ID}「{recipe.Name}」要改份数的原料"
+                            + $"「{item.@ref}」解析不出 ID，这一项跳过");
+
+                        continue;
+                    }
+
+                    int at = Array.IndexOf(recipe.Items, id);
+
+                    if (at < 0)
+                    {
+                        // 静默跳过的话，「名字写错了」和「改了但看不出效果」在日志里长得一样
+                        ProjectEdenPlugin.Log.LogError(
+                            $"改原版配方：配方 {recipe.ID}「{recipe.Name}」里根本没有 "
+                            + $"{LDB.items.Select(id)?.name ?? id.ToString()} 这样原料，改不了份数。"
+                            + $"当前原料表：{Describe(recipe)}");
+
+                        continue;
+                    }
+
+                    if (item.count <= 0)
+                    {
+                        ProjectEdenPlugin.Log.LogError(
+                            $"改原版配方：配方 {recipe.ID}「{recipe.Name}」的 setCount 写了 "
+                            + $"count={item.count}，份数必须是正数（删料没做），这一项跳过");
+
+                        continue;
+                    }
+
+                    if (recipe.ItemCounts[at] == item.count) continue; // 已经是这个数（热重载重跑）
+
+                    recipe.ItemCounts[at] = item.count;
+                    retuned++;
+                }
+
+            if (!wantsAdd) { ReportEdit(recipe, before, added, retuned); return; }
 
             foreach (RecipeItemEntry item in entry.add)
             {
@@ -220,12 +274,66 @@ namespace ProjectEden
                 added++;
             }
 
-            if (added == 0) return;
+            ReportEdit(recipe, before, added, retuned);
+        }
+
+        /// <summary>
+        /// 报这条改动，并**顺带把可燃能量的进出账算出来**。
+        ///
+        /// <b>为什么这一行非有不可：<c>EnergyAudit</c> 看不见原版配方。</b> 它走的是
+        /// <c>ores.json</c> 自己的配方表，所以凡是这里改过的原版配方，都在审计的射程之外。
+        /// 而这一段能做的事恰恰是「让一条原版配方开始或停止凭空造能量」——
+        /// 那就得在改的地方当场把账打出来，否则谁也不会去查。
+        /// </summary>
+        private static void ReportEdit(RecipeProto recipe, string before, int added, int retuned)
+        {
+            if (added == 0 && retuned == 0) return;
+
+            var what = new StringBuilder();
+
+            if (added > 0) what.Append("加了 ").Append(added).Append(" 样原料");
+
+            if (retuned > 0)
+            {
+                if (what.Length > 0) what.Append("、");
+
+                what.Append("改了 ").Append(retuned).Append(" 样原料的份数");
+            }
+
+            long inHeat = Burnable(recipe.Items, recipe.ItemCounts);
+            long outHeat = Burnable(recipe.Results, recipe.ResultCounts);
+            long delta = outHeat - inHeat;
 
             ProjectEdenPlugin.Log.LogInfo(
-                $"改原版配方：{recipe.ID}「{recipe.Name}」加了 {added} 样原料。"
+                $"改原版配方：{recipe.ID}「{recipe.Name}」{what}。"
                 + $"改前 {before}；改后 {Describe(recipe)}。"
-                + "（原料条数变了，老存档由原版自己的 Array.Resize 兜住，新槽从 0 开始）");
+                + $"可燃能量 {inHeat / 1000000.0:0.##} MJ 进 / {outHeat / 1000000.0:0.##} MJ 出，"
+                + $"差额 {delta / 1000000.0:+0.##;-0.##;0} MJ"
+                + (added > 0 ? "（原料条数变了，老存档由原版自己的 Array.Resize 兜住，新槽从 0 开始）" : ""));
+
+            // 差额为正 = 这条配方在造可燃能量。万倍速建筑跑得了原版配方，所以这不是小事
+            if (delta > 1000000L)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"改原版配方：{recipe.ID}「{recipe.Name}」改完之后**产物的可燃能量比原料多 "
+                    + $"{delta / 1000000.0:0.##} MJ**。EnergyAudit 不覆盖原版配方，所以没有别处会拦它；"
+                    + "而本 mod 的万倍速建筑跑得了这条配方。确认这是有意为之。");
+        }
+
+        /// <summary>一侧的可燃能量合计。非燃料（HeatValue 为 0）自然按 0 记。</summary>
+        private static long Burnable(int[] ids, int[] counts)
+        {
+            if (ids == null || counts == null) return 0L;
+
+            var sum = 0L;
+
+            for (var i = 0; i < ids.Length && i < counts.Length; i++)
+            {
+                ItemProto item = LDB.items.Select(ids[i]);
+
+                if (item != null) sum += item.HeatValue * counts[i];
+            }
+
+            return sum;
         }
 
         /// <summary>
@@ -340,10 +448,11 @@ namespace ProjectEden
     }
 
     /// <summary>
-    /// 给一条<b>原版</b>配方追加原料。和 <see cref="ExtraRecipeEntry"/> 是两件事：
-    /// 那个是「加一条新配方」，这个是「原版那条本身要多吃点东西」。
+    /// 就地改一条<b>原版</b>配方的原料表。和 <see cref="ExtraRecipeEntry"/> 是两件事：
+    /// 那个是「加一条新配方」，这个是「原版那条本身要改」。
     ///
-    /// 只能加料。删料和改份数没做——需要什么再加什么，别先把没人要的开关铺出来。
+    /// 能加料（<see cref="add"/>）和改份数（<see cref="setCount"/>）。**删料仍然没做**
+    /// ——删料要动数组长度，而且没人需要。
     /// </summary>
     [Serializable]
     internal class VanillaRecipeEditEntry
@@ -362,6 +471,19 @@ namespace ProjectEden
 
         /// <summary>要追加的原料。已经在配方里的会被跳过（热重载幂等）。</summary>
         public RecipeItemEntry[] add;
+
+        /// <summary>
+        /// 改一样<b>已有</b>原料的份数。<c>count</c> 是**绝对值不是增量**——
+        /// 这条动作因此天然幂等，`PostAddDataAction` 热重载重跑一遍结果一样。
+        ///
+        /// <b>只动值不动长度，所以对存档安全</b>：`AssemblerComponent.Export` 依赖的是
+        /// `requires` / `products` 的**长度**，份数是纯粹的值（这一点和 CLAUDE.md 里
+        /// 「逐台克隆不许改长度」是同一条规则的两面）。
+        ///
+        /// 点名的原料不在配方里时**报 ERROR 并跳过**，不静默——那多半是名字写错了，
+        /// 而「改了个不存在的原料」和「改了但没效果」在日志里必须分得开。
+        /// </summary>
+        public RecipeItemEntry[] setCount;
     }
 
     [Serializable]

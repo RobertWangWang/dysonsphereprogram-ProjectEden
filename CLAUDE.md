@@ -48,7 +48,7 @@ Three separate errors, and only the third is vanilla's fault:
    "heavier = denser") **while the accounting unit is per-CH₂** — equal carbon per item must mean
    equal heat value. That ladder is what let cracking turn a cheap light cut into expensive
    products and mint energy.
-3. **Vanilla hydrogen is 4.1× over the mod's anchor** (286 kJ/mol → 1.96 MJ; vanilla says 8.0).
+3. **Vanilla hydrogen is 4.6× over the mod's anchor** (286 kJ/mol → 1.96 MJ; vanilla says **9.0**, measured — this line and three others said 8.0 for a long time, which is why the override's log line prints the value it actually read).
    This file already recorded that vanilla is not self-consistent here; what was new is that a
    reforming recipe yielding **8 hydrogen per craft** turns that inconsistency into free energy.
 
@@ -1686,7 +1686,61 @@ Two things it did need: `madeFromString`'s 0 branch returns a bare `"-"` (`Recip
 
 **That makes the mega tab's slot and grid space shared across two config files, and nothing in either one says so.** 风力发电机集群 sits at build slot 7 / grid column 7 from `machines.json`; the seventh mega building was first written to the same pair in `megabuildings.json` and had to be moved to 8. The reservation ledger would have shifted one of them silently, and the visible result of a real collision is `UIBuildMenu.StaticLoad` overwriting `protos[category, slot]` — **one building simply missing from the build bar, with no error**. Check both files before picking a slot; `megabuildings.json`'s `//slot` on that entry says so at the point of use.
 
-**Mecha fuel has a power multiplier as well as an energy total.** `Mecha.GenerateEnergy` computes `ratio = ItemProto.ReactorInc + 1` (then folds in the proliferator table) and multiplies `reactorPowerGen` by it, so `ReactorInc = 1.5` means **+150% power**. It scales *rate*, not *total* — `HeatValue` is still what determines how long one unit lasts, so a high `ReactorInc` drains each unit faster. Vanilla spread: 原油 −0.5, 蓄电器（满）and 氢燃料棒 1.0, 氘核燃料棒 2.0, 金色燃料棒 9.0.
+**Mecha fuel has a power multiplier as well as an energy total.** `Mecha.GenerateEnergy` computes `ratio = ItemProto.ReactorInc + 1` (then folds in the proliferator table) and multiplies `reactorPowerGen` by it, so `ReactorInc = 1.5` means **+150% power**. It scales *rate*, not *total* — `HeatValue` is still what determines how long one unit lasts, so a high `ReactorInc` drains each unit faster.
+
+**The vanilla spread that used to be quoted here was wrong in four of five entries, and it had been
+quoted onward into `machines.json` and both feature guides.** It is now measured, by
+`FuelSurvey.DumpFuelLadder`, which dumps every item with `FuelType != 0` — heat value, `ReactorInc`,
+which generators accept it, and its own producing recipes:
+
+| | claimed | **measured** |
+|---|---|---|
+| 原油 | −0.5 (×0.5) | **+0.2 (×1.2)** — even the sign was wrong |
+| 蓄电器（满） | 1.0 | 1.0 ✓ (the only one that was right) |
+| 氢燃料棒 | 1.0 | **2.0 (×3)** |
+| 氘核燃料棒 | 2.0 | **3.0 (×4)** |
+| 反物质燃料棒 / 金色燃料棒 | — / 9.0 | **5.0 (×6) / 11.0 (×12)** |
+
+精炼油 is 0.3 (×1.3). The consequence was not academic: `锂电池蓄电器（满）` was tuned to ×2.5 and
+both guides said that "sits between 氢燃料棒 and 氘核燃料棒" — against the real numbers (×3 and ×4)
+it sits *below* 氢燃料棒, between it and the vanilla accumulator.
+
+**Do not select fuels by name.** The survey's discriminator is `FuelType != 0`, deliberately: the
+first draft was going to dump "the four fuel rods", which needs a name test, and this repo has paid
+for "select by name, miss by name" five times (`_stack`, `itemInc`, `cacheCargoInc1`, auto-property
+backing fields, …). `FuelType != 0` *is* the fact "can this be burnt", it cannot miss a fuel that
+lacks 棒 in its name, and it prints the whole ladder so "which rung does a new fuel land on" is
+answerable without a second launch.
+
+**Two things that ladder made visible on its first run**, neither of which was being looked for:
+
+- **`EnergyAudit` structurally cannot see a vanilla recipe**: it walks `ores.json`'s own recipe list,
+  so every vanilla recipe is outside its scope — while this mod's 10000× mega assembler will happily
+  run one. **The green line means "no mod recipe mints energy", not "nothing mints energy".**
+- **And this mod's `vanillaHeat` override turned a mild vanilla surplus into a large one, by exactly
+  the mechanism it was added to fix.** 氢燃料棒 is `钛块×1 + 氢×10 → ×2`, i.e. 108 MJ out. In vanilla
+  that is 90 MJ in (hydrogen at 9.0) — **+18 MJ, a 1.2× surplus, unremarkable**. Re-anchoring
+  hydrogen to 1.96 MJ to stop steam reforming minting energy drops the input to 19.6 MJ, so the same
+  untouched vanilla recipe becomes **+88.4 MJ, a 5.5× multiplier**. Titanium gates the throughput, so
+  it was a "titanium → electricity" converter at roughly 66 MJ per ingot rather than true perpetual
+  motion — but the shape is the point: **re-anchoring one item re-prices every recipe that touches
+  it, in both directions, and only the ones inside the audit's scope get re-checked.**
+- **Fixed by `recipes.json`'s `vanillaEdits`, which gained `setCount` for it** (hydrogen ×10 → ×56,
+  = `ceil(108 / 1.96)`, rounded up so the delta lands **negative** at −1.76 MJ rather than positive).
+  `setCount` writes an **absolute** count, so it is idempotent across `PostAddDataAction` re-runs, and
+  it changes a *value* not an array *length*, which is the save-safe half of that distinction. The
+  cost is stated rather than hidden: **a hydrogen fuel rod now costs 5.6× the hydrogen** (5 → 28 per
+  rod).
+- **And the edit reports its own energy balance, because nothing else will.** `ReportEdit` prints
+  burnable-in / burnable-out / delta for every vanilla recipe this mod touches, and WARNs on a
+  positive delta over 1 MJ. That is the general rule this whole episode produced: **when you edit
+  something outside a checker's scope, the edit site has to carry the check.**
+- **The arithmetic above was wrong the first time it was written here, and the error is instructive:
+  it used 8.0 MJ for vanilla hydrogen** — the figure this file, `ores.json` and `OreConfig.cs` had all
+  been repeating — which made the vanilla surplus read as +28 MJ instead of +18. The measured value
+  is **9.0**, and it was in the log the whole time, because `ApplyVanillaHeat` prints the value it
+  actually read before overwriting it. *When a log line reports the number, do not restate it from a
+  comment.*
 
 **Burning a cloned "full" item does not return its shell without a patch.** The same method hardcodes the pair: `if (reactorItemId == 2207) player.TryAddItemToPackage(2206, 1, …)`. A cloned full accumulator is not 2207, so it is consumed outright — silently throwing away the whole build cost each time. `MechaFuelShellPatches` transpiles it the usual way: normalise the *read* of `reactorItemId` so any mod full variant reports as 2207, and replace the two hardcoded `2206` pushes with a lookup keyed on the current fuel (`reactorItemId` is still the full item at that point — it is only overwritten later, at IL 0x01F8). Values are filtered as they are read; nothing in `Mecha` is written.
 
@@ -1846,7 +1900,7 @@ The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven 
 
 **LDBTool re-binds proto IDs from its own config, after your code sets them.** `LDBTool.PreAddProto` → `Bind` → `IdBind` / `GridIndexBind` records every mod proto's ID and GridIndex in `BepInEx/config/LDBTool/LDBTool.CustomID.cfg` and `LDBTool.CustomGridIndex.cfg`, **keyed by the proto's display name**, and on every later launch it writes those stored values *back onto the proto*. So changing an ID in this repo's JSON has **no effect** on a proto that has already been registered once — the first ID a proto is ever given is sticky until that cfg entry is deleted. Cobalt sat on 电磁矩阵's 6001 through three config edits because of this. When an ID looks ignored, check that cfg before anything else, and delete the entry (both files) to let the new value take. `OreRegistry.VerifyIds` now checks the post-registration reality and names the file.
 
-**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)**, **6641–6643 (沸石催化剂 / 待生沸石催化剂 / 丙烯)**, **6644–6645 (尿素 / 乌洛托品)**, **6646–6647 (丙烯腈 / 聚丙烯腈)**, **6648–6651 (苯 / 异丙苯 / 苯酚 / 丙酮)**, **6652 (硫磺)**, **6653–6654 (石脑油 / 蜡油)**, **6506 (熔岩冷却厂)**, **6507 (催化反应器)**, **6508 (综合化学厂)**, **6509 (氧化还原燃烧厂)** **6655–6657 (双元推进剂 / 金属浆料燃料 / 固体复合推进剂)** and **6658 (活性透镜)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**, **6507**, **6648–6653 (catalyst synthesis / regeneration, three type-14 reactor recipes, propylene carbothermic)** **6654–6656 (urea / hexamine / urea-formaldehyde resin → vanilla plastic)** **6657–6659 (acrylonitrile / PAN / PAN carbonisation → vanilla carbon nanotube)** **6660–6664 (benzene ×2 routes / cumene / cumene cleavage / phenolic resin → vanilla plastic)** **6665–6667 (catalytic reforming / residue HDS / contact-process sulfuric acid)** **6668 (hydrocracking)**, **6509 (the plant itself)**, **6669 (药柱压制)** and **6670 (活性透镜 · 晶格培养)**. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs **702**, 703, 704, **707**, 708 and 723–727 (mega buildings), **701, 705, 709, 714, 715, 717, 718, 719** (cloned machines — pinned to measured values, see the cascade note below) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂), 13 is 熔岩处理 (熔岩冷却厂) 14 is 催化 (催化反应器), **16 is 综合化学 (综合化学厂)** and **17 is 氧化还原燃烧 (氧化还原燃烧厂)** — a type with **no recipes of its own**, it is only the key of the multi-type compatibility table. **14 is not a ceiling** — see the `ERecipeType` paragraph under *Cloned buildings*; 16 and up are equally usable.
+**Do not use `ProtoSet.Select(id) != null` as an occupancy test.** For `LDB.items` it reported 200 consecutive IDs as taken; scan `dataArray` for `proto.ID == id` instead. Related: vanilla item/recipe protos live in `resources.assets`, not in the assembly, so **there is no way to enumerate used IDs by decompiling** — the only authoritative table is the running `LDB`. Known landmines: matrices occupy items **6001–6006** (电磁矩阵 is 6001) **plus 6007, which this mod took for 生物矩阵 — matrix ids must stay dense from 6001, see the seventh-matrix section**, and this repo already uses items 6500–6505, 6510–6520, 6530–6536, 6560–6568, 6580–6590, 6594–6599, 6617–6631, 6636–6639, **6640 (岩浆)**, **6641–6643 (沸石催化剂 / 待生沸石催化剂 / 丙烯)**, **6644–6645 (尿素 / 乌洛托品)**, **6646–6647 (丙烯腈 / 聚丙烯腈)**, **6648–6651 (苯 / 异丙苯 / 苯酚 / 丙酮)**, **6652 (硫磺)**, **6653–6654 (石脑油 / 蜡油)**, **6506 (熔岩冷却厂)**, **6507 (催化反应器)**, **6508 (综合化学厂)**, **6509 (氧化还原燃烧厂)** **6655–6657 (双元推进剂 / 金属浆料燃料 / 固体复合推进剂)** **6658 (活性透镜)**, **6659 (同位提纯厂)**, **6660 (电解液)** and **6661 (精炼油燃料棒)** (**6591–6593 and 6600–6611 were freed when the alloy grade tiers were removed — reuse them only in a fresh save**, an existing save holding one of those items would be left with an ID that has no proto), plus recipes 6500–6505, 6510, 6520–6524, 6530–6533, 6535–6536, 6540–6550, 6560–6562, 6570–6573, 6580–6586, 6590–6592, 6600–6604, 6632–6635, 6640–6644, **6506** and **6645–6647 (the three cumulate recipes)**, **6507**, **6648–6653 (catalyst synthesis / regeneration, three type-14 reactor recipes, propylene carbothermic)** **6654–6656 (urea / hexamine / urea-formaldehyde resin → vanilla plastic)** **6657–6659 (acrylonitrile / PAN / PAN carbonisation → vanilla carbon nanotube)** **6660–6664 (benzene ×2 routes / cumene / cumene cleavage / phenolic resin → vanilla plastic)** **6665–6667 (catalytic reforming / residue HDS / contact-process sulfuric acid)** **6668 (hydrocracking)**, **6509 (the plant itself)**, **6669 (药柱压制)**, **6670 (活性透镜 · 晶格培养)**, **6671 (同位提纯厂)**, **6672 (电解液 · 配液)**, **6673–6675 (the three purification recipes)** and **6676 (精炼油燃料棒 · 凝胶成型)**. **This ledger went stale once already** — it stopped at item 6658 / recipe 6670 while 6659–6660 and 6671–6675 were in use, so **re-derive it from the JSON (`grep -o '"itemId": [0-9]*' data/*.json | sort -n | tail`) rather than trusting this line**; `ProtoSlots` will shift a colliding id and warn, but a warning is not a plan. **Vanilla recipe 75 (宇宙矩阵) is edited in place** rather than cloned — it gains 生物矩阵 as a seventh ingredient. Model IDs **702**, 703, 704, **707**, 708 and 723–727 (mega buildings), **701, 705, 709, 714, 715, 717, 718, 719** (cloned machines — pinned to measured values, see the cascade note below) and 710–713, 716, 720–722 (ore veins) are likewise spoken for. **727 is the ceiling** — `ResolveModelId` scans down from `LDB.models.dataArray.Length + 64 - 1`, and every pinned id above was assigned by that downward scan, so `dataArray.Length` is 664 here and 728 would be rejected. `ERecipeType` 9 is 电化学, 10 is 氧化还原, 11 is 生化培养 (生物温室), 12 is 锻造 (锤锻精工厂), 13 is 熔岩处理 (熔岩冷却厂) 14 is 催化 (催化反应器), **16 is 综合化学 (综合化学厂)** and **17 is 氧化还原燃烧 (氧化还原燃烧厂)** — a type with **no recipes of its own**, it is only the key of the multi-type compatibility table. **14 is not a ceiling** — see the `ERecipeType` paragraph under *Cloned buildings*; 16 and up are equally usable.
 
 
 **Model IDs drift silently whenever a building is inserted above them, and it has already happened

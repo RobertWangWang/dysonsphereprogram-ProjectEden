@@ -1082,8 +1082,13 @@ The mecha power bonus comes from `ItemProto.ReactorInc` — `Mecha.GenerateEnerg
 `ratio = ReactorInc + 1` and multiplies `reactorPowerGen` by it, so 1.5 means +150%. A pure data field, no patch
 required.
 
-Vanilla reference: Accumulator (full) ×2.0, Hydrogen Fuel Rod ×2.0, Deuteron Fuel Rod ×3.0, Antimatter Fuel Rod
-×8.0, Crude Oil ×0.5. The lithium cell's ×2.5 sits between the hydrogen and deuteron rods.
+Vanilla reference (read out of the running game, not from memory): Crude Oil ×1.2, Refined Oil ×1.3, Accumulator
+(full) ×2.0, Hydrogen Fuel Rod ×3.0, Deuteron Fuel Rod ×4.0, Antimatter Fuel Rod ×6.0, Golden Fuel Rod ×12.0.
+The lithium cell's ×2.5 sits **between the accumulator and the hydrogen rod**.
+
+> This paragraph used to quote a different set of numbers (and claimed the ×2.5 sat between the hydrogen and
+> deuteron rods). Those were written from memory and four of the five were wrong. The energy axis is unaffected —
+> the lithium cell's 16.2 GJ is still 6× the vanilla accumulator.
 
 > **It changes power, not total energy.** A higher bonus means the same cell **discharges faster**, but because the
 > total is fixed at 16.2 GJ it also discharges fewer times. For "lasts longer" adjust the heat value; adjust this
@@ -2672,13 +2677,14 @@ Cluster lives. The inconsistency is deliberate: power buildings are easier to fi
 it takes to hold that output. So switching liquids is invisible on the power grid and
 **very visible on the belt**.
 
-### The six liquids
+### Thirteen liquids, plus one solid
 
 | Temp. | Liquid | Heat | Efficiency | Per unit | At full load |
 |---|---|---|---|---|---|
 | 250 °C | Algal Oil | 4.2 MJ | 30% | 1.26 MJ | 170.8 /s |
 | 500 °C | **Vanadium Residue Oil** | 4.5 MJ | 43% | 1.94 MJ | 111.6 /s |
 | 600 °C | **Vacuum Gas Oil** | 4.5 MJ | 46% | 2.07 MJ | 104.1 /s |
+| 650 °C | **Refined Oil Fuel Rod** (solid) | 270 MJ | 47% | 127.96 MJ | **1.7 /s** |
 | 700 °C | **Benzene** | 22.4 MJ | 49% | 10.88 MJ | 19.9 /s |
 | 750 °C | Refined Oil | 4.5 MJ | 50% | 2.23 MJ | 96.8 /s |
 | 800 °C | **Cumene** | 35.8 MJ | 51% | 18.10 MJ | 11.9 /s |
@@ -2707,8 +2713,63 @@ refined oil, that route is strictly better (1.0 per barrel against 0.3, and it y
 simply the only way to get the other three cuts.
 
 **Gas oil and residue oil are the two this plant alone will accept** (heavy cuts need dedicated heating and
-atomisation, which an ordinary boiler cannot provide). The other eleven **still burn in the vanilla Thermal
-Power Plant**: the combustible liquid fuel bit is OR-ed on, so nothing was taken away from them.
+atomisation, which an ordinary boiler cannot provide). The other twelve — including the solid fuel rod —
+**still burn in the vanilla Thermal Power Plant**: the combustible liquid fuel bit is OR-ed on, so nothing
+was taken away from them.
+
+#### The only solid: the Refined Oil Fuel Rod
+
+**Chemical Plant: refined oil ×60 + plastic ×6 + titanium ingot ×2 + energy matrix ×2 + structure matrix ×2 →
+Refined Oil Fuel Rod ×1 (10 s)**
+
+Refined oil is worked together with a polymer thickener into a paste and packed into a titanium casing — which
+is how real gelled hydrocarbon fuel is made, with a gellant fraction of 5–10% by weight (here 6/66 ≈ 9%).
+
+**The 270 MJ is derived, not picked.** A fuel rod is a fixed-volume container, so the figure to compare is
+energy per litre: hydrogen at 700 bar is about 4.8 MJ/L and liquid hydrogen 8.5 MJ/L, while a hydrocarbon gel
+is about 35 MJ/L — a ratio of 4.1–7.3, taken as 5. So 54 MJ (the vanilla hydrogen rod) × 5 = 270 MJ, and the
+number of oil units then falls out of conservation: 270 ÷ 4.5 = 60.
+
+It fills a rung vanilla left empty: **between the hydrogen rod's 54 MJ and the deuteron rod's 600 MJ there is
+an 11× gap with nothing in it.**
+
+| | Energy per rod | Mecha power | How long one rod lasts |
+|---|---|---|---|
+| Hydrogen Fuel Rod | 54 MJ | **×3** | 18 |
+| **Refined Oil Fuel Rod** | **270 MJ** | ×2 | **135** |
+| Deuteron Fuel Rod | 600 MJ | ×4 | 150 |
+
+**The power axis deliberately does not follow.** `ReactorInc` models how *fast* a fuel burns, and hydrogen's
+laminar flame speed is about 2.9 m/s against roughly 0.4 m/s for hydrocarbons — a hydrocarbon fuel has no
+business overtaking hydrogen on that axis. So this rung is "one step up in energy, one step down in power",
+and neither rod dominates the other: one sells endurance, the other sells burst. The deuteron rod still beats
+it on both axes, so the nuclear tier is untouched.
+
+> **Do not use it for stationary power — that is by design.** It conserves energy strictly (60 × 4.5 = 270,
+> not one joule more), so rodding the oil and then burning it is always worse than burning the oil: at 650 °C
+> it sits one rung *below* burning refined oil directly at 750 °C, which makes it **4.5% worse**.
+>
+> What it sells is density and endurance: one inventory slot holds 300 rods = 81 GJ, which would take 18,000
+> barrels of refined oil.
+
+> **Related: the hydrogen fuel rod recipe changed this version too, hydrogen ×10 → ×56.**
+> The vanilla recipe is 90 MJ in, 108 MJ out (vanilla hydrogen is 9 MJ) — +18 MJ, unremarkable. But this mod
+> re-anchors hydrogen to 1.96 MJ to stop steam reforming minting energy, and **that turns the same untouched
+> vanilla recipe into 19.6 MJ in against 108 MJ out, a 5.5× multiplier** — which a 10000× assembler will
+> happily run. With the fix both rods are measured by the same ruler: both conserve strictly, so the choice
+> between them is density versus power and nothing else. **The cost, stated plainly: a hydrogen fuel rod now
+> takes 5.6× the hydrogen** (5 → 28 per rod). To undo it, delete that `setCount` entry in `recipes.json` —
+> no rebuild needed.
+
+**Why 650 °C.** Its base is refined oil and it ought to inherit that 750 — the step it gives up is the ash it
+brings into the hot gas path that plain refined oil does not: the polymer thickener is a soot precursor (the
+same table already puts benzene at 700), and what is left of the titanium casing is TiO₂, a refractory oxide
+melting at 1843 °C, which deposits straight onto the heating surfaces.
+
+**The titanium and the two matrices are a balance knob, not a chemistry derivation**, and it is said out loud
+here — putting the rod behind the research line leaves the early and mid game to the hydrogen rod, and makes
+this purely a late-game density upgrade. The titanium does have a real referent though: the vanilla hydrogen
+rod's casing is titanium too.
 
 #### Crude oil burns too, and it has to be the worst of them
 
