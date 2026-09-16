@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using HarmonyLib;
 
@@ -70,17 +71,30 @@ namespace ProjectEden.Patches
 
             if (player == null || player.package == null) return;
 
+            // 品质要按 (星球, 桩号) 记，而 Pay 只拿得到桩号——在这里把星球号放好。
+            // 上面那三道判定已经保证了「只处理玩家当前所在、且已加载的那颗星球」，
+            // 所以这一局里它不会中途换值。
+            _planetId = factory.planet.id;
+
             int budget = Config.instantBuildPerTick > 0 ? Config.instantBuildPerTick : DefaultPerTick;
 
             PrebuildData[] pool = factory.prebuildPool;
 
             var built = 0;
             var batching = false;
+            var needPay = 0;
+            var freeBuilt = 0;
 
             // 和 FastBuild 一样倒着走：新放下的排在后面，先建新的手感才对
             for (int i = factory.prebuildCursor - 1; i > 0 && built < budget; i--)
             {
                 if (pool[i].id != i || pool[i].isDestroyed) continue;
+
+                // **「这一座要不要我付账」是本轮唯一还没定的事实，所以数出来。**
+                // itemRequired 已经是 0 的话，料在更早的地方就被扣掉了，Pay 一次都不会跑
+                // ——而那正好解释「秒完成生效了、品质诊断却一行没有」。
+                if (pool[i].itemRequired > 0) needPay++;
+                else freeBuilt++;
 
                 if (pool[i].itemRequired > 0 && !Pay(player, pool, i)) continue;
 
@@ -124,7 +138,9 @@ namespace ProjectEden.Patches
 
             if (Interlocked.Exchange(ref _logged, 1) == 0)
                 ProjectEdenPlugin.Log.LogInfo(
-                    $"作弊：建造秒完成已生效，本次结算建好 {built} 个（每次上限 {budget}，材料从机甲背包扣）");
+                    $"作弊：建造秒完成已生效，本次结算建好 {built} 个（每次上限 {budget}）——"
+                    + $"其中 {needPay} 个由这里付账、{freeBuilt} 个**放下时就已经付清了**。"
+                    + "**后一个数不是 0，就说明扣料不在秒完成这条路上**，品质得去扣料的真正那一处接。");
         }
 
         /// <summary>
@@ -135,32 +151,161 @@ namespace ProjectEden.Patches
         /// 和建设机器人的行为一致。拿不出来就原样留着，不会把预建物卡死。
         ///
         /// 增产点数（<c>inc</c>）直接丢掉：建筑不吃增产，原版机器人也不把它带进建筑里。
+        ///
+        /// <b>品质则相反，必须接住——这一处曾经是把它清零的，而那让「建筑按品质省电」
+        /// 整条轴在秒完成开着时完全失效。</b>
+        ///
+        /// 原来那句注释写着「建好的建筑不保留品质（建筑没有品质槽位）」，它在写的时候是对的，
+        /// 效果层出现之后就过时了：建筑确实没有品质槽位，但<b>材料的品质会在建造那一刻
+        /// 折进这座建筑的耗电</b>（<see cref="QualityBuildPatches"/>）。
+        ///
+        /// 而秒完成是<b>本 mod 自己重写的一条建造路径</b>：它从
+        /// <c>ConstructionBeforeGameTick</c> 的后置里扣料，**在 <c>QualityBuildPatches</c>
+        /// 的扣料作用域之外**（那个作用域是五把建造工具的 <c>CreatePrebuilds</c> 等七个方法）。
+        /// 于是玩家放下一座用 50 分材料做的建筑，日志里一行都没有、电费一分不省。
+        /// **这是「本仓库为某个功能加的规则，悄悄限制了后来加的另一个功能」那一类**，
+        /// 而这次两边都是我们自己的。
         /// </summary>
         private static bool Pay(Player player, PrebuildData[] pool, int index)
         {
             int itemId = pool[index].protoId;
             int count = pool[index].itemRequired;
 
-            // **调用前后各清一次品质侧信道。** preloader 把 TakeTailItems 改写成了
+            // **调用前清、调用后读、读完再清。** preloader 把 TakeTailItems 改写成了
             // 「读寄存器（入参方向）+ 在 ret 前写寄存器（出参方向）」，而那条协议
-            // 只在游戏自己的调用点上接好了。我们不清的话：进去时它消费上一个人留下的值，
-            // 出来时它留下的值又会被下一个读它的人当成自己的——两头都会让品质凭空长出来。
+            // 只在游戏自己的调用点上接好了。不清前面，进去时它消费上一个人留下的值；
+            // 不清后面，它留下的值会被下一个读它的人当成自己的——两头都让品质凭空长出来。
             //
-            // 这一处是 tools/verify_quality.ps1 新加的那道检查第一次跑就抓出来的，
-            // 而肉眼扫「谁调了搬运方法」时它被漏掉了：建造扣料看着和物品搬运不是一回事。
+            // **但「清」和「读」不是一回事**，而上一版把两者混为一谈：出参方向的正确做法是
+            // 读回来再清，直接清掉等于把被调方刚算好的答案扔了。
+            // **扣了多少分是量出来的，不是从侧信道接的。**
             //
-            // 建好的建筑不保留品质（建筑没有品质槽位），所以这里是清零而不是赋值。
+            // 接侧信道本来更直接，但它依赖「被调方在返回前发布、而且没有别人把它擦掉」
+            // 这条协议在这一处成立——而本仓库已经栽过两次：`TakeItemFromPlayer` 和
+            // `UseHandItems` 都是算对了再自己擦掉。**量背包差值不依赖任何协议**，
+            // 而且是精确的：背包少掉的那些分，正是这次建造吃掉的。
+            //
+            // 侧信道的值仍然读一下，只进诊断——两个数不一致时那一行就是线索。
+            MeasureBag(player, itemId, out int bagCount, out int bagQua);
+
             if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
 
             player.package.TakeTailItems(ref itemId, ref count, out int _, false);
 
+            int viaChannel = QualityAccess.ChannelReady ? QualityAccess.GetChannel0() : 0;
+
             if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
+
+            MeasureBag(player, itemId, out int _, out int bagAfter);
+
+            int qua = bagQua - bagAfter;
+
+            if (qua < 0) qua = 0;
+
+            // **每一个闸都打出来，不是只打我相信的那一个。** 「材料本来就没品质」和
+            // 「品质读丢了」在结果上一模一样（都是 0 分），而它们要做的事完全相反。
+            if (Interlocked.Exchange(ref _payLogged, 1) == 0)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"作弊·建造秒完成·诊断：桩 {pool[index].id} 要「{pool[index].protoId}」，扣到 {count} 件。"
+                    + $"扣之前背包里这种货 {bagCount} 件 / {bagQua} 分，扣之后 {bagAfter} 分，"
+                    + $"**按差值算这次吃掉 {qua} 分**；侧信道同时读回 {viaChannel} 分。"
+                    + "**背包那两个数都是 0 → 材料本来就没品质（上游的事）；"
+                    + "差值不是 0 而侧信道是 0 → 侧信道在这一处被谁擦了（差值已经绕开它）。** 整局只报一次。");
 
             if (count <= 0) return false;
 
             pool[index].itemRequired -= count;
 
-            return pool[index].itemRequired <= 0;
+            NotePaid(pool[index].id, count, qua);
+
+            if (pool[index].itemRequired > 0) return false;
+
+            SettleQuality(index);
+
+            return true;
+        }
+
+        // ── 品质：一座桩可能分几个 tick 才付清，所以要按桩号累计 ──────────
+
+        /// <summary>
+        /// <c>prebuildId → (件数, 总分)</c>。背包里只有一半时这一座会先付一半、下一轮再付，
+        /// 所以不能付一次算一次——<b>平均分要拿整座建筑的料算</b>。
+        ///
+        /// 只在本机当前星球上跑（<see cref="BuildPaid"/> 开头就把别的星球挡掉了），
+        /// 而且每 tick 最多 <c>budget</c> 座，所以一个普通字典足够，不必上并发容器。
+        /// </summary>
+        private static readonly Dictionary<int, (int Items, long Points)> Paying =
+            new Dictionary<int, (int, long)>();
+
+        private static int _planetId;
+
+        private static void NotePaid(int prebuildId, int items, int qua)
+        {
+            if (prebuildId <= 0 || items <= 0) return;
+
+            // **付到一半的桩被玩家取消掉，这条就没人来收了。** 没有现成的钩子能知道
+            // 哪一座被取消，所以这里只做个上界：正常情况下这张表几乎总是空的
+            // （绝大多数建筑一次付清），涨到三位数就说明积了垃圾，整张丢掉。
+            // 代价是当时正在分期付款的那几座退回 0 分——有界、可解释，比无限涨好。
+            if (Paying.Count > 256) Paying.Clear();
+
+            Paying.TryGetValue(prebuildId, out (int Items, long Points) acc);
+
+            Paying[prebuildId] = (acc.Items + items, acc.Points + qua);
+        }
+
+        /// <summary>
+        /// 付清了：把「每件平均分」挂到这座桩上，等 <c>BuildFinally</c> 把它变成实体时，
+        /// <c>QualityBuildPatches</c> 的 <c>AddEntityDataWithComponents</c> 后置会把它接走
+        /// 并写进耗电。**这里不碰耗电**——那个字段只该在实体刚建好、还没人改过时写一次。
+        /// </summary>
+        private static void SettleQuality(int prebuildId)
+        {
+            if (!Paying.TryGetValue(prebuildId, out (int Items, long Points) acc)) return;
+
+            Paying.Remove(prebuildId);
+
+            if (_planetId <= 0 || acc.Items <= 0 || acc.Points <= 0) return;
+
+            var perItem = (int)(acc.Points / acc.Items);
+
+            if (perItem <= 0) return;
+
+            QualityBuildStore.SetPending(_planetId, prebuildId, perItem);
+
+            // **这条路自己的一次性日志。** 秒完成开着时，扣料不走 QualityBuildPatches
+            // 的作用域，所以那边的「建造扣料」永远不会打——少了这一行，
+            // 「秒完成把品质接上了」和「压根没接」在日志里又分不开了。
+            if (Interlocked.Exchange(ref _quaLogged, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"作弊·建造秒完成：第一次把材料品质接给建筑——桩 {prebuildId}，"
+                + $"{acc.Items} 件料合计 {acc.Points} 分，每件 {perItem} 分。"
+                + "**秒完成是本 mod 自己的建造路径，不走「建造扣料」那条作用域**，"
+                + "所以看这一行、不要找那一行。接下来该出现的是「效果层：第一座用带品质的材料造出来的建筑」。");
+        }
+
+        private static int _quaLogged;
+
+        private static int _payLogged;
+
+        /// <summary>背包里这种货现在共几件、共多少分。只给上面那条一次性诊断用。</summary>
+        private static void MeasureBag(Player player, int itemId, out int count, out int qua)
+        {
+            count = 0;
+            qua = 0;
+
+            StorageComponent.GRID[] grids = player.package?.grids;
+
+            if (grids == null || !QualityAccess.GridReady) return;
+
+            for (var g = 0; g < grids.Length; g++)
+            {
+                if (grids[g].count <= 0 || grids[g].itemId != itemId) continue;
+
+                count += grids[g].count;
+                qua += QualityAccess.GetGridQua(ref grids[g]);
+            }
         }
     }
 }

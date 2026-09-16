@@ -101,6 +101,23 @@ raising speed buys nothing at all. So the mega buildings use multi-cycle settlem
 own settlement logic several times over. Every pass is complete vanilla logic, so **nothing is conjured out of
 nothing** — they still stall when material runs out.
 
+**Short on power, they slow down linearly with the supply ratio.** 50% supply is 1800 cycles/second, 25% is 900 —
+the same terms a 1x vanilla machine is on.
+
+> **Why this needed doing at all.** Vanilla machines are already linear: `time += (int)(power × speedOverride)`, so
+> half the growth is half the output. But a mega building's `speedOverride` is 1e8, and **one call adds more `time`
+> than any recipe's `timeSpend` by one or two orders of magnitude** — so a supply ratio of 0.11 and one of 1.00
+> settle identically, and vanilla's other gate, `if (power < 0.1f) return 0;`, kills the building outright below 10%.
+> Left alone, what you see is "no slowdown at all, then suddenly everything is dead".
+>
+> So the throttle scales **cycles per tick**, the same knob the Biodome's light scaling uses (`speed` must never be
+> touched: mega buildings are identified by `speed >= threshold`, and one that drops below it is never picked up
+> again). The curve is **copied from vanilla's own**, linear — no second curve invented.
+> The floor is 1 cycle/tick, which is exactly a 1x vanilla machine at full speed: being short on power should mean
+> slower, not stopped. Actually stopping is left to vanilla's own 10% gate, which we do not duplicate.
+>
+> Set `powerScalesCycles` to false in `megabuildings.json` if you do not want it.
+
 ### How to feed them (important)
 
 At full speed a mega building eats **3600 recipes' worth of input per second**. The two feed paths differ wildly in
@@ -1184,7 +1201,7 @@ A thousand wind turbines pressed into one tower array.
 | Appearance | The Wind Turbine's model and icon, **tinted teal** (hue 158°) |
 | Location | Slot 7 of the **Mega Structures** tab in the build bar |
 | Output | **300 MW**, exactly a thousand wind turbines (300 kW each) |
-| Build | Wind Turbine ×1000 + Energy Matrix ×1000, **10 s, hand-craft only** |
+| Build | Wind Turbine ×1000 + Energy Matrix ×1000, 10 s, **hand-craft or in an assembler** |
 
 - Like a single turbine it **lives on planetary wind**: on an airless world it is just as motionless an ornament
 - It is **one entity**: one collision box, one grid tie. The 1000x is in the power, not the footprint
@@ -1192,12 +1209,22 @@ A thousand wind turbines pressed into one tower array.
   turbine raises "wind turbine too close" — a check that only fires on buildings carrying the wind flag, which
   proves the clone really did carry "this is wind power" across rather than becoming an inert shell
 
-> **How "hand-craft only" is done.** The recipe's type is set to `None` (0).
-> The replicator only looks at `RecipeProto.Handcraft`, so it still lists it;
-> the recipe picker skips on "`filter != 0` and `filter != recipe.Type`", and no machine's
-> `assemblerRecipeType` is ever 0, so no machine can select it.
-> The one cost, which was checked: the product gets no `productionMask` bit, and the only reader of that bit in the
-> whole game is the "reference rate" panel — which a hand-craft recipe has no business appearing in anyway.
+> **This and the Combustible Liquid Power Plant were both hand-craft-only; both can now go into an assembler.**
+> Clicking out a thousand turbines one at a time is not what a factory game is for. Hand-crafting is **kept** —
+> it simply is no longer the only route (`RecipeProto.Handcraft` was always true; only `Type` changed).
+>
+> "Hand-craft only" used to be done by setting the recipe's type to `None` (0). The replicator only looks at
+> `Handcraft`, so it still listed it; the recipe picker skips on "`filter != 0` and `filter != recipe.Type`", and no
+> machine's `assemblerRecipeType` is ever 0, so no machine could select it. The type is now 4 (Assemble), which both
+> the Assembling Machine and the Sky Assembler recognise.
+>
+> **That also fixed a side effect.** At type 0 the product gets no `productionMask` bit
+> (`ItemProto.InitProductionMask` opens with `if (recipe.Type == 0) continue;`), and the only reader of that bit in
+> the whole game is the "reference rate" panel. That was an acceptable cost while the recipe could not be automated;
+> now that it can, the bit comes back with it.
+>
+> **The Fixed-Rate Miner is still hand-craft-only**, deliberately: it is the first miner of a run — no prerequisite
+> tech, 1 Iron Ingot + 1 Copper Ingot — and should not wait on you building a production line first.
 
 > **Why no power logic had to change.** `PowerSystem.NewGeneratorComponent` copies `windForcedPower`,
 > `genEnergyPerTick` and the rest of `PrefabDesc` **field by field** into `PowerGeneratorComponent`, and the wind
@@ -3686,12 +3713,54 @@ quality flows along the whole item highway exactly the way vanilla's proliferato
 > panel's charge slider, and the field is saved, so re-applying on load would compound). Nearly every
 > building has a power consumer, so this one axis covers all of them from a single implementation.
 >
-> **Not working yet**: for quality to reach a building it must first pass from the metal into the
-> *building item*, i.e. through one crafting step. **Only hand-crafting carries it today**:
-> `AssemblerComponent` has `served`/`incServed`/`quaServed`, so inputs bring quality into the machine,
-> but the product side has **only `produced` and no `incProduced`** — vanilla products carry no
-> proliferator points, so the twin transform had nothing to mirror. Adding a twin field for the product
-> is preloader work and is not done.
+> **This barely worked until just now, and is fixed.** When you hold a stack of buildings and place
+> them one at a time, the material comes out of **the stack in your hand** — and that path deducted
+> the count without deducting the quality, so the material average came out near 0 and so did the
+> discount, while whatever stayed in your hand kept the whole stack's points and **climbed in
+> per-item score the more you used**. Both paths, hand and inventory, now carry quality.
+>
+> **Dismantling a building returns that quality with the building.** It did not before — a building's
+> quality is a power discount rather than a property of goods, and vanilla hands back a brand-new
+> item, so placing something and picking it up again simply destroyed the quality. It now refunds,
+> the same way dismantling a storage box or an assembler already did.
+>
+> **Just landed**: machines now **settle input quality into the product**. The product's **per-item
+> score** is the per-item score of the inputs that settlement consumed, **weighted by item count** —
+> mixing in plain material drags it down, and the product is **never better than the best input**.
+> The product buffer gained a `quaProduced` for this, and it is **not a twin field**:
+> vanilla has no `incProduced` at all (proliferator points never enter the product buffer — goods made
+> from sprayed input come out clean), so this is a slot quality owns outright, every read and write of
+> it is hand-written, and the twin transform does not touch it.
+>
+> ```
+> iron ingot ×2 @50 + gear ×1 @50           → electric motor at 50
+> iron ingot ×2 @50 + gear ×1 @0 (plain)    → electric motor at 33
+> ```
+>
+> **This rule was changed once.** It used to sum the inputs' quality and spread it over the output
+> count, so turning many items into few made the per-item score climb (50-quality iron plus a
+> 50-quality gear produced a motor at 150), by a factor that depended entirely on how many inputs the
+> recipe happens to take — not a design, just arithmetic leaking through, and it contradicted
+> "the refinery is the only source of quality". Under the weighted average, **crafting only carries
+> quality; it never creates it.**
+>
+> The whole chain was verified in game (refinery → belt → inserter → machine → product → box, with
+> quality measured at every stage), including **a mega building feeding a belt**, a segment that had
+> never been tested on its own. Those measurements were taken under the old rule, so the specific
+> number — 100 at the time — becomes 50 under the weighted average: the chain is connected, the
+> post-change numbers still need one more run.
+>
+> **Also just landed**: the product's quality now **leaves the machine**. `produced[]` has four ways
+> out — an inserter picking up, dismantling the machine, clicking the product icon on the panel, and a
+> mega building's own belts and logistics slots — and **all four are wired**. All four have to be: miss
+> one and on that path the count moves while the points stay behind, so the goods left in the buffer
+> carry the whole slot's points and the per-item score climbs out of nowhere.
+>
+> **Also just landed**: shift-clicking material in, and feeding it by hand from the machine's own
+> panel, now carry quality too. Manual feeding is four paths in total (the shift-click, plus the three
+> refreshes that move the panel's temporary feed box back and forth), and **all four have to be wired
+> together**: wire only half and the per-frame refresh wipes the box's quality to 0, which is then
+> written back into the machine. Feeding through an inserter was always fine.
 >
 > **Also not done**: the per-class axes (assembler speed, mining speed, inserter swing, turret damage —
 > one per building class, +30% at the top). **All of this is stated deliberately; please don't report it
@@ -3716,8 +3785,17 @@ The ceiling is **100 points per item**.
 
 ### The only source: the Isotopic Refinery
 
-**Mined ore has quality 0.** That is not "not done yet", it is the rule: quality is not mined, it is
-refined. To get any, you have to run metal through the **Isotopic Refinery** (category 12, slot 12,
+**Mined ore has quality 0.** The tooltip says so explicitly - `Quality  Common (0)` - rather than
+omitting the row, because "looked it up, it is 0" and "there is nothing here" are two different
+things.
+
+A baseline of 10 for ordinary material was tried and **withdrawn**: quality is stored as a
+*container total*, so a floor applied only at read time is not actually in the sum. Mix 100
+ordinary with 100 at 50 points and the total holds 5000, not 6000 - it averages to 25 where the
+"every item has a score" intuition says 30. **A read-time floor and an additive model are mutually
+exclusive**, and the additive model matters more.
+
+To get quality you have to refine: quality is not mined, it is refined. To get any, you have to run metal through the **Isotopic Refinery** (category 12, slot 12,
 recipe type 18, 180 MW).
 
 It is the eleventh mega building, and its three recipes are three real industrial purification processes:
@@ -3781,18 +3859,40 @@ A typical galaxy gives 17: Iron, Copper, High-Purity Silicon, Titanium, Stone Br
 Diamond, Crystal Silicon, Graphene, Carbon Nanotube, plus the seven ingots Cobalt / Aluminium / Lithium /
 Manganese / Chromium / Vanadium / Tungsten.
 
+**The refining recipes cannot be hand-crafted, and that is deliberate.** They are greyed out in the
+replicator, and clicking one only pops "This recipe is produced in the Isotopic Refinery" - exactly
+as vanilla treats plastic, sulfuric acid and graphene. The refinery is the only source of quality;
+there is no hand-craft shortcut past it. **Hand-crafting only carries quality across**: craft
+something out of material that already has quality and the product takes the weighted average, but
+nothing is created out of nothing.
+
+**Both output routes carry quality.** A refinery's products can go into the building's own
+logistics slots or straight onto a belt, and both get the same per-item score. (One gap remains:
+**belting quality-bearing material into another mega building** drops the quality; feeding a
+storage box or a logistics station is fine.)
+
 **Re-refining does not compound.** What is injected is a *fixed amount per item*, not an increment on the
 existing quality, so feeding the output back in only burns one more yield step per pass.
 
 ### Where you can see it
 
-Quality is a property of a **container**, so it can never appear in an item tooltip (those only know about
-the item proto). It shows up in two places:
+Quality is a property of a **container**, not of the item proto — the same copper ingot scores differently
+in different slots. So it shows up in three places, and every one of them asks **that slot** for the number:
 
+- **The item tooltip**: hover a stack in a storage box or in your backpack and the property table gains a
+  row reading `Quality  Fine (47)   total 75200`. The bracketed figure is **per item**, the one after it is
+  the **whole stack's total**. (That row can exist at all only because the tooltip asks the mouse which
+  slot it is over; the item proto alone could never answer.)
 - **Every logistics station storage slot**: a "Quality N" label at the right end of the count bar, where N
-  is the **per-item** figure rather than the stack total — the total moves with the count and tells you
-  nothing about how good the goods are.
+  is the **per-item** figure. Only that one figure here: it is a narrow label pinned against the progress
+  bar, and a second number would cover the bar up.
 - **The refinery panel**: the line under the picker row spells out input -> output, quality and time.
+
+**Why both numbers are worth printing.** The per-item figure is the **comparable** one — "is this batch
+better than that one" has no other answer, because the total moves with the count. The total is the number
+actually stored in the field: quality is an additive quantity, so merging two stacks adds their totals, and
+that is what you reconcile against. Which is why seeing 47 instead of 50 after mixing is **correct** — 1600
+copper at 50 plus 100 unrefined is 80000 / 1700 = 47.
 
 A mega building's 30 slots are invisible to the player (clicking it opens the recipe window), so for the
 refinery that panel is the **only** place the number can be read.

@@ -81,6 +81,26 @@ namespace ProjectEden.Utils
         /// </summary>
         public int cyclesPerTick;
 
+        /// <summary>
+        /// 电力不足时按供电率线性降速。<b>默认开。</b>
+        ///
+        /// <b>不开的话巨型建筑对缺电几乎免疫，然后一头撞死</b>——这不是设计，是
+        /// 「10000 倍」撞上原版公式的副作用：
+        /// <code>
+        /// InternalUpdate  IL 0000: if (power &lt; 0.1f) return 0;
+        ///                 IL 0576: time += (int)(power * speedOverride);
+        /// </code>
+        /// 原版 1 倍机器的 <c>speedOverride</c> 是 10000，<c>time</c> 涨得慢一半产量就慢一半，
+        /// <b>产出对供电率是线性的</b>。可巨型建筑的 <c>speedOverride</c> 是 1e8，
+        /// 单次调用加的 <c>time</c> 比任何 <c>timeSpend</c> 都大一两个数量级——
+        /// 供电率 0.11 和 1.00 结算出来一模一样，掉到 0.1 以下则整台停摆。
+        ///
+        /// 所以真正的节流阀是<b>每 tick 跑几个周期</b>（<see cref="cyclesPerTick"/>），
+        /// 和生物温室按日照缩放是同一个旋钮。缩放曲线<b>照抄原版自己的那条</b>：
+        /// 线性。不自己发明曲线，这样两边在边界上不会各说各话。
+        /// </summary>
+        public bool powerScalesCycles;
+
         public int stackSize;
         public int hpMax;
 

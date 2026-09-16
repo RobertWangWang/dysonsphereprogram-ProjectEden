@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
@@ -59,18 +59,25 @@ namespace ProjectEden.Patches
         [ThreadStatic] internal static List<(int PlanetId, int PrebuildId)> _prebuilds;
 
         /// <summary>
-        /// 手上那一摞。<b>它没有品质</b>——<c>Player.inhandItemInc</c> 没有孪生字段，
-        /// <c>UseHandItems</c> 一个寄存器都不写。所以这些件数只进分母、不进分子，
-        /// 把平均拉低。只会丢，不会发明。
+        /// 手上那一摞用掉了多少，由 <see cref="QualityHandUsePatches"/> 报进来。
+        ///
+        /// <b>这里曾经把手上那部分按 0 分计入平均，理由是「手上那一格没有品质槽位」。
+        /// 那个理由已经过时，而结论碰巧还对了一阵子——两者都得改。</b>
+        /// 手上那一格现在有孪生字段（<c>&lt;inhandItemQua&gt;k__BackingField</c>），
+        /// <c>UseHandItems</c> 也确实把品质算了出来，只是**在返回前自己擦掉了**，
+        /// 所以从这边看仍然是 0。详见 <see cref="QualityHandUsePatches"/> 的类注释。
+        ///
+        /// <b>为什么改由那边报进来，而不是在这里再挂一个后置：</b>
+        /// 同一个方法上两个后置的先后顺序不保证，而这里要读的正是那边刚修正完的值。
+        /// 顺序不保证的依赖，出错时不报错——合并成一处就没有这个问题。
         /// </summary>
-        [HarmonyPostfix]
-        [HarmonyPatch(typeof(Player), nameof(Player.UseHandItems))]
-        private static void UseHandItems_Postfix(int __result)
+        internal static void NoteHandUse(int items, int qua)
         {
-            if (_depth <= 0 || __result <= 0) return;
+            if (_depth <= 0 || items <= 0) return;
 
-            _items += __result;
-            _handItems += __result;
+            _items += items;
+            _handItems += items;
+            _points += qua;
         }
 
         // ── 蓝图桩 → 实体 ───────────────────────────────────────
@@ -141,7 +148,11 @@ namespace ProjectEden.Patches
 
         private static void ApplyPowerCut(PlanetFactory factory, int entityId, int planetId)
         {
+            // **「没有记录」和「记录了，是 0 分」是两件事，这里只能处理后者。**
+            // TryGet 为假 = 这座建筑不是本 mod 看着造的（装 mod 之前就在、
+            // 或者记录丢了），它的 workEnergyPerTick 已经是玩家的东西，不碰。
             if (!QualityBuildStore.TryGet(planetId, entityId, out int perItem) || perItem <= 0) return;
+
 
             if (entityId >= factory.entityPool.Length) return;
 
@@ -174,22 +185,94 @@ namespace ProjectEden.Patches
         private static int _reported;
 
         /// <summary>
-        /// <b>两条路各占多少件，是这一刀唯一还没定的事实。</b>
-        /// 手上那一摞没有品质槽位，如果常规建造走的主要是它，那这条轴基本恒为 0——
-        /// 那就得回去给 <c>Player</c> 补一个孪生字段。日志里直接把比例打出来，
-        /// 省掉一轮「进游戏试试看」。
+        /// <b>开机状态行。这一条是补上的，而它的缺席让一个直接的问题变成了读 IL。</b>
+        ///
+        /// 玩家问「建筑按分数省电了吗」，日志里 <c>建造扣料</c> 和 <c>效果层</c> 各 0 行
+        /// ——而那**分不开**「补丁没生效」和「这局没建东西」，只能回去逐条读
+        /// <c>UseHandItems</c> 的 61 句 IL 才答得上。本仓库记过六次的同一条，这是第七次：
+        /// <b>状态行回答「接上了没有」，事件行回答「它决定了什么」，谁也替代不了谁。</b>
         /// </summary>
+        internal static void Report()
+        {
+            if (QualityAccess.GetInhandQua == null || !QualityAccess.GridReady)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    "物品品质·效果层（建筑省电）：**没接上**——手上那一格或储物格的访问器缺一个。"
+                    + "这种情况下用好料造的建筑和普通料一样耗电，而且不报错。");
+
+                return;
+            }
+
+            // **报「真的打上了几个」，不是「我调了 PatchAll 没报错」。**
+            // 扣料作用域是七个方法，少打上一个，那条路上的材料就白扣——而那在日志上
+            // 和「玩家没走那条路」长得一模一样。所以这里读 Harmony 自己的补丁表。
+            var scoped = 0;
+
+            foreach (System.Reflection.MethodBase m in Harmony.GetAllPatchedMethods())
+                if (m.Name == "CreatePrebuilds" || m.Name == "DoUpgradeObject" || m.Name == "PlaceItems")
+                    scoped++;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物品品质·效果层（建筑省电）：已接线，顶尖品质省 {MaxPowerCut * 100:0.#}% 工作功率，"
+                + "按材料的每件平均分线性插值，**只在建造那一刻写一次**（每 tick 压会和物流站"
+                + "充能滑条打架，而且那个字段进存档、读档再乘一次就是复利）。"
+                + $"扣料作用域实际打上 {scoped} 个方法（五把建造工具的 CreatePrebuilds + "
+                + "DoUpgradeObject + PlaceItems，**应当是 7**）。"
+                + "背包和手上两条路都带品质。第一次真的造出带品质的建筑时会再报一行。");
+
+            if (scoped < 7)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"物品品质·效果层：扣料作用域只打上了 {scoped} 个方法，少于应有的 7 个"
+                    + "——没打上的那条路上，材料的品质会被白扣掉，而且不报错。");
+        }
+
+        /// <summary>
+        /// 两条路各占多少件。手上那一摞曾经按 0 分计，所以这行原本是用来判断
+        /// 「值不值得回去给 <c>Player</c> 补孪生字段」的；现在两条都带品质了，
+        /// 它留下来是为了让「材料平均分为什么这么低」有据可查。
+        /// </summary>
+        private static int _reportedEmpty;
+
+        // 注：这里曾经有个 TraceTake——**故意不看 _depth** 的扣料追踪器，
+        // 它是连着四轮「猜挂点 → 挂上去 → 发现没进来」之后换的思路，一轮就定位了
+        // （手上那条深度 = 1、建造栏那条前五次深度 = 0 是建造栏在往手上补货）。
+        // 问题查清就撤掉了，**做法本身记在 CLAUDE.md 里**：一个诊断连续两轮只能证伪时，
+        // 该换的是工具的方向，不是下一个猜测。
+
         internal static void ReportOnce(int perItem)
         {
-            if (_items <= 0 || _reported >= 3) return;
+            // **两个额度必须分开，这一条是花了一轮才买到的。**
+            //
+            // `CreatePrebuilds` 每帧都在跑（建造预览也走它），绝大多数调用一件料都不扣。
+            // 上一版两种情况共用一个 3 次的额度，于是**额度全被空调用花光**，
+            // 真正扣料的那一次永远排不上——日志看起来像「扣料从来没发生过」，
+            // 而实际上只是没被采样到。
+            //
+            // 这是本仓库记过的「预算型探针必须把预算花在有信息量的样本上」，
+            // 而且和「日志要打无聊状态」是**两条不同的规矩**：空样本留一条就够证明
+            // 作用域进来过，有料的样本才需要多留几条。
+            if (_items <= 0)
+            {
+                if (_reportedEmpty >= 1) return;
+
+                _reportedEmpty++;
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    "物品品质·建造扣料：**作用域跑到了，但这一次一件料都没数到**。" +
+                    "建造预览每帧都会走 CreatePrebuilds，所以这一行本身很正常——" +
+                    "**真正扣料那一次会另外打一行**。整局只报一次这种空样本。");
+
+                return;
+            }
+
+            if (_reported >= 3) return;
 
             _reported++;
 
             ProjectEdenPlugin.Log.LogInfo(
-                $"物品品质·建造扣料 #{_reported}：共 {_items} 件——" +
-                $"背包 {_items - _handItems} 件（带品质，合计 {_points} 分），" +
-                $"手上 {_handItems} 件（**没有品质槽位，按 0 分计**）；" +
-                $"平均每件 {perItem} 分。手上那部分占比高的话，就该给 Player 补孪生字段了。");
+                $"物品品质·建造扣料 #{_reported}：共 {_items} 件（背包 {_items - _handItems} 件、" +
+                $"手上 {_handItems} 件，**两条路现在都带品质**），合计 {_points} 分，" +
+                $"平均每件 {perItem} 分。");
         }
     }
 

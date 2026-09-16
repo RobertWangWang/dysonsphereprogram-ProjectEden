@@ -477,7 +477,7 @@ namespace ProjectEden.Patches
             for (var i = 0; i < code.Count; i++)
             {
                 if (code[i].opcode != OpCodes.Ldfld) continue;
-                if (!ReferenceEquals(code[i].operand, heatField)) continue;
+                if (!SameField(code[i].operand, heatField)) continue;
 
                 code[i].opcode = OpCodes.Call;
                 code[i].operand = photon;
@@ -486,30 +486,99 @@ namespace ProjectEden.Patches
             }
 
             // ── D. 两个传送带取货口 ──
-            // 原版形状（两处一字不差）：
+            //
+            // 原版形状（两处一字不差，加宽后也一样，已对着 patched 副本核过）：
             //   ldarg.0 ; ldfld catalystId   ← filter
             //   ldnull                        ← needs
             //   ldloca ; ldloca ; callvirt PickFrom
             //   ldarg.0 ; ldfld catalystId ; bne.un
-            // 用 ldnull + 两个 ldloca + callvirt 定位，比单认 ldfld 稳
-            for (int i = code.Count - 1; i >= 1; i--)
+            //
+            // <b>锚点从 ldnull 换成了「名字叫 PickFrom 的 callvirt」，这是一次返工。</b>
+            // 上一版拿 ldnull 起手、再向后看两个 ldloca 和一个 callvirt——形状写得对，
+            // 实测却<b>一处都匹配不上</b>（日志：取货口 0，而同一个转译器里的光子那处匹配成功，
+            // 所以转译器本身是跑了的）。用通用操作码当锚点的坏处就在这儿：
+            // 否掉它的可能有六七条谓词，而<b>失败时一条信息都没有</b>，只能靠猜。
+            //
+            // 改成锚在语义唯一的那个东西上（方法名），并且<b>每一条谓词不匹配时都记一笔</b>，
+            // 所以下次再坏，日志直接说是哪一条，不用再来一轮。
+            var pickAnchors = 0;
+            var rejectShape = 0;
+            var rejectFilter = 0;
+            var rejectCompare = 0;
+
+            for (int k = code.Count - 1; k >= 4; k--)
             {
-                if (code[i].opcode != OpCodes.Ldnull) continue;
-                if (i + 3 >= code.Count) continue;
-                if (!IsLdloca(code[i + 1]) || !IsLdloca(code[i + 2])) continue;
-                if (code[i + 3].opcode != OpCodes.Callvirt) continue;
-                if (!(code[i + 3].operand is MethodInfo pick) || pick.Name != "PickFrom") continue;
+                if (code[k].opcode != OpCodes.Callvirt) continue;
 
-                // filter：ldnull 前一条就是 `ldfld catalystId`
-                if (code[i - 1].opcode != OpCodes.Ldfld || !ReferenceEquals(code[i - 1].operand, cataField))
+                // 取不到 MethodInfo 也要算一笔：preloader 改过签名的方法，Harmony 有可能
+                // 解析不出来而把 operand 交成 null（CLAUDE.md 记过这个形状）
+                var pick = code[k].operand as MethodInfo;
+
+                if (pick == null || pick.Name != "PickFrom") continue;
+
+                pickAnchors++;
+
+                if (k + 3 >= code.Count) { rejectShape++; continue; }
+
+                // 往前：ldfld catalystId ; ldnull ; ldloca ; ldloca ; [callvirt]
+                if (!IsLdloca(code[k - 1]) || !IsLdloca(code[k - 2])
+                    || code[k - 3].opcode != OpCodes.Ldnull)
+                {
+                    rejectShape++;
                     continue;
+                }
 
-                int cmp = i + 4; // 取货之后：ldarg.0 ; ldfld catalystId ; bne.un
+                if (code[k - 4].opcode != OpCodes.Ldfld || !SameField(code[k - 4].operand, cataField))
+                {
+                    rejectFilter++;
+                    continue;
+                }
 
-                if (cmp + 1 >= code.Count) continue;
-                if (code[cmp].opcode != OpCodes.Ldarg_0) continue;
-                if (code[cmp + 1].opcode != OpCodes.Ldfld) continue;
-                if (!ReferenceEquals(code[cmp + 1].operand, cataField)) continue;
+                int i = k - 3;   // ldnull（needs）
+
+                // 取货之后：<载入 this> ; ldfld catalystId ; bne.un
+                //
+                // <b>这里不再写死 `ldarg.0`，这是第二次返工。</b> 上一版要求 cmp 处正好是
+                // <c>OpCodes.Ldarg_0</c>，结果两处<b>都</b>倒在这一条上——而 Cecil 读原版
+                // （以及 preloader 加宽后的副本）那里明明白白就是 `ldarg.0`。
+                // 也就是说 Harmony 交到转译器手里的编码和文件里的不是同一个形式：
+                // 「载入第 0 号参数」有 <c>ldarg.0</c> / <c>ldarg.s 0</c> / <c>ldarg 0</c> 三种写法，
+                // 认死一种就会在另一种上静默失配。
+                //
+                // 真正的锚点是<b>那次 `ldfld catalystId`</b>（语义上唯一），
+                // 载入 this 的那条只要求它「是在载入第 0 号参数」，不管用哪种编码。
+                // **第三次返工，而这次的对手是本 mod 自己。** 1c 的品质改写在
+                // <c>PickFrom</c> 之后插了 <c>ldsfld Q0 ; stloc</c>（把出参的品质接回来），
+                // 于是「取货之后紧跟着 ldfld catalystId」不再成立，两处取货口<b>同时</b>失配
+                // ——日志里只表现为「应当 7 处、实际 5 处」，而那 5 处都是对的。
+                // 先把我们自己插的指令跳掉，再从那里开始找锚点。
+                int scan = QualityAccess.SkipChannelNoise(code, k + 1);
+
+                int cmp = -1;
+
+                for (int p = scan + 1; p <= scan + 3 && p < code.Count; p++)
+                {
+                    if (code[p].opcode != OpCodes.Ldfld) continue;
+                    if (!SameField(code[p].operand, cataField)) continue;
+                    if (!IsLdargZero(code[p - 1])) break;   // 前一条不是载入 this，不敢动
+
+                    cmp = p - 1;
+                    break;
+                }
+
+                if (cmp < 0)
+                {
+                    rejectCompare++;
+
+                    if (rejectCompare <= 2)
+                        ProjectEdenPlugin.Log.LogWarning(
+                            $"活性透镜·诊断：PickFrom 之后没认出「载入 this + ldfld catalystId」"
+                            + $"（跳过品质指令后从第 {scan - k} 条起算）。"
+                            + $"实际是 [{code[scan].opcode} {code[scan].operand}]"
+                            + $" [{Peek(code, scan + 1)}] [{Peek(code, scan + 2)}]");
+
+                    continue;
+                }
 
                 // (3) 比较：先 dup 一份取货结果，再把 ldfld 换成 AcceptPicked(picked, ref gen)。
                 //     插入点上的标签要搬到 dup 上，否则分支会落到 dup 之后、栈就错了
@@ -547,7 +616,16 @@ namespace ProjectEden.Patches
             if (beltHits != 2)
                 ProjectEdenPlugin.Log.LogError(
                     $"活性透镜：GameTick_Gamma 里应当正好有 2 个传送带取货口，实际 {beltHits} 个。"
-                    + "少改的那个口喂不进活性透镜，玩家会看到「有的接收站吃、有的不吃」");
+                    + "少改的那个口喂不进活性透镜，玩家会看到「有的接收站吃、有的不吃」。"
+                    + $"（找到 {pickAnchors} 个 PickFrom 调用；被否掉的：形状 {rejectShape}、"
+                    + $"filter 字段 {rejectFilter}、比较字段 {rejectCompare}）"
+                    + "——**四个数就是诊断本身**：PickFrom 为 0 说明连方法都没认出来"
+                    + "（多半是 operand 解析不出，preloader 动过那个签名）；"
+                    + "形状不为 0 说明原版把参数摆法改了；字段不为 0 说明 catalystId 认错了。");
+            else
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"活性透镜：GameTick_Gamma 的 {beltHits} 个传送带取货口已接管"
+                    + $"（共扫到 {pickAnchors} 个 PickFrom 调用）");
 
             return code;
         }
@@ -584,7 +662,7 @@ namespace ProjectEden.Patches
             for (var i = 0; i < code.Count; i++)
             {
                 if (code[i].opcode != OpCodes.Ldfld) continue;
-                if (!ReferenceEquals(code[i].operand, cataField)) continue;
+                if (!SameField(code[i].operand, cataField)) continue;
 
                 code[i].opcode = OpCodes.Call;
                 code[i].operand = helper;
@@ -813,6 +891,44 @@ namespace ProjectEden.Patches
         private static bool IsLdloca(CodeInstruction ins)
         {
             return ins.opcode == OpCodes.Ldloca || ins.opcode == OpCodes.Ldloca_S;
+        }
+
+        /// <summary>
+        /// 「载入第 0 号参数」的<b>三种编码</b>都认：<c>ldarg.0</c> / <c>ldarg.s 0</c> / <c>ldarg 0</c>。
+        ///
+        /// 只认 <c>ldarg.0</c> 吃过一次亏：Cecil 读文件看到的是 <c>ldarg.0</c>，
+        /// Harmony 交给转译器的却未必是同一个形式，而失配时<b>没有任何报错</b>。
+        /// 短/长形式这一类差别，凡是按操作码匹配的地方都要一次认全。
+        /// </summary>
+        /// <summary>诊断用：越界也要能打印，否则诊断自己会抛。</summary>
+        private static string Peek(List<CodeInstruction> code, int at) =>
+            at >= 0 && at < code.Count ? code[at].opcode + " " + code[at].operand : "（越界）";
+
+        private static bool IsLdargZero(CodeInstruction ins)
+        {
+            if (ins.opcode == OpCodes.Ldarg_0) return true;
+            if (ins.opcode != OpCodes.Ldarg && ins.opcode != OpCodes.Ldarg_S) return false;
+
+            return ins.operand == null || System.Convert.ToInt32(ins.operand) == 0;
+        }
+
+        /// <summary>
+        /// 比较转译器里的字段操作数。<b>不要只用 <c>ReferenceEquals</c>。</b>
+        ///
+        /// 反射对象的引用相等在<b>大多数</b>情况下成立（运行时会缓存 <c>RuntimeFieldInfo</c>），
+        /// 所以用它写出来的匹配器能跑很久——直到某一次不成立，而那时的表现是
+        /// <b>匹配数为 0、没有任何报错</b>，和「原版改了形状」长得一模一样，分不开。
+        ///
+        /// 按「声明类型 + 名字」兜底，代价是一次字符串比较（只在编译补丁时跑，不在 tick 上）。
+        /// </summary>
+        private static bool SameField(object operand, FieldInfo want)
+        {
+            if (want == null) return false;
+            if (ReferenceEquals(operand, want)) return true;
+
+            return operand is FieldInfo got
+                   && got.Name == want.Name
+                   && got.DeclaringType == want.DeclaringType;
         }
 
         /// <summary>tick 路径上的确定性散列，不分配、不共享状态。</summary>

@@ -1,4 +1,4 @@
-// 本文件移植自 ProjectGenesis（创世之书），属于其衍生作品。
+﻿// 本文件移植自 ProjectGenesis（创世之书），属于其衍生作品。
 // Portions of this file are derived from ProjectGenesis (GenesisBook).
 //
 //     Copyright (C) 2022-2026 Awbugl and ProjectGenesis contributors
@@ -172,6 +172,41 @@ namespace ProjectEden.Patches
         {
             int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
 
+            // ── 电力不足按供电率线性降速 ──────────────────────────
+            //
+            // **不做这一步，巨型建筑对缺电几乎免疫、然后一头撞死。** 那不是设计，
+            // 是「10000 倍」撞上原版公式的副作用，两条指令就能看明白：
+            //
+            //   InternalUpdate IL 0000: if (power < 0.1f) return 0;
+            //                  IL 0576: time += (int)(power * speedOverride);
+            //
+            // 原版 1 倍机器的 speedOverride 是 10000，time 涨得慢一半产量就慢一半——
+            // **产出对供电率是线性的**。可巨型建筑是 1e8，单次调用加的 time 比任何
+            // timeSpend 都大一两个数量级，于是供电率 0.11 和 1.00 结算出来<b>一模一样</b>，
+            // 掉到 0.1 以下则整台停摆。玩家看到的就是「一点不减速，然后突然全死」。
+            //
+            // 所以节流阀只能是**每 tick 跑几个周期**，和生物温室按日照缩放同一个旋钮
+            // （见 MegaLightPatches：speed 绝对不能动，降到阈值以下这台建筑就再也不被接管）。
+            //
+            // **曲线照抄原版自己那条：线性。** 不自己发明一条，两边才不会在边界上各说各话
+            // ——这和钻头消耗「逐项照抄原版的产出表达式」是同一条规矩。
+            //
+            // 地板取 1：那正是原版 1 倍机器的满速。缺电该变慢，不该变成完全停工；
+            // 而真正的停工由原版自己的 power < 0.1 那道闸负责，我们不重复它。
+            if (MegaBuildingRegistry.Config?.powerScalesCycles == true && cycles > 1)
+            {
+                float p = power < 0f ? 0f : power > 1f ? 1f : power;
+
+                // 四舍五入而不是截断：截断在 cycles 小的时候会系统性少给近一个周期
+                var scaled = (int)(cycles * p + 0.5f);
+
+                if (scaled < 1) scaled = 1;
+
+                if (scaled < cycles) ReportThrottleOnce(cycles, scaled, p);
+
+                cycles = scaled;
+            }
+
             // 看天吃饭的建筑（生物温室）：周期数按日照强度缩放，满日照满产、零日照停工。
             // 缩到 0 就连原版那一次也要压住——它插在我们后面，拦不掉，只能让它结算不了
             if (MegaLightPatches.IsLightDependent(factory, component.entityId))
@@ -203,6 +238,58 @@ namespace ProjectEden.Patches
             }
 
             return settled;
+        }
+
+        private static int _reportedThrottle;
+
+        /// <summary>
+        /// 第一次真的因为缺电降速时报一行。
+        ///
+        /// <b>这条跑在 tick 路径上，而且是并行的</b>（_assembler_parallel），所以先用
+        /// <c>Interlocked</c> 抢占再拼字符串——抢占放在字符串插值之前，插值本身就不会
+        /// 落到 tick 上。和 <c>AdvancedMinerPatches.ClaimLog</c> 同一套规矩。
+        ///
+        /// 只报一次，是因为它要回答的是<b>一次性的问题</b>：「降速这件事到底生效了没有」。
+        /// 缺电是常态，每次都报就成了刷屏。
+        /// </summary>
+        private static void ReportThrottleOnce(int full, int scaled, float power)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _reportedThrottle, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑：供电率 {power:P0}，本 tick 的配方周期从 {full} 降到 {scaled}（线性，照抄原版 "
+                + "time += power × speedOverride 的口径）。不降的话 10000 倍速对缺电几乎免疫——"
+                + "供电率 0.11 和 1.00 结算完全一样，掉到 0.1 以下才突然整台停摆。"
+                + "要关掉改 megabuildings.json 的 powerScalesCycles。");
+        }
+
+        private static int _reportedBeltQua;
+
+        /// <summary>
+        /// 传送带出货到底带不带品质，只报一次。
+        ///
+        /// <b>两种结果都报。</b> 只在有品质时才打一行的话，
+        /// 「提纯厂没走带子」和「走了带子但品质没接上」在日志上长得一模一样——
+        /// 而这次的 bug 恰好就是后者，它整整藏了一个版本。
+        ///
+        /// <c>Interlocked</c> 抢占在字符串插值之前：这条跑在并行 tick 路径上。
+        /// </summary>
+        private static void ReportBeltQualityOnce(int itemId, int units, QualityRefineryRegistry.Tier tier)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _reportedBeltQua, 1) != 0) return;
+
+            if (tier == null || tier.Quality <= 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑·传送带出货：物品 {itemId} ×{units}，不是提纯配方，不带品质（正常）。");
+
+                return;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑·传送带出货：物品 {itemId} ×{units} 带着每件 {tier.Quality} 分上了带子。"
+                + "**在这之前这条路上的品质恒为 0**：品质只挂在 produced → 物流槽位 "
+                + "那一步，而 produced 还有直接上带子这一条出路，于是同一台提纯厂两条出路两个答案。");
         }
 
         private static bool _reportedSpeed;
@@ -294,8 +381,42 @@ namespace ProjectEden.Patches
                         {
                             int num = produced < maxPilerCount ? produced : maxPilerCount;
 
-                            if (CargoWidening.InsertAtHead(cargoPath, itemId, num, 0))
+                            // **品质必须在这里也注入一次。**
+                            //
+                            // <c>produced[]</c> 有<b>两条</b>出路：这条直接上传送带，
+                            // 以及 <c>MegaStationPatches.UpdateStationStorage</c> 那条进本建筑自己的
+                            // 物流槽位。品质原先只挂在后者（<c>OnProduced</c>），于是
+                            // <b>同一台提纯厂，走物流网的那份 50 分、走带子的那份 0 分</b>，
+                            // 一个字也不报。玩家看到的是「提纯后是 10 不是 50」（10 是底线分）。
+                            //
+                            // 查的是同一张表（<c>FindTier</c>）、用的是同一个每件分数，
+                            // 所以两条出路不可能再分岔。非提纯配方查不到，一次字典查找就返回。
+                            QualityRefineryRegistry.Tier tier =
+                                QualityRefineryRegistry.FindTier(__instance.recipeId);
+
+                            int qua = tier == null || tier.Quality <= 0 ? 0 : tier.Quality * num;
+
+                            // **机器自己造出来的那部分品质也要跟着走，而且必须扣掉。**
+                            //
+                            // 上面那一份是提纯厂凭配方等级铸出来的；这一份是
+                            // <c>QualityCraftFlowPatches</c> 把带品质的<b>投料</b>结算进
+                            // <c>quaProduced</c> 的。只搬件数不扣分，留在缓冲区里的那份
+                            // 会在下一次出货时<b>再发一遍</b>——单件分数凭空往上涨，
+                            // 和本仓库在 <c>StationStore.inc</c> 上记过的那个形状一样。
+                            // 比例要拿扣减前的件数（produced）算。
+                            //
+                            // **先算后扣**：带子满时 <c>InsertAtHead</c> 会失败，一件货都没走，
+                            // 那一刻扣掉的分就凭空没了——带子越堵丢得越快。
+                            qua += QualityCraftOut.PeekSlot(ref __instance, index2, num, produced);
+
+                            if (CargoWidening.InsertAtHead(cargoPath, itemId, num, 0, qua))
+                            {
+                                QualityCraftOut.DrainSlot(ref __instance, index2, num, produced);
+
                                 __instance.produced[index2] -= num;
+
+                                ReportBeltQualityOnce(itemId, num, tier);
+                            }
                         }
                     }
                     else
@@ -313,10 +434,24 @@ namespace ProjectEden.Patches
                                 int num = served < maxPilerCount ? served : maxPilerCount;
                                 var inc = (int)((double)__instance.incServed[index3] * num / served);
 
-                                if (CargoWidening.InsertAtHead(cargoPath, itemId, num, inc))
+                                // 多余原料退回带子时，品质也要按件数带走——
+                                // 只扣件数不扣品质，留下的料就白白继承了整格的点数，
+                                // 和本仓库在 StationStore.inc 上记过的那个形状一样。
+                                int[] quaServed = QualityAccess.ServedQuaReady
+                                    ? QualityAccess.GetServedQua(ref __instance)
+                                    : null;
+
+                                var qua = 0;
+
+                                if (quaServed != null && index3 < quaServed.Length && quaServed[index3] > 0)
+                                    qua = (int)((double)quaServed[index3] * num / served);
+
+                                if (CargoWidening.InsertAtHead(cargoPath, itemId, num, inc, qua))
                                 {
                                     __instance.incServed[index3] -= inc;
                                     __instance.served[index3] -= num;
+
+                                    if (qua > 0) quaServed[index3] -= qua;
                                 }
                             }
                         }
@@ -358,7 +493,8 @@ namespace ProjectEden.Patches
 
                 if (cargoPath == null) continue;
 
-                int itemId = CargoWidening.PickAtRear(cargoPath, __instance.needs, out int needIdx, out int stack, out int inc);
+                int itemId = CargoWidening.PickAtRear(cargoPath, __instance.needs, out int needIdx, out int stack,
+                    out int inc, out int qua);
 
                 RecipeExecuteData executeData = __instance.recipeExecuteData;
 
@@ -366,6 +502,16 @@ namespace ProjectEden.Patches
                 {
                     __instance.served[needIdx] += stack;
                     __instance.incServed[needIdx] += inc;
+
+                    // 品质跟着件数进 <c>quaServed</c>，和 <c>incServed</c> 逐行对应。
+                    // 不接这一句的后果是：带品质的料用带子送进巨型建筑就归 0。
+                    if (qua > 0 && QualityAccess.ServedQuaReady)
+                    {
+                        int[] quaServed = QualityAccess.GetServedQua(ref __instance);
+
+                        if (quaServed != null && needIdx < quaServed.Length) quaServed[needIdx] += qua;
+                    }
+
                     slotdata[index].storageIdx = executeData.products.Length + needIdx + 1;
                 }
 
@@ -373,6 +519,12 @@ namespace ProjectEden.Patches
                 {
                     if (__instance.produced[i] >= 50) continue;
 
+                    // **这一笔的品质是明确丢弃的，不是忘了接。**
+                    // 这是「产物回流」：把带子上的成品收回 <c>produced[]</c>。
+                    // 而产物侧<b>根本没有可存品质的字段</b>（原版连 <c>incProduced</c>
+                    // 都没有，孪生变换无物可镜），所以拿回来也无处可放。
+                    // 要接就得给 AssemblerComponent 新增一个 producedQua，那是 preloader 的活。
+                    // 丢失有界（只在玩家把成品回接进进料口时发生），写在明处。
                     itemId = CargoWidening.PickAtRear(traffic, beltId, executeData.products[i], null, out stack, out int _);
 
                     if (executeData.products[i] != itemId) continue;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -271,9 +271,24 @@ namespace ProjectEden.Patches
             if (QualityAccess.ChannelClearable) QualityAccess.ClearChannel();
         }
 
-        internal static bool InsertAtHead(CargoPath path, int itemId, int stack, int inc)
+        /// <summary>
+        /// 往传送带头上放一堆货，<b>并把这一堆的品质一并送过去</b>。
+        ///
+        /// <b>这就是 <see cref="Gate"/> 注释里说的「阶段 3」，对入库这一侧。</b>
+        /// 在这之前这里无条件调 <c>Gate()</c> 清零，语义是「这一笔不带品质」——
+        /// 而巨型建筑的传送带出货全走这里，于是<b>同位提纯厂用带子发出去的
+        /// 金属品质恒为 0</b>，而走物流网的那一份是 50 分。同一台机器两条出路
+        /// 两个答案，还不报任何错——玩家报上来的是「提纯后是 10 不是 50」（底线分）。
+        ///
+        /// 协议是<b>调用方在调用前写</b>，所以这里是「写值」而不是「清零」；
+        /// <paramref name="qua"/> 为 0 时两者等价，所以不带品质的调用点行为一字未变。
+        /// 调用<b>后</b>仍然清一次：寄存器的寿命必须压在一次调用以内，
+        /// 否则下一个读它的人会拿到上一笔的值（实测过单件涨到 1010，上限是 100）。
+        /// </summary>
+        internal static bool InsertAtHead(CargoPath path, int itemId, int stack, int inc, int qua = 0)
         {
-            Gate();
+            if (qua > 0 && QualityAccess.SetChannel0 != null) QualityAccess.SetChannel0(qua);
+            else Gate();
 
             bool ok = IsActive
                 ? _insertWide != null && _insertWide(path, itemId, (short)stack, (short)inc)
@@ -286,19 +301,44 @@ namespace ProjectEden.Patches
 
         private static byte Clamp(int v) => (byte)(v > 255 ? 255 : v < 0 ? 0 : v);
 
-        internal static int PickAtRear(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc)
+        /// <summary>
+        /// 从传送带尾端取一堆货，<b>并把它的品质取回来</b>。
+        ///
+        /// <b>取货方向的协议和入库是反的：被调方写、调用方读。</b>
+        /// 实测改写后的程序集（跑完整五段管线的那份，不是只跑了加宽的那份）：
+        /// <code>
+        /// CargoPath::TryPickItemAtRear     00DE: ldfld Cargo::qua → 00E3: stsfld Q0
+        /// CargoTraffic::TryPickItemAtRear  008D: ldfld Cargo::qua → 0092: stsfld Q0
+        /// </code>
+        /// ——品质<b>本来就送回来了</b>，是这里的 <c>finally { Gate(); }</c>
+        /// 在我们读它之前先把寄存器抹了。<see cref="Gate"/> 的注释里写的
+        /// 「取货类的方法是反过来的…调用后也要清一次」就是这件事，
+        /// 只是当时只写了「清」而没写「先读再清」。
+        ///
+        /// <b>顺序是读完再清，而且清不能省。</b> 寄存器的寿命必须压在一次调用以内：
+        /// 留着的话，下一个没写就读的人拿到的是这一笔的品质——凭空发明，而且会累积。
+        /// </summary>
+        internal static int PickAtRear(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc,
+            out int qua)
         {
             Gate();
 
             try
             {
-                return PickAtRearCore(path, needs, out needIdx, out stack, out inc);
+                int id = PickAtRearCore(path, needs, out needIdx, out stack, out inc);
+
+                qua = id > 0 && QualityAccess.GetChannel0 != null ? QualityAccess.GetChannel0() : 0;
+
+                return id;
             }
             finally
             {
                 Gate();
             }
         }
+
+        internal static int PickAtRear(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc) =>
+            PickAtRear(path, needs, out needIdx, out stack, out inc, out int _);
 
         private static int PickAtRearCore(CargoPath path, int[] needs, out int needIdx, out int stack, out int inc)
         {
@@ -329,19 +369,28 @@ namespace ProjectEden.Patches
             return 0;
         }
 
-        internal static int PickAtRear(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack, out int inc)
+        /// <summary>同上，传送带版本。被调方同样写 Q0。</summary>
+        internal static int PickAtRear(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack,
+            out int inc, out int qua)
         {
             Gate();
 
             try
             {
-                return PickAtRearCore(traffic, beltId, filter, needs, out stack, out inc);
+                int id = PickAtRearCore(traffic, beltId, filter, needs, out stack, out inc);
+
+                qua = id > 0 && QualityAccess.GetChannel0 != null ? QualityAccess.GetChannel0() : 0;
+
+                return id;
             }
             finally
             {
                 Gate();
             }
         }
+
+        internal static int PickAtRear(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack,
+            out int inc) => PickAtRear(traffic, beltId, filter, needs, out stack, out inc, out int _);
 
         private static int PickAtRearCore(CargoTraffic traffic, int beltId, int filter, int[] needs, out int stack, out int inc)
         {

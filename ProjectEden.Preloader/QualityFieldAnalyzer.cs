@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Mono.Cecil;
@@ -95,6 +95,12 @@ namespace ProjectEden.Preloader
             "InserterComponent::itemInc",
             "ShipData::inc",
 
+            // **鼠标手上那一格。** 拖拽、拆分、手动合并全都经过它，
+            // 所以它不搬品质等于**玩家一动手就掉品质**。
+            // IL 里的名字是自动属性的后备字段，整套名字启发式都认不出来；
+            // TwinName 为此加了「剥壳再套回去」那一条。
+            "Player::<inhandItemInc>k__BackingField",
+
             // ── 生产 ──
             "AssemblerComponent::incServed",
             "LabComponent::incServed",
@@ -155,6 +161,32 @@ namespace ProjectEden.Preloader
             "StationStore::inc",
             "AssemblerComponent::incServed",
 
+            // **分拣器。它曾经不在这张表里，代价是品质永远到不了储物柜。**
+            //
+            // 症状：提纯出来的金属经传送带进储物柜，品质是 0。逐段查过，提纯注入 ✅、
+            // 物流槽位 ✅、槽位→带子 ✅、带子上的 Cargo.qua ✅、储物箱 AddItem ✅
+            // ——只有中间那只爪子不搬。
+            //
+            // **为什么漏了四轮才找到：两张表的差异。** `itemInc` 在 DeclaredPayload 里，
+            // 所以 1a 给它建了孪生字段 `itemQua`——字段存在、类型对、进存档，看哪儿都正常。
+            // 但它不在**这张**表里，而这张表才是 1c 判断「要不要改写这个方法」的依据。
+            // 于是三个 tick 变体在**选集阶段**就被跳过：没有语句、没有分类、没有 Unhandled、
+            // 没有 Blocker——**报告从头到尾说一切正常**，所有探针都在它下游。
+            //
+            // 加进来之后又暴露三种缺的发射形状，而其中两种的根是同一个：
+            // 复制传播的合成只认紧邻 `stloc` 的 `ldloc`，不跳中间那条 `conv`
+            // （详见 QualityTransform 里那一段的注释）。补上之后全部打通。
+            //
+            // **核对的是末态，不是报告**：改写后的程序集里三个变体各
+            // itemInc=18 / **itemQua=18**，一一对应；26168 个方法体分支目标全部可解析。
+            "InserterComponent::itemInc",
+
+            // **鼠标手上那一格。** 拖拽、拆分、手动合并全都经过它，
+            // 所以它不搬品质等于**玩家一动手就掉品质**。
+            // IL 里的名字是自动属性的后备字段，整套名字启发式都认不出来；
+            // TwinName 为此加了「剥壳再套回去」那一条。
+            "Player::<inhandItemInc>k__BackingField",
+
             // 这两个不是「又一个载荷」，是**主干道内部的临时元组**：
             // StorageComponent::Sort 把格子归并整理时，点数先落到 IDCNTINC 再写回格子。
             // 不把它们算进主干道，Sort 就会用一个没有孪生的临时值覆盖 grids[i].inc，
@@ -202,6 +234,60 @@ namespace ProjectEden.Preloader
         /// 原布局就是新结构体的前缀，按 <c>原 stride</c> 盲拷即可，不用逐字段写渲染副本），
         /// 或者给 <c>StationComponent</c> 加一条和 <c>workDroneDatas</c> 平行的品质数组。
         /// </summary>
+        /// <summary>
+        /// <b>品质独有的新槽位——不是孪生。</b>
+        ///
+        /// 前面那张表里的每一项，原版都有一个 <c>inc</c> 和它一一对应，所以「孪生」这个词成立：
+        /// 加一个同形状的字段，再让 1c 把每一次 <c>inc</c> 访问照着复制一遍就行。
+        ///
+        /// <b>这一张表里的没有对应物。</b> <c>AssemblerComponent.produced</c> 是产物缓冲区的
+        /// <b>件数</b>，而原版**根本没有** <c>incProduced</c>——增产点数不进产物缓冲，
+        /// 喷过的料造出来的东西是干净的。所以品质在这里要的是一个<b>全新的槽位</b>。
+        ///
+        /// <b>正因为没有对应物，它绝不能进 <see cref="MainlinePayload"/>。</b>
+        /// 1c 的工作方式是「把这个字段的每一次访问镜像一份」，而它要镜像的源是 <c>produced</c>
+        /// ——那样 <c>produced[i] += 件数</c> 会被复制成 <c>quaProduced[i] += 件数</c>，
+        /// **把件数当成品质写进去**，而且一路都不报错。
+        /// 这个字段的每一次读写都必须是手写的，语义由人定。
+        ///
+        /// 格式：<c>类型::字段名:元素类型</c>（<c>[]</c> 表示数组）。
+        /// </summary>
+        internal static readonly string[] ExtraFields =
+        {
+            "AssemblerComponent::quaProduced:Int32[]",
+
+            // **在途池：已经扣了料、但产物还没出来的那部分品质。**
+            //
+            // 原版一个 cycle 的两端<b>不在同一 tick</b>：开工时扣 <c>served</c>，
+            // 跑够 <c>timeSpend</c> 才往 <c>produced</c> 里加。普通速度的装配机上这中间隔着几十帧。
+            // 没有这个池子的话，逐 tick 比差值会两头落空——扣料那一 tick「没产出」，
+            // 出货那一 tick「没消耗」，**品质一分都到不了产物上**。
+            //
+            // （巨型建筑 <c>speedOverride</c> 是 1e8，一个 cycle 一 tick 就跑完，
+            // 所以那边碰巧不需要这个池子——**碰巧对是最难查的一种对**。）
+            "AssemblerComponent::quaPending:Int32",
+
+            // **在途池的分母：那些点数是多少件料带来的。**
+            //
+            // 规则从「求和」改成「按件数加权平均」之后，光有点数不够用了：
+            // 产物的每件分数 = 在途点数 ÷ <b>在途件数</b>，而这两个数**必须同时跨 tick**
+            // ——分子留下了、分母丢了，算出来的就不是平均数。
+            //
+            // 也试过不加这个字段：把平均值直接存进 <c>quaPending</c>、后来的 cycle 覆盖它。
+            // 那是个近似——两个 cycle 同时在途且投料品质不同时会取后者，
+            // 而本仓库的规矩是<b>宁可多一个字段，也不静默近似</b>。
+            "AssemblerComponent::quaPendingItems:Int32",
+        };
+
+        /// <summary>声明的载荷总数。<b>给 1a 的数量断言用，免得那边再写一份常量。</b></summary>
+        internal static int DeclaredPayloadCount => DeclaredPayload.Length;
+
+        /// <summary>品质独有的新槽位个数，同样给 1a 的断言用。</summary>
+        internal static int ExtraFieldCount => ExtraFields.Length;
+
+        /// <summary>因为要原样喂 GPU 而不能加孪生字段的那几个。</summary>
+        internal static int GpuUploadedCount => GpuUploaded.Length;
+
         private static readonly string[] GpuUploaded =
         {
             "TrashObject::inc",
@@ -608,6 +694,11 @@ namespace ProjectEden.Preloader
             var skip = new HashSet<string>(NotifySink, StringComparer.Ordinal);
             var found = new Dictionary<MethodDefinition, List<int>>();
 
+            // 清单里那些字段的键，给下面的「平凡 set 访问器」用。
+            // 直接从声明字符串取：它们本来就写成 <c>类型全名::字段名</c>，和 Cecil 的
+            // <c>FullName</c>（嵌套类型用 <c>/</c> 分隔）是同一套写法。
+            var payloadKeys = new HashSet<string>(DeclaredPayload, StringComparer.Ordinal);
+
             skipped = 0;
 
             foreach (TypeDefinition t in AllTypes(module))
@@ -627,6 +718,20 @@ namespace ProjectEden.Preloader
                         (idx ?? (idx = new List<int>())).Add(i);
                     }
 
+                    // **属性的 set 访问器：形参叫 value，名字启发式在这里第五次漏了载荷。**
+                    //
+                    // 鼠标手上那一格是自动属性，唯一的写入口是
+                    // <c>Player::set_inhandItemInc(Int32 value)</c>——15 处调用全走它。
+                    // 形参名是编译器给的 <c>value</c>，<see cref="LooksLikeInc"/> 认不出来,
+                    // 于是访问器体内那条 <c>stfld 载荷</c> 的值来源判成 opaque，整个变换卡住。
+                    //
+                    // 判据是**方法体形状**，不是名字：正好
+                    // <c>ldarg.0 ; ldarg.1 ; stfld 清单里的载荷字段 ; ret</c>。
+                    // 形状判定不会因为游戏换个编译器改名字而失效——
+                    // 而这正是 <c>_stack</c> / <c>itemInc</c> / <c>cacheCargoInc1</c> 那三次的教训。
+                    if (idx == null && TrivialSetterSlot(m, payloadKeys, out int vslot))
+                        idx = new List<int> { vslot };
+
                     if (idx == null) continue;
 
                     if (skip.Contains(t.FullName + "::" + m.Name)) { skipped++; continue; }
@@ -636,6 +741,36 @@ namespace ProjectEden.Preloader
             }
 
             return found;
+        }
+
+        /// <summary>
+        /// 这个方法是不是<b>某个载荷字段的平凡 set 访问器</b>：方法体正好是
+        /// <c>ldarg.0 ; ldarg.1 ; stfld 载荷字段 ; ret</c>。是的话它唯一的形参就是载荷参数。
+        ///
+        /// 和 <c>QualityTransform.IsTrivialGetter</c> 是同一条判据的另一半：
+        /// <b>看方法体，不看 <c>set_</c> 前缀</b>。按前缀放行会把带副作用的属性
+        /// （校验、通知、惰性初始化）一起放进来，而那时侧信道会把品质写进一个
+        /// 根本不落到孪生字段上的地方——静默丢失。
+        /// </summary>
+        private static bool TrivialSetterSlot(MethodDefinition m,
+            ICollection<string> payloadKeys, out int slot)
+        {
+            slot = -1;
+
+            if (!m.HasBody || !m.HasThis || m.Parameters.Count != 1) return false;
+            if (!IsIntegerPayload(m.Parameters[0].ParameterType)) return false;
+
+            IList<Instruction> b = m.Body.Instructions;
+
+            if (b.Count != 4) return false;
+            if (b[0].OpCode != OpCodes.Ldarg_0 || b[1].OpCode != OpCodes.Ldarg_1) return false;
+            if (b[2].OpCode != OpCodes.Stfld || !(b[2].Operand is FieldReference fr)) return false;
+            if (b[3].OpCode != OpCodes.Ret) return false;
+            if (!payloadKeys.Contains(fr.DeclaringType.FullName + "::" + fr.Name)) return false;
+
+            slot = 0;
+
+            return true;
         }
 
         private static void CountParams(ModuleDefinition module,

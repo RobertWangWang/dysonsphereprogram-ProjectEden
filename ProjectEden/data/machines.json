@@ -43,8 +43,8 @@
         "fuelMask": 16
       },
       "recipeId": 6625,
-      "//recipeHandcraftOnly": "和风力发电机集群同理：配方 Type 设成 0(None)，只能手搓。",
-      "recipeHandcraftOnly": true,
+      "//recipeHandcraftOnly": "**false = 可以进制造台**（配方 Type 用 4 Assemble）。手搓并不会因此失去：Handcraft 是无条件 true 的，所以两条路都通，只是不再被锁死在手搓上。改成 true 会把 Type 设成 0(None)——合成器只看 Handcraft 照样列得出来，而配方选择器按 filter != recipe.Type 过滤、没有哪台机器的 assemblerRecipeType 会等于 0，于是哪台机器都选不到它。顺带：Type 0 还会让它拿不到 productionMask 位（ItemProto.InitProductionMask 开头就 `if (recipe.Type == 0) continue;`），因而不出现在「参考速率」里；改成 4 之后这条也一并恢复。",
+      "recipeHandcraftOnly": false,
       "recipeTimeSpend": 600,
       "recipeGridIndex": 0,
       "//recipeItems": "100 台火力发电厂 + 100 个能量矩阵（6002）。数量和 powerMultiplier 是同一个 100——这座建筑就是一百台。",
@@ -354,8 +354,8 @@
         "powerMultiplier": 1000.0
       },
       "recipeId": 6536,
-      "//recipeHandcraftOnly": "只能手搓：配方 Type 设成 0(None)，合成器只看 Handcraft 照样列得出来，而配方选择器按 filter != recipe.Type 过滤，没有哪台机器的 assemblerRecipeType 会等于 0。",
-      "recipeHandcraftOnly": true,
+      "//recipeHandcraftOnly": "**false = 可以进制造台**（配方 Type 用 4 Assemble），手搓照旧保留（Handcraft 无条件 true）。理由见可燃性液体发电厂那条同名注释：Type 0 不只是「机器选不到」，还会连 productionMask 位一起丢掉，因而不出现在「参考速率」里。",
+      "recipeHandcraftOnly": false,
       "//recipeTimeSpend": "单位是 tick，60 tick = 1 秒。600 = 10 秒。",
       "recipeTimeSpend": 600,
       "recipeGridIndex": 0,

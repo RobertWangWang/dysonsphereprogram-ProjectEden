@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Mono.Cecil;
@@ -77,6 +77,20 @@ namespace ProjectEden.Preloader
             internal int Methods;
 
             /// <summary>新增的孪生局部变量数</summary>
+            /// <summary>
+            /// <b>切出了含载荷的语句、却一条都没孪生的方法。</b>
+            /// 正常情况下这个表应该是空的——每条语句都会落进某个账。
+            /// 非空就是静默丢失，而静默丢失的症状是「品质恒为 0」。
+            /// </summary>
+            internal readonly Dictionary<string, int> SilentLoss = new Dictionary<string, int>(StringComparer.Ordinal);
+
+            /// <summary>
+            /// 按行为认出来、破例改写的界面方法。
+            /// <b>报出来是为了让这条规则可审查</b>——它要是哪天认不出来了，
+            /// 症状又是「品质静默变 0」，而这一行会先变短。
+            /// </summary>
+            internal readonly List<string> UiMovers = new List<string>();
+
             internal int TwinLocals;
 
             /// <summary>
@@ -89,6 +103,9 @@ namespace ProjectEden.Preloader
 
             /// <summary>调用后把寄存器擦掉的次数。</summary>
             internal int Scrubs;
+
+            /// <summary>因为调用方是中继而<b>没有</b>擦的点数。</summary>
+            internal int Relays;
 
             /// <summary>形状表里没有的东西：签名 → 次数</summary>
             internal readonly Dictionary<string, int> Unhandled = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -222,16 +239,77 @@ namespace ProjectEden.Preloader
             Dictionary<MethodDefinition, List<int>> paramSlots =
                 QualityFieldAnalyzer.SelectTwinParams(module, out int _);
 
+            // ── 平凡访问器表：**必须在任何改写发生之前建好** ──
+            BuildAccessorMap(module, twin);
+
             // ── 逐方法处理 ──
             foreach (TypeDefinition t in AllTypes(module))
             {
-                if (t.Name.StartsWith("UI", StringComparison.Ordinal)) continue;
+                bool ui = t.Name.StartsWith("UI", StringComparison.Ordinal);
 
                 foreach (MethodDefinition m in t.Methods)
                 {
                     if (!m.HasBody) continue;
 
-                    if (!m.Body.Instructions.Any(i => IsMainline(i, twin))) continue;
+                    // **界面类里也有真的在搬货的方法。**
+                    //
+                    // 按 <c>UI</c> 前缀整个跳过，对绝大多数界面类成立（它们只画），
+                    // 而 <c>UIStorageGrid</c> 的 <c>TransferToOther</c> / <c>HandTake</c> / <c>HandPut</c> /
+                    // <c>OnGridMouseDown</c> 是玩家手动搞货的入口——它们先调
+                    // <c>TakeItemFromGrid</c>（产出品质）再调 <c>AddItem</c>（消费品质）。
+                    // 被排除在外、而全模块的擦除照常执行，于是
+                    // <b>只有擦除、没有搬运</b>（实测：真实访问 0，擦除 5/6/23/18）。
+                    // 玩家看到的是「储物仓里 50 分，拿回背包就是 0」。
+                    //
+                    // **不硬编码名单，按行为判定：既调了产出品质的方法（byref 载荷形参）、
+                    // 又调了消费品质的方法（按值载荷形参）的，就是在搬货。**
+                    // 名单会烂（游戏更新改个方法名就静默失效），行为判定不会。
+                    if (ui)
+                    {
+                        if (!MovesPayload(m, paramSlots)) continue;
+
+                        r.UiMovers.Add(t.Name + "::" + m.Name);
+                    }
+
+                    // **只中转的方法也要选进来。**
+                    //
+                    // 原条件是「方法体里有载荷字段指令」。有一类方法一个载荷字段都不碰，
+                    // 只把品质从自己的<b>载荷参数</b>转给下一个同样带载荷参数的调用——
+                    // 它们被挡在外面，而 <c>ScrubAfterCalls</c> 是全模块扫的，
+                    // 于是这些方法里<b>只有擦除、没有搬运</b>，品质到这就断。
+                    //
+                    // 实测擞上的三个，它们恰好是【物流槽位 → 带子】那一步的全部：
+                    // <code>
+                    //   CargoPath::TryInsertItem      真实=0 qua字段=0 擦除=4
+                    //   CargoTraffic::TryInsertItem   全 0
+                    //   CargoTraffic::PutItemOnBelt   全 0
+                    // </code>
+                    // 加上手捡那条的 <c>CargoTraffic::PickupBeltItems</c>，四个缺口是同一个根。
+                    //
+                    // 条件故意写得窄：<b>自己有载荷参数，且调了同样有载荷参数的方法</b>。
+                    // 宽成「任何调了载荷方法的方法」会把一大片不相干的方法拉进来，
+                    // 冒出一批没实现的形状而让整个变换不生效。
+                    bool relayOnly = m.Body.Instructions.Any(i =>
+                    {
+                        if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) return false;
+                        if (!(i.Operand is MethodReference cmr0)) return false;
+                        if (!TryResolve(cmr0, out MethodDefinition cd0)) return false;
+                        if (!paramSlots.TryGetValue(cd0, out List<int> cs0)) return false;
+
+                        // 本方法自己带载荷参数 → 它可能是「把品质传下去」的中转。
+                        if (paramSlots.ContainsKey(m)) return true;
+
+                        // 或者被调方有 byref 载荷形参 → 它能「产出」品质（out inc），
+                        // 本方法接到之后还要再送给别人——手捡那条就是这个形状：
+                        // <c>PickupBeltItems</c> 自己一个载荷参数都没有。
+                        foreach (int p0 in cs0)
+                            if (cd0.Parameters[p0].ParameterType.IsByReference)
+                                return true;
+
+                        return false;
+                    });
+
+                    if (!relayOnly && !m.Body.Instructions.Any(i => IsMainline(i, twin))) continue;
 
                     // 混合方法要手工写，这一趟不碰
                     if (IsHandWritten(t, m)) continue;
@@ -276,6 +354,16 @@ namespace ProjectEden.Preloader
             }
 
             if (mutate) ScrubAfterCalls(module, regs, paramSlots, r);
+
+            if (mutate) AssertNoNarrowedQuality(module, regs, twin, r);
+
+            r.Notes.Add(r.UiMovers.Count > 0
+                ? $"界面层的搬运方法破例改写：{r.UiMovers.Count} 个——"
+                  + string.Join("、", r.UiMovers.ToArray())
+                  + "。它们既调了产出品质的方法、又调了消费品质的方法，**就是在搬货而不是在画画**。"
+                  + "这一行变短就意味着手动搞货又开始掉品质了。"
+                : "界面层没有识别出任何搬运方法——**这不正常**，"
+                  + "UIStorageGrid 的手动搞货本来就应该被认出来。");
 
             r.Notes.Add(
                 $"品质搬运层：{r.Twinned} 条语句已孪生、{r.NoTwinNeeded} 条确认不需要孪生，" +
@@ -481,6 +569,15 @@ namespace ProjectEden.Preloader
             // `V_4 = V_3 × 每件品质分` 里 V_3 只是个件数，原样重放当系数就行。
             stmts.RemoveAll(st => st.Synth && Orphan(m, code, st.To, carriers));
 
+            // **转发语句也要随它转发的那个局部一起消失。**
+            //
+            // 合成跑在不动点<b>之前</b>，那时候候选集还是乐观的；等不动点把某个局部
+            // 剔出去（它的定义语句拼不出来），转发它的语句就成了孤儿，
+            // 以「拼不出来」的身份挡住整个变换——实测就是
+            // <c>DispenserComponent::InternalTick</c> 那 2 处，而它描述的事情已经不需要做了。
+            stmts.RemoveAll(st => st.Synth && st.Core == "call:forward"
+                                           && ForwardOrphan(m, code, st, carriers));
+
             // 诊断：EDEN_QUALITY_DEBUG=<方法名> 时，把这个方法体的分类结果原样打出来。
             // 缺口报告只说「这个形状拼不出来」，而原因几乎总在别的语句上——
             // 没有这一段，每查一处都要重写一遍切分逻辑。
@@ -488,7 +585,14 @@ namespace ProjectEden.Preloader
 
             if (!string.IsNullOrEmpty(dbg) && m.Name == dbg)
             {
-                r.Notes.Add($"[dbg] {m.DeclaringType.Name}::{m.Name} 候选 "
+                // **重载必须分得开。** 调试开关按方法名匹配，而 `CargoPath::TryPickItem`
+                // 有三个重载——不打参数个数和载荷槽位，三条调试行长得一模一样，
+                // 而「哪一个重载没被孪生」正是要问的问题。
+                r.Notes.Add($"[dbg] {m.DeclaringType.Name}::{m.Name}({m.Parameters.Count}参"
+                            + $"，载荷槽位 {(paramSlots.TryGetValue(m, out List<int> dbgSlots) ? string.Join("/", dbgSlots.Select(x => x.ToString()).ToArray()) : "无")}"
+                            + $"，语句 {stmts.Count}"
+                            + $"，含载荷指令 {code.Count(x => IsMainline(x, twin))}"
+                            + $"，指令 {code.Count}) 候选 "
                             + string.Join(",", cand.Select(v => "V_" + v.Index).ToArray())
                             + " / 可用 " + string.Join(",", carriers.Select(v => "V_" + v.Index).ToArray())
                             + " / 作废 " + string.Join(",", dead.Select(v => "V_" + v.Index).ToArray()));
@@ -499,6 +603,8 @@ namespace ProjectEden.Preloader
             }
 
             // 2) 逐语句匹配
+            int twinnedBefore = r.Twinned;
+
             var touched = false;
 
             foreach (Stmt st in stmts)
@@ -522,6 +628,36 @@ namespace ProjectEden.Preloader
                     && !DropShapes.Contains(core) && !SaveWriteShapes.Contains(core)
                     && ReadsSave(code, from, to) && PayloadStores(code, from, to, twin) == 1)
                     core = SaveReadCore;
+
+                // **「读一次载荷、送进一个带载荷形参的调用」不该逐个形状列举。**
+                //
+                // 鼠标手上那一格接进来之后，这一族一下子冒出十几种形状——而前缀
+                // （<c>get_inhandItemId</c>、<c>get_inhandItemCount</c>、几个 <c>ldc</c>、
+                // 取 <c>mecha</c> 取 <c>controller</c>……）的组合本来就是无穷的,
+                // 真正要做的事却只有一件：**在那个 call 之前把品质写进寄存器**。
+                //
+                // 所以按语义归一化，和上面那条读存档的规则同一个路子：
+                // 语句里有载荷读、并且有一个带**按值**载荷形参的调用 → 就是转发。
+                // 拼不出来照样会变成 Pending 露出来，不会静默。
+                if (!TwinShapes.Contains(core) && !NoTwinShapes.Contains(core)
+                    && !DropShapes.Contains(core) && !SaveWriteShapes.Contains(core)
+                    && ForwardsToPayloadCall(ctx, code, from, to))
+                    core = "call:forward";
+
+                // **写载荷靠的是 set 访问器时，目的地只能是侧信道，不能直接写孪生字段。**
+                //
+                // 差点两边都写，而那是错的：访问器自己的方法体已经孪生成
+                // `qua = Q0`，调用点再在 call **之前**直接写一遍孪生字段，
+                // 紧接着这次 call 就会拿 Q0 把它盖掉——而 Q0 这时往往已经被
+                // <see cref="ScrubAfterCalls"/> 擦成 0 了（`SetHandItems` 就是：
+                // 品质由 `TakeItemFromGrid` 的出参接进局部，那次调用之后 Q0 就被擦了）。
+                // 表现是「明明每一处都写了，手上还是 0」。
+                //
+                // 所以调用点一律走转发：算出品质 → 写 Q<槽位> → 由访问器落地。
+                // 存档读那一族例外，它的值拼不出来，交给 BuildZeroWrite 写 Q<槽位> = 0。
+                if (TrivialAccessor(code[to], out FieldDefinition _, out bool accSet) && accSet
+                    && !ReadsSave(code, from, to))
+                    core = "call:forward";
 
                 // **只有写好发射代码的形状才算认得。** 光在 TwinShapes 里不算——
                 // 那会让变换报成功却什么都不做，品质恒为 0 而日志说一切正常。
@@ -608,6 +744,27 @@ namespace ProjectEden.Preloader
 
             // 孪生局部的计数在 Emit 里做——那里才是真正建出来的地方。
             // 在这里按 ctx.Locals 数会把分析遍也算进去，导致数字翻倍。
+            // **切出了含载荷的语句、却一条都没孪生——点名报出来。**
+            //
+            // 分类循环的每一条出路都记账（Twinned / Pending / Unhandled /
+            // Dropped / NoTwinNeeded / SaveSkipped），所以「有语句但零孪生」本来不该发生。
+            // 它发生了：<c>InserterComponent::InternalUpdate</c> 切出 12 条含 <c>itemInc</c>
+            // 的语句，最终程序集里 <c>itemQua</c> 的访问数是 <b>0</b>，
+            // 而 <c>Unhandled</c>、<c>Pending</c>、<c>Blockers</c> 全是空的——
+            // <b>报告说全处理完了</b>。
+            //
+            // 后果不是抽象的：分拣器正是【带子 → 储物柜】那一步，
+            // 它不搬品质就意味着品质永远到不了箱子里。这个症状花了四轮
+            // 才定位，而其中三轮是因为<b>没人告诉我们这里丢了东西</b>。
+            //
+            // 这一条只报告、不改行为：先让洞可见，再谈怎么堵。
+            if (stmts.Count > 0 && r.Twinned == twinnedBefore)
+            {
+                string who = m.DeclaringType.FullName + "::" + m.Name;
+
+                if (!r.SilentLoss.ContainsKey(who)) r.SilentLoss[who] = stmts.Count;
+            }
+
             if (mutate && work.Count > 0) Emit(m, ctx, work, r);
         }
 
@@ -682,7 +839,17 @@ namespace ProjectEden.Preloader
 
             foreach (Job job in work.OrderByDescending(j => j.Insert < 0 ? j.To : j.Insert))
             {
-                if (job.To >= code.Count) continue;
+                // **这条 continue 原先不记账。** 分析遍把语句算进了 Twinned，
+                // 发射遍在这里静默跳过，于是报告说「孪生了 N 条」而实际写进去的更少——
+                // 正是这个文件到处在防的那种自欺。
+                if (job.To >= code.Count)
+                {
+                    r.Blockers.Add(
+                        $"{m.DeclaringType.Name}::{m.Name} 里形状「{job.Core}」的插入位置 "
+                        + $"{job.To} 超出了方法体长度 {code.Count}，这条孪生语句没写进去");
+
+                    continue;
+                }
 
                 List<Instruction> emit = Build(ctx, code, job);
 
@@ -801,6 +968,33 @@ namespace ProjectEden.Preloader
                            && at.Next.Next != null && IsStloc(at.Next.Next))
                         at = at.Next.Next;
 
+                    // **调用方自己就是中继时，不擦。**
+                    //
+                    // 上面那一句只认一种出参读回：调用方把品质存进局部变量。
+                    // 还有第二种，而它被漏了：<b>调用方本身带载荷出参，
+                    // 被调方写的那个值就是它自己要往上传的出参</b>——
+                    // 这时插一句擦除，等于把中继掉链。
+                    //
+                    // 实测到的现场（改写后的程序集）：
+                    // <code>
+                    // CargoTraffic::TryPickItem
+                    //   0072: callvirt CargoPath::TryPickItem(...)   // 被调方刚写好 Q0
+                    //   0077: ldc.i4.0
+                    //   0078: stsfld Q0                              // 擦掉
+                    //   007D: ret                                    // 上游 PickFrom 读到 0
+                    // </code>
+                    // 于是【传送带 → 分拣器 → 储物柜】整条链品质恒为 0，
+                    // 而 <c>CargoPath::TryPickItem</c> 本身是孪生完好的——每一步都「成功」，功能却不在。
+                    //
+                    // 判据故意写得窄：调用方自己在 <paramref name="slots"/> 里（带载荷参数），
+                    // 且插入点后面紧跟 <c>ret</c>——也就是这次调用的返回值就是本方法的返回值。
+                    // 宽一点都会把「调完还要干别的事」那些点一并放过，
+                    // 而寄存器多活一步就是「凭空发明品质」——比丢失难查得多。
+                    bool relay = slots.ContainsKey(m)
+                                 && at.Next != null && at.Next.OpCode == OpCodes.Ret;
+
+                    if (relay) { r.Relays++; continue; }
+
                     for (var si = 0; si < used.Count && si < regs.Count; si++)
                     {
                         Instruction zero = Instruction.Create(OpCodes.Ldc_I4_0);
@@ -817,6 +1011,29 @@ namespace ProjectEden.Preloader
 
                 m.Body.OptimizeMacros();
             }
+
+            if (r.SilentLoss.Count > 0)
+            {
+                var top = new System.Text.StringBuilder();
+                var n = 0;
+
+                foreach (KeyValuePair<string, int> kv in r.SilentLoss.OrderByDescending(x => x.Value))
+                {
+                    if (n++ >= 8) break;
+
+                    top.Append(kv.Key).Append('×').Append(kv.Value).Append('、');
+                }
+
+                r.Notes.Add(
+                    $"**静默丢失：{r.SilentLoss.Count} 个方法切出了含载荷的语句、却一条都没孪生。**"
+                    + $"这些方法里的品质恒为 0，而且不会报错。前几名：{top}"
+                    + "（分拣器在列表里就意味着【带子 → 储物柜】这一步不搬品质）");
+            }
+
+            r.Notes.Add(
+                $"中继放行：{r.Relays} 处——调用方自己带载荷出参、且调完就 ret，"
+                + "被调方写的那个值就是它要往上传的。**这几处原先是被擦掉的**，"
+                + "于是【带子 → 分拣器 → 储物柜】整条链品质恒为 0。");
 
             r.Notes.Add(
                 $"调用后擦除：{r.Scrubs} 处。侧信道寄存器的寿命被压到「一次调用」以内——" +
@@ -853,6 +1070,20 @@ namespace ProjectEden.Preloader
             /// 它的名字在 <c>ldloca</c> 上，语句末尾是 call，不是 stloc。
             /// </summary>
             internal VariableDefinition Dst;
+
+            /// <summary>
+            /// <c>call:forward</c> 专用：**这条语句真正依赖的那段实参**的区间
+            /// （<c>From</c>/<c>To</c> 覆盖的是整次调用，里面还有 itemId、件数这些
+            /// 和品质无关的实参）。
+            ///
+            /// 剪孤儿要用它：合成跑在载体不动点<b>之前</b>，等不动点把某个局部剔出去，
+            /// 转发它的语句就拼不出来了，得跟着消失。按整次调用的区间剪会把
+            /// <b>每一条转发都误杀</b>——那里面总有几个不是载体的局部。
+            /// </summary>
+            internal int ArgFrom = -1;
+
+            /// <summary>见 <see cref="ArgFrom"/>。</summary>
+            internal int ArgTo = -1;
         }
 
         /// <summary>
@@ -913,6 +1144,51 @@ namespace ProjectEden.Preloader
                 outp.Add(new Stmt { From = from, To = to, TrueFrom = trueFrom, Core = core });
             }
 
+            // **栈深从不归零的方法，出参写入要单独抓一遍。**
+            //
+            // 上面按「栈深归零」切语句，而有一类方法把返回值提前压栈、
+            // 一直留到 <c>ret</c>：中间那几条出参写入永远回不到 0，于是<b>一条语句都切不出来</b>。
+            //
+            // 实测擞上的：<c>CargoPath::TryPickItem</c> 三个重载各有 1 条含载荷的指令，
+            // 5 参 / 6 参各切出 1 条语句，<b>4 参切出 0 条</b>——差别就在它把
+            // <c>cargoPool[i].item</c>（返回值）提前压了栈，而另两个重载中间有一道
+            // filter 判断把栈抽干了。后果：<b>手从传送带上捡货永远拿到 0 分</b>
+            // （<c>CargoTraffic::PickupBeltItems</c> 走的正是 4 参那个）。
+            //
+            // 这一遍只找一种形状，它自己就是完整语义，不靠外层栈深：
+            // <c>ldarg &lt;载荷出参&gt; … ldfld:PAY … stind</c>。已经被上面切进某条语句的不重复抓。
+            var covered = new HashSet<int>();
+
+            foreach (Stmt st in outp)
+                for (int k = st.From; k <= st.To; k++)
+                    covered.Add(k);
+
+            for (var i = 1; i < code.Count; i++)
+            {
+                if (covered.Contains(i) || !IsStind(code[i])) continue;
+
+                int[] sa = ArgStarts(code, i, 2);
+
+                if (sa == null) continue;
+
+                int dstFrom = sa[0], valFrom = sa[1];
+
+                // 目的地必须是本方法的载荷出参（那才有寄存器槽位可写），
+                // 值那一侧必须真的碰了载荷字段——两条都满足才抓，寍可漏不可乱认。
+                if (valFrom != dstFrom + 1) { /* 目的地不是单条 ldarg，跟不起 */ }
+
+                if (!IsLdarg(code[dstFrom])) continue;
+                if (!HasMainline(code, valFrom, i - 1, twin)) continue;
+
+                outp.Add(new Stmt
+                {
+                    From = dstFrom, To = i, TrueFrom = dstFrom,
+                    Core = CoreShape(code, dstFrom, i, twin),
+                });
+            }
+
+            outp.Sort((x, y) => x.To.CompareTo(y.To));
+
             return outp;
         }
 
@@ -930,8 +1206,9 @@ namespace ProjectEden.Preloader
             "ldloc stloc",          // local = 另一个载荷局部（复制传播）
             "ldarg:PAY stloc",      // local = 载荷参数（品质在侧信道寄存器里）
             "call:out",             // local 由被调方通过 out 形参写回
-            "call:get_Value ldfld:PAY stloc",
             "ldfld:PAY mul sub stloc",
+            "ldfld:PAY sub add stloc",
+            "dup stloc ldfld:PAY stloc",
             "ldfld:PAY div mul ldc add stloc",
             "ldfld:PAY ldfld:PAY add stloc",
             "call:split_inc stloc",  // local = split_inc(ref n, ref m, p)
@@ -974,6 +1251,21 @@ namespace ProjectEden.Preloader
 
             foreach (Stmt st in stmts) taken.Add(st.To);
 
+            // **转发合成不能和真语句抢同一次调用，而 `taken` 挡不住这件事。**
+            //
+            // `taken` 记的是语句的**末指令**，而 `V = X.inc … AddCargo(…)` 这类真语句的
+            // 末指令是 <c>stloc</c>、不是那次 call，所以同一次 <c>AddCargo</c> 会被转发合成
+            // 再认领一遍。两条语句改同一处：先插入的那条把后面的下标全顶走，
+            // 后一条就「认得但拼不出来」——实测 <c>PilerComponent::InternalUpdate</c> 4 处，
+            // 而且是在放宽转发实参（允许一整段算式）之后才冒出来的。
+            //
+            // 所以另记一份**真语句覆盖到的全部下标**，只给转发合成用。
+            var covered = new HashSet<int>();
+
+            foreach (Stmt st in stmts)
+                for (int k = st.From; k <= st.To && k < code.Count; k++)
+                    covered.Add(k);
+
             // (1) 复制传播与 split_inc，一起跑到不动点——它们互相喂：
             //     `V_44 = V_3`（复制）→ `V_45 = split_inc(ref n, ref V_44, p)`（分走）
             //     → `X.inc -= V_45`（下游那 9 处 sub）。中间断一环，后面全塌。
@@ -995,13 +1287,39 @@ namespace ProjectEden.Preloader
                     if (taken.Contains(i) || !IsStloc(code[i])) continue;
 
                     VariableDefinition dst = VarOf(m, code[i]);
-                    VariableDefinition src = IsLdloc(code[i - 1]) ? VarOf(m, code[i - 1]) : null;
+
+                    // **收尾可能有一条收窄：`ldloc ; conv.u1 ; stloc`。跳过它再认。**
+                    //
+                    // 旁边两个分支早就这么做了（`ldarg:PAY stloc` 跳解引用、`calc stloc`
+                    // 跳 `conv.`），只有这一支没跳——而它是**最常见**的那一支，
+                    // 因为载荷字段是 Byte / Int16，复制进局部时编译器几乎总要收窄一次。
+                    //
+                    // 代价实测过，而且是这一期最贵的一个：
+                    // <c>InserterComponent::InternalUpdate</c> 里
+                    // <code>
+                    //   06A6: ldloc.s V_13
+                    //   06A8: conv.u1          ← 卡在这里，前一条不是 ldloc，复制语句没被合成
+                    //   06A9: stloc.s V_14
+                    //   06C4: ldloca.s V_14    ← 同一个局部又当 InsertInto 的 out remainInc
+                    // </code>
+                    // V_14 于是多出一处「不属于任何合格语句」的 stloc，
+                    // <see cref="SafeCarriers"/> 按规矩把整个局部判死，连带
+                    // <c>call:out</c> 和 <c>itemInc -= 已送出 - 剩余</c> 一起拼不出来。
+                    // 三个分拣器 tick 变体全断——**而分拣器正是【传送带 → 储物柜】那一步**。
+                    //
+                    // 病根隔着两层：症状是「储物柜里品质是 0」，病因是一条 conv 没跳过。
+                    int cf = i - 1;
+
+                    if (cf - 1 >= 0 && code[cf].OpCode.Name.StartsWith("conv.", StringComparison.Ordinal))
+                        cf--;
+
+                    VariableDefinition src = IsLdloc(code[cf]) ? VarOf(m, code[cf]) : null;
 
                     if (dst == null || src == null || !cand.Contains(src)) continue;
 
                     taken.Add(i);
 
-                    extra.Add(new Stmt { From = i - 1, To = i, Core = "ldloc stloc", Synth = true });
+                    extra.Add(new Stmt { From = cf, To = i, Core = "ldloc stloc", Synth = true });
 
                     if (cand.Add(dst)) grew = true;
                 }
@@ -1115,6 +1433,111 @@ namespace ProjectEden.Preloader
 
                         if (cand.Add(ov)) grew = true;
                     }
+
+                    // **中转转发：本方法把自己的载荷参数直接传给下一个调用。**
+                    //
+                    // 这类方法<b>一个载荷字段都不碰</b>，所以按载荷切语句永远切不出东西；
+                    // 而 <c>ScrubAfterCalls</c> 是全模块扫的，于是它们里<b>只有擦除、没有搬运</b>。
+                    //
+                    // 实测擞上的四个，恰好是【物流槽位 → 带子】和【手捡】那两条路的全部：
+                    // <c>CargoPath::TryInsertItem</c>、<c>CargoTraffic::TryInsertItem</c>、
+                    // <c>CargoTraffic::PutItemOnBelt</c>、<c>CargoTraffic::PickupBeltItems</c>。
+                    //
+                    // 发射器本来就有（<see cref="BuildForwardToCallee"/>），缺的只是一条语句让它挂靠。
+                    // 条件写得窄：被调方的载荷实参必须是一条 <c>ldarg</c>，而且那个参数
+                    // 正是本方法的载荷参数——真正的「原样转发」。算过的、拼过的都不算，
+                    // 那些要么已经有载荷字段而被正常切出来了，要么就不该我们猜。
+                    foreach (int pi in cs)
+                        {
+                            if (cd.Parameters[pi].ParameterType.IsByReference) continue;
+
+                            int ai = pi + (cd.HasThis ? 1 : 0);
+                            int aEnd = ai + 1 < cargc ? ca[ai + 1] - 1 : i - 1;
+
+                            // **同样要跳收窄。** 载荷形参是 Int16，而本地算出来的份额是 Int32，
+                            // 于是实参常常是 `ldloc V ; conv.i2`。不跳就认不出来——
+                            // 这正是前面复制传播那一支栍过的同一个坑，而它卡住的是
+                            // <c>StationComponent::UpdateOutputSlots</c>——【物流槽位 → 带子】的源头。
+                            //
+                            // **收窄剥掉之后不再要求「只剩一条指令」**：多条的交给下面第 ④ 条判,
+                            // 那一条是 <c>HandPut</c> 把手上剩余写回去的形状（两个载体局部相加）。
+                            if (aEnd > ca[ai]
+                                && code[aEnd].OpCode.Name.StartsWith("conv.", StringComparison.Ordinal))
+                                aEnd--;
+
+                            if (aEnd < ca[ai]) continue;
+
+                            // 转发源有两种，两者 TwinValue 都翻译得了：
+                            //   ① 本方法的载荷参数  → 品质在 Q<本方法槽位>
+                            //   ② 一个载体局部      → 品质在它的孪生局部里
+                            //
+                            // ② 是后补的，而它才是【物流槽位 → 带子】那一步的形状：
+                            // <c>StationComponent::UpdateOutputSlots</c> 先用 split_inc 拆出一份到局部，
+                            // 再把那个局部传给上带子的调用——整条语句里<b>没有载荷字段</b>，
+                            // 按载荷切语句就看不见它，而它正是品质离开物流站的唯一出口。
+                            var ok = false;
+
+                            if (aEnd == ca[ai] && IsLdarg(code[aEnd]))
+                            {
+                                ParameterDefinition fp = ParamOf(m, code[aEnd]);
+
+                                ok = fp != null && ctx.ParamSlot.ContainsKey(fp);
+                            }
+                            else if (aEnd == ca[ai] && IsLdloc(code[aEnd]))
+                            {
+                                VariableDefinition fv = VarOf(m, code[aEnd]);
+
+                                ok = fv != null && cand.Contains(fv);
+                            }
+                            // ④ **一整段纯取值的算式**，比如 `V_4 + V_2`。
+                            //
+                            // 前三条只认「一条指令」，而这一条是实测逼出来的：
+                            // <c>UIStorageGrid::HandPut</c> 放下一部分之后要把手上剩下的写回去，
+                            // 写的是 <c>SetHandItemInc_Unsafe(剩余份额 + 退回来的零头)</c>
+                            // ——两个操作数都是<b>载体局部</b>，整条语句里一个载荷字段都没有,
+                            // 于是切语句看不见它、前三条也认不出它，**手上剩下的那部分品质直接清零**。
+                            // 探针抓到的原话：`放 1 件｜手上 50 件 2000 分 → 手上 49 件 0 分`。
+                            //
+                            // 发射器本来就够用（<see cref="BuildForwardToCallee"/> 把整段实参
+                            // 交给 <c>TwinValue</c>，加减乘除它自己会递归），缺的只是这道闸。
+                            // 条件仍然写得紧：整段必须是<b>纯取值</b>（重放一条带副作用的指令是静默的）,
+                            // 而且里面真的有品质来源，否则它只是个和品质无关的量。
+                            else if (aEnd > ca[ai] && PureRange(code, ca[ai], aEnd)
+                                                   && CarriesQuality(m, code, ca[ai], aEnd, cand, ctx))
+                            {
+                                ok = true;
+                            }
+                            else if (aEnd == ca[ai]
+                                     && code[aEnd].OpCode.Name.StartsWith("ldc", StringComparison.Ordinal))
+                            {
+                                // ③ 常量：<c>X.SetInc(0)</c> 这种「清空」。**品质是 0，不是「不用管」。**
+                                //
+                                // 不写的话寄存器里留着的是上一个人的品质，而被调方照读不误——
+                                // 这正是 <see cref="ScrubAfterCalls"/> 要防的「凭空发明」，
+                                // 只是擦除发生在 call **之后**，救不了这一次。
+                                // 实测 <c>UIStorageGrid::HandPut</c> 清空手上那一格时就是这个形状。
+                                ok = true;
+                            }
+
+                            if (!ok) continue;
+
+                            if (taken.Contains(i) || covered.Contains(i)) break;
+
+                            taken.Add(i);
+
+                            // <c>Dst</c> 在这里不是「本语句定义的局部」，而是「本语句依赖的局部」——
+                            // 拿来让它能跟着载体一起被剪掉。安全：<c>call:forward</c>
+                            // 不在 <see cref="DefinesCarrier"/> 里，没人会拿它的 Dst 当定义用。
+                            extra.Add(new Stmt
+                            {
+                                From = ca[0], To = i, TrueFrom = ca[0],
+                                Core = "call:forward", Synth = true,
+                                Dst = IsLdloc(code[aEnd]) ? VarOf(m, code[aEnd]) : null,
+                                ArgFrom = ca[ai], ArgTo = aEnd,
+                            });
+
+                            break;
+                        }
                 }
 
                 for (var i = 1; i < code.Count; i++)
@@ -1407,6 +1830,26 @@ namespace ProjectEden.Preloader
             Instruction last = code[job.To];
             bool toField = last.OpCode.Name.StartsWith("stfld", StringComparison.Ordinal);
 
+            // **写载荷靠 set 访问器时，零要写进侧信道，不是写进孪生字段。**
+            //
+            // `Player::Import` 读存档那一笔正是这个形状（`inhandItemInc = r.ReadInt32()`）。
+            // 直接写字段会被紧接着那次 call 用 Q0 盖掉——访问器自己的方法体就是
+            // `qua = Q0`。写寄存器，让访问器去落地，两边才是一条路。
+            if (!toField && TrivialAccessor(last, out FieldDefinition _, out bool aset) && aset)
+            {
+                if (ctx.AllParamSlots == null || !(last.Operand is MethodReference amr)
+                    || !TryResolve(amr, out MethodDefinition amd)
+                    || !ctx.AllParamSlots.TryGetValue(amd, out List<int> aslots)
+                    || aslots.Count == 0 || aslots[0] >= ctx.Regs.Count)
+                    return null;
+
+                return new List<Instruction>
+                {
+                    Instruction.Create(OpCodes.Ldc_I4_0),
+                    Instruction.Create(OpCodes.Stsfld, ctx.Regs[aslots[0]]),
+                };
+            }
+
             if (!toField && !last.OpCode.Name.StartsWith("stelem", StringComparison.Ordinal)) return null;
 
             int argc = toField ? 2 : 3;
@@ -1560,6 +2003,18 @@ namespace ProjectEden.Preloader
 
                 int end = ai + 1 < argc ? a[ai + 1] - 1 : callAt - 1;
 
+                // **实参末尾的收窄不能重放到品质上。**
+                //
+                // 那条 <c>conv.i2</c> 是给被调方的 <c>Int16 inc</c> 形参准备的，而品质写的是
+                // <b>Int32 寄存器</b>——本文件早就记过这条规矩（「宽度不用跟着原版走」），
+                // 只是转发这一处漏了。
+                //
+                // 后果是静默的数值损坏，而且<b>按档位才发作</b>：铜每件 50 分、
+                // 铁每件 100 分，同样堆叠下铁的总分翻倍后越过 32767，
+                // <c>conv.i2</c> 一截就是负数——玩家看到的是「铁块品质 -32」而铜块正常。
+                // 上限巡检也接不住它：那里开头就是 <c>if (qua &lt;= 0) return;</c>。
+                if (end > a[ai] && IsNarrowingConv(code[end])) end--;
+
                 List<Instruction> v = TwinValue(ctx, code, a[ai], end);
 
                 if (v == null)
@@ -1580,6 +2035,55 @@ namespace ProjectEden.Preloader
             job.Anchor = code[callAt - 1];
 
             return outp;
+        }
+
+        /// <summary>
+        /// 这条语句是不是「把品质送进被调方」：语句里有一次载荷读，而且有一个带
+        /// <b>按值</b>载荷形参的调用。byref 的载荷形参是出口不是入口，不算。
+        /// </summary>
+        /// <summary>
+        /// 这条转发语句的实参里，是不是有局部已经不算载体了。
+        ///
+        /// <b>只看实参那一段</b>（<see cref="Stmt.ArgFrom"/>/<see cref="Stmt.ArgTo"/>）：
+        /// 整次调用的区间里还有 itemId、件数那些和品质无关的局部，按它剪会把每一条转发都误杀。
+        /// </summary>
+        private static bool ForwardOrphan(MethodDefinition m, IList<Instruction> code, Stmt st,
+            ICollection<VariableDefinition> carriers)
+        {
+            if (st.Dst != null && !carriers.Contains(st.Dst)) return true;
+
+            if (st.ArgFrom < 0 || st.ArgTo < st.ArgFrom) return false;
+
+            for (int k = st.ArgFrom; k <= st.ArgTo && k < code.Count; k++)
+            {
+                if (!IsLdloc(code[k])) continue;
+
+                VariableDefinition v = VarOf(m, code[k]);
+
+                if (v != null && !carriers.Contains(v)) return true;
+            }
+
+            return false;
+        }
+
+        private static bool ForwardsToPayloadCall(Ctx ctx, IList<Instruction> code, int from, int to)
+        {
+            if (ctx.AllParamSlots == null) return false;
+            if (!HasMainline(code, from, to, ctx.Twin)) return false;
+
+            for (int k = from; k <= to; k++)
+            {
+                if (code[k].OpCode != OpCodes.Call && code[k].OpCode != OpCodes.Callvirt) continue;
+                if (!(code[k].Operand is MethodReference mr)) continue;
+                if (!TryResolve(mr, out MethodDefinition cd)) continue;
+                if (!ctx.AllParamSlots.TryGetValue(cd, out List<int> cs)) continue;
+
+                foreach (int pi in cs)
+                    if (!cd.Parameters[pi].ParameterType.IsByReference)
+                        return true;
+            }
+
+            return false;
         }
 
         private static bool IsBranchTarget(IList<Instruction> code, Instruction target)
@@ -2027,6 +2531,8 @@ namespace ProjectEden.Preloader
 
             if (emit == null || emit.Count == 0) return emit;
 
+            StripNarrowing(ctx, emit);
+
             string bad = TypeError(ctx, emit);
 
             if (bad == null) return emit;
@@ -2035,6 +2541,100 @@ namespace ProjectEden.Preloader
             ctx.TypeErrors[job.To] = bad;
 
             return null;
+        }
+
+        /// <summary>
+        /// <b>把“写入品质之前的收窄”剔掉。</b>
+        ///
+        /// 发射器是靠<b>重放原值表达式</b>拼出品质表达式的，而原值的末尾常常挂着一条
+        /// <c>conv.i2</c> / <c>conv.u1</c>——那是为了适配原版的窄字段（<c>Cargo.inc</c> 是 Int16、
+        /// <c>InserterComponent.itemInc</c> 是 Int16）。而<b>品质的目的地全是 Int32</b>：
+        /// 孪生字段、侧信道寄存器、孪生局部。跟着收窄就是白白截掉高位。
+        ///
+        /// <b>后果是静默的数值损坏，而且按档位才发作。</b> 铜每件 50 分、铁每件 100 分，
+        /// 同样堆叠下铁的总分翻倍后越过 32767，<c>conv.i2</c> 一截就是负数——
+        /// 玩家看到的是「铁块品质 -32」而铜块一切正常。上限巡检也接不住：
+        /// 它开头就是 <c>if (qua &lt;= 0) return;</c>。
+        ///
+        /// <b>放在 <see cref="Build"/> 的单一出口上，而不是逐个发射器改。</b>
+        /// 实测这个错同时出现在转发（写寄存器）和字段赋值（写 itemQua）两类发射器里，
+        /// 共 22+ 处；逐个改早晚漏一个，而漏掉的那一个不报错。
+        /// </summary>
+        /// <summary>
+        /// <b>改完之后核末态：不允许任何一处「收窄之后直接写品质」。</b>
+        ///
+        /// 这个错我在一期里栝了<b>三次</b>，每次在不同的位置：
+        /// 复制传播的合成认不出 `ldloc ; conv ; stloc`、转发重放实参时带上了 conv、
+        /// 字段赋值发射器同样带上了 conv。前两次靠玩家报障发现，
+        /// 第三次靠全模块扫描发现（一次扫出 22 处）。
+        ///
+        /// 仅靠「下次记得」是不够的，所以把它变成<b>每次启动都跑的断言</b>：
+        /// 违例就是 Blocker，1c 整体不生效（游戏照常能玩，只是没品质），
+        /// 而不是静默地把铁块的品质截成负数。
+        ///
+        /// 这正是仓库自己记过的那条：<b>变换长了新情况，先长它的检查器。</b>
+        /// </summary>
+        private static void AssertNoNarrowedQuality(ModuleDefinition module,
+            IList<FieldDefinition> regs, IDictionary<string, FieldDefinition> twin, Report r)
+        {
+            var regSet = new HashSet<FieldDefinition>(regs);
+            var twinSet = new HashSet<FieldDefinition>(twin.Values);
+            var hits = new List<string>();
+
+            foreach (TypeDefinition t in AllTypes(module))
+            foreach (MethodDefinition m in t.Methods)
+            {
+                if (!m.HasBody) continue;
+
+                List<Instruction> code = m.Body.Instructions.ToList();
+
+                for (var i = 1; i < code.Count; i++)
+                {
+                    if (!IsNarrowingConv(code[i - 1])) continue;
+                    if (code[i].OpCode != OpCodes.Stfld && code[i].OpCode != OpCodes.Stsfld) continue;
+                    if (!(code[i].Operand is FieldDefinition fd)) continue;
+                    if (!regSet.Contains(fd) && !twinSet.Contains(fd)) continue;
+
+                    hits.Add($"{t.Name}::{m.Name} @IL_{code[i].Offset:X4} → {fd.Name}");
+                }
+            }
+
+            if (hits.Count == 0)
+            {
+                r.Notes.Add("宽度自检：没有任何一处在收窄之后写品质。"
+                            + "（品质全是 Int32，跟着原值的 conv.i2 走会截掉高位——"
+                            + "铁块每件 100 分时这一截就是负数，而上限巡检接不住负数。）");
+
+                return;
+            }
+
+            foreach (string h in hits.Take(10))
+                r.Blockers.Add($"品质被收窄：{h}");
+
+            if (hits.Count > 10) r.Blockers.Add($"…共 {hits.Count} 处品质写入前带着收窄");
+        }
+
+        private static void StripNarrowing(Ctx ctx, IList<Instruction> emit)
+        {
+            for (var i = 1; i < emit.Count; i++)
+            {
+                if (!IsNarrowingConv(emit[i - 1])) continue;
+
+                bool intoQuality =
+                    (emit[i].OpCode == OpCodes.Stfld || emit[i].OpCode == OpCodes.Stsfld)
+                    && emit[i].Operand is FieldReference fr
+                    && (ctx.Regs.Any(r => r.Name == fr.Name && r.DeclaringType.Name == fr.DeclaringType.Name)
+                        || ctx.Twin.Values.Any(tv => tv.Name == fr.Name
+                                                     && tv.DeclaringType.FullName == fr.DeclaringType.FullName));
+
+                if (!intoQuality && IsStloc(emit[i]))
+                    intoQuality = emit[i].Operand is VariableDefinition vd && ctx.Locals.Values.Contains(vd);
+
+                if (!intoQuality) continue;
+
+                emit.RemoveAt(i - 1);
+                i--;
+            }
         }
 
         private static List<Instruction> BuildCore(Ctx ctx, IList<Instruction> code, Job job)
@@ -2057,11 +2657,36 @@ namespace ProjectEden.Preloader
                     && !ctx.Twin.TryGetValue(sf.DeclaringType.FullName + "::" + sf.Name, out tf))
                     return null;
 
+            // 自动属性的 set 访问器：一次 call 就是一次 `stfld`，目的地字段从访问器体里取。
+            // 见 <see cref="TrivialAccessor"/>。
+            // **写载荷靠 set 访问器的那一族：只挪插入点，不给 tf。**
+            //
+            // 不给 tf 是故意的：这一族的品质必须写进侧信道，由访问器自己的方法体
+            // （`qua = Q0`）落地。哪个发射器要是直接写了孪生字段，紧接着这次 call
+            // 就会用 Q0 把它盖掉——所以宁可让它拼不出来、报成 Pending，也不要静默盖掉。
+            if (tf == null && TrivialAccessor(store, out FieldDefinition _, out bool aset)
+                           && aset)
+            {
+                // **孪生语句要插在 call 之前，不是之后。**
+                // <see cref="ScrubAfterCalls"/> 会在每次调用之后把侧信道寄存器擦掉，
+                // 而值那一侧常常正是寄存器（`SetHandItems(id, count, inc)` 里的 inc）。
+                // 插在前面是栈中性的：实参已经压完，我们自己压的几条自压自消。
+                //
+                // call 本身是跳转目标的话插在前面会被跳过去——那时宁可认不出来。
+                if (IsBranchTarget(code, store)) return null;
+
+                job.Insert = job.To - 1;
+                job.Anchor = code[job.To - 1];
+            }
+
             switch (job.Core)
             {
                 // X.inc = 常数  →  X.qua = 0
                 case "ldc stfld:PAY":
-                case "call:get_package ldc stfld:PAY":
+                // 注：`call:get_package ldc stfld:PAY` 这类「取值器前缀 + 载荷」的形状
+                // 已经不会再出现——<see cref="Norm"/> 把纯取值器当成寻址剥掉了，
+                // 于是它们归一化成不带前缀的那一条。实测把两条旧表项删掉之后
+                // 孪生语句数一条不少（1030），所以它们是真的死了，不是被别的表项接住。
                 {
                     if (tf == null) return null;
 
@@ -2089,6 +2714,8 @@ namespace ProjectEden.Preloader
                 // A.inc = B.inc - n。目的地一侧没变，值一侧 TwinValue 本来就认得。
                 case "ldfld:PAY stfld:PAY":
                 case "ldfld:PAY sub stfld:PAY":
+                case "ldfld:PAY add stfld:PAY":
+                case "ldfld:PAY sub sub stfld:PAY":
                 case "sub stfld:PAY":
                 {
                     if (tf == null) return null;
@@ -2182,6 +2809,11 @@ namespace ProjectEden.Preloader
 
             case "ldfld:PAY stind.i2":
             case "ldfld:PAY stind.i4":
+
+            // 同一条，只是它落在分支汇合点上：`UseHandItems` 的「手上不够拿」那一支
+            // 直接 `*useInc = 手上的点数`，而那条语句的入口正是 `ble.s` 的落点。
+            // 汇合点就是 From，地址那一条 `ldarg` 也在那里，所以发射器一字不用改。
+            case "ldfld:PAY stind.i4 [merge]":
             case "ldflda:PAY ldind.i4 call:split_inc stind.i4":
             {
                 if (!IsStind(store)) return null;
@@ -2406,13 +3038,23 @@ namespace ProjectEden.Preloader
             case "ldfld:PAY call:AddItemStacked stloc":
             case "ldfld:PAY call:AddCargo stloc":
             case "add ldfld:PAY ldfld:PAY add call:AddCargo stloc":
+
+            // 中转：同一个发射器，只是实参那一侧是本方法的载荷参数而不是载荷字段。
+            case "call:forward":
                 return BuildForwardToCallee(ctx, code, job);
 
             // 被调方通过 out 形参写回来：twinLocal = Q<槽位>，插在 call 之后。
             case "call:out":
             {
                 if (job.Dst == null || !ctx.Locals.TryGetValue(job.Dst, out VariableDefinition otv))
+                {
+                    if (Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG") == ctx.Method.Name)
+                        Console.Error.WriteLine(
+                            $"[out] {ctx.Method.Name} IL_{code[job.From].Offset:X4} "
+                            + $"Dst={(job.Dst == null ? "null" : "V_" + job.Dst.Index)} 不在载体集里");
+
                     return null;
+                }
 
                 // 同样：要找有载荷形参的那个 call，不是第一个
                 var ocall = -1;
@@ -2465,6 +3107,12 @@ namespace ProjectEden.Preloader
                             Instruction.Create(OpCodes.Stloc, otv),
                         };
                 }
+
+                if (Environment.GetEnvironmentVariable("EDEN_QUALITY_DEBUG") == ctx.Method.Name)
+                    Console.Error.WriteLine(
+                        $"[out2] {ctx.Method.Name} IL_{code[job.From].Offset:X4} Dst=V_{job.Dst.Index} "
+                        + $"ocall=IL_{code[ocall].Offset:X4} 槽位数={oslots.Count} argc={oargc} "
+                        + "—— 没有一个载荷出参的实参就是 Dst");
 
                 return null;
             }
@@ -2542,9 +3190,10 @@ namespace ProjectEden.Preloader
 
                 // local = X.inc  →  twinLocal = X.qua
                 case "ldfld:PAY stloc":
-                case "call:get_Value ldfld:PAY stloc":   // V = kvp.Value.inc（取值器已核实是纯读字段）
+                // 同上：`call:get_Value ldfld:PAY stloc` 已被归一化成 `ldfld:PAY stloc`
                 case "calc stloc":                       // V = 件数 × 每件品质分（纯算术）
                 case "ldfld:PAY mul sub stloc":          // V = X.inc - 等级 × 件数
+                case "ldfld:PAY sub add stloc":          // V += 手上的点数 - 剩下的（放进格子时实际消耗的那一份）
                 case "ldfld:PAY ldfld:PAY add stloc":    // V = A.inc + B.inc（两堆合并）
                 case "ldfld:PAY div mul ldc add stloc":   // V = (点数/件数) × 新件数 + 0.5（自动集装机）
                 {
@@ -2562,6 +3211,54 @@ namespace ProjectEden.Preloader
                     val.Add(Instruction.Create(OpCodes.Stloc, tv));
 
                     return val;
+                }
+
+                // `p = gameData.mainPlayer ; n = p.inhandItemCount ; inc = p.inhandItemInc`
+                //
+                // 对象靠 <c>dup</c> 留在栈上，中间还夹着<b>另一个局部的赋值</b>，
+                // 所以整段不能交给 TwinValue 原样重放（会把 <c>stloc</c> 也重放一遍）。
+                // 真正要重放的只有 <b>dup 之前</b>那几条——把 Player 取到手的那一段。
+                //
+                // **这一条差点被当成「没人调用的测试方法」放过去。** 方法名是
+                // <c>_test_take_player_inhand_inc</c>，看着像调试残留；数了调用点才知道
+                // 它有两个，而且都是要紧的：<c>EntityFastFillIn</c> 和 <c>BeltFastFillIn</c>
+                // ——Shift 点一下把手上的东西塞进建筑/传送带，走的就是这里。
+                // **名字像什么不是证据，调用点才是。**
+                case "dup stloc ldfld:PAY stloc":
+                {
+                    VariableDefinition ddst = VarOf(ctx.Method, store);
+
+                    if (ddst == null || !ctx.Locals.TryGetValue(ddst, out VariableDefinition dtv))
+                        return null;
+
+                    var dup = -1;
+
+                    for (int k = job.From; k < job.To; k++)
+                        if (code[k].OpCode == OpCodes.Dup) { dup = k; break; }
+
+                    if (dup <= job.From) return null;
+
+                    if (!TrivialAccessor(code[job.To - 1], out FieldDefinition dtf,
+                            out bool dset) || dset)
+                        return null;
+
+                    var dout = new List<Instruction>();
+
+                    for (int k = job.From; k < dup; k++)
+                    {
+                        if (!IsPureLoad(code[k])) return null;
+
+                        dout.Add(Clone(code[k]));
+                    }
+
+                    dout.Add(Instruction.Create(OpCodes.Ldfld, dtf));
+
+                    // 分类遍里孪生局部还没建，能走到这一步就说明拼得出来
+                    if (dtv == null) return dout;
+
+                    dout.Add(Instruction.Create(OpCodes.Stloc, dtv));
+
+                    return dout;
                 }
 
                 // local = X.inc / count  →  twinLocal = X.qua / count
@@ -2915,6 +3612,34 @@ namespace ProjectEden.Preloader
                 return outp;
             }
 
+            // (a2) **平凡取值器：一次 call 就等于一次 ldfld。**
+            //
+            // 鼠标手上那一格是自动属性，读它的 81 处全是
+            // <c>call Player::get_inhandItemInc()</c>——方法体只有
+            // <c>ldarg.0 ; ldfld 后备字段 ; ret</c>，所以它的品质版就是把这一条 call
+            // 换成读孪生后备字段，寻址前缀原样重放。
+            //
+            // 不按 <c>get_</c> 前缀放行：<see cref="IsTrivialGetter"/> 是<b>核实方法体</b>的,
+            // 带副作用的属性（惰性初始化、计数器）不会走到这里。
+            if (IsTrivialGetter(last) && last.Operand is MethodReference gmr
+                && TryResolve(gmr, out MethodDefinition gmd)
+                && gmd.Body.Instructions[1].OpCode == OpCodes.Ldfld
+                && gmd.Body.Instructions[1].Operand is FieldReference gfr
+                && ctx.Twin.TryGetValue(gfr.DeclaringType.FullName + "::" + gfr.Name,
+                    out FieldDefinition gtf))
+            {
+                for (int k = from; k < to; k++)
+                {
+                    if (!IsPureLoad(code[k])) return null;
+
+                    outp.Add(Clone(code[k]));
+                }
+
+                outp.Add(Instruction.Create(OpCodes.Ldfld, gtf));
+
+                return outp;
+            }
+
             // 其余三种都只认单条指令的表达式——多条的先不碰，报成未实现比猜着改安全
             if (from != to) return null;
 
@@ -2968,7 +3693,58 @@ namespace ProjectEden.Preloader
                    // 解引用是纯读：`*count` 这种实参在 split_inc 的第三个位置上很常见,
                    // 不放行的话整条 split 都拼不出来。
                    || n.StartsWith("ldind.", StringComparison.Ordinal)
-                   || IsTrivialGetter(i);
+                   || IsPureCall(i, 3);
+        }
+
+        /// <summary>
+        /// 这条 <c>call</c> 的被调方是不是**纯取值**——方法体很短，而且每一条指令都只是
+        /// 取值（<c>ldarg.0</c>、读字段、转型、再调一个同样纯的取值器），末尾 <c>ret</c>。
+        ///
+        /// <b>「三条指令的取值器」那条太窄，实测卡住了整条机甲反应堆的路。</b>
+        /// <c>UIMechaWindow::get_mecha</c> 是 <c>ldarg.0 ; call get_data() ; isinst Mecha ; ret</c>
+        /// ——四条，中间还有一次转型，于是 <c>mecha.player.inhandItemInc</c> 这一族
+        /// 整个重放不出来。递归判「纯」比再补一条形状稳：它认的是**重放安全**这件事本身。
+        ///
+        /// 深度和长度都写死；解析不出来（跨程序集拿不到方法体）就当不纯。
+        /// <b>宁可少认，也绝不把一条带副作用的调用重放第二遍</b>——那是静默的。
+        /// </summary>
+        private static bool IsPureCall(Instruction i, int depth)
+        {
+            if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) return false;
+            if (!(i.Operand is MethodReference mr) || mr.HasParameters) return false;
+            if (!TryResolve(mr, out MethodDefinition md) || md.Body == null) return false;
+
+            return PureBody(md, depth);
+        }
+
+        private static bool PureBody(MethodDefinition md, int depth)
+        {
+            if (depth <= 0) return false;
+
+            IList<Instruction> b = md.Body.Instructions;
+
+            if (b.Count == 0 || b.Count > 8) return false;
+
+            foreach (Instruction x in b)
+            {
+                string n = x.OpCode.Name;
+
+                if (n == "ret" || n == "isinst" || n == "castclass" || n == "dup" || n == "nop")
+                    continue;
+
+                if (n.StartsWith("ldarg", StringComparison.Ordinal)
+                    || n.StartsWith("ldfld", StringComparison.Ordinal)
+                    || n.StartsWith("ldsfld", StringComparison.Ordinal)
+                    || n.StartsWith("ldc", StringComparison.Ordinal)
+                    || n.StartsWith("conv.", StringComparison.Ordinal))
+                    continue;
+
+                if (IsPureCall(x, depth - 1)) continue;
+
+                return false;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -2980,6 +3756,97 @@ namespace ProjectEden.Preloader
         /// 放进带副作用的属性（惰性初始化、计数器），而重放一条带副作用的指令是静默的。
         /// 解析不出来（跨程序集拿不到方法体）就当不纯——宁可认不出来。
         /// </summary>
+        /// <summary>
+        /// 这条 <c>call</c> 是不是<b>某个载荷字段的平凡访问器</b>——自动属性编译出来的
+        /// <c>get_X()</c>（<c>ldarg.0 ; ldfld F ; ret</c>）或
+        /// <c>set_X(v)</c>（<c>ldarg.0 ; ldarg.1 ; stfld F ; ret</c>）。
+        /// 是的话给出孪生字段，并说明这一次是写侧还是读侧。
+        ///
+        /// <b>为什么要有这一条：一次 call 就等于一次字段访问，而形状表只认后者。</b>
+        /// 鼠标手上那一格（<c>Player.inhandItemInc</c>）是自动属性，全游戏 15 处写、
+        /// 81 处读<b>全部</b>走访问器，一条 <c>ldfld</c> 都不出现。于是切语句时
+        /// 那些方法里「一个载荷指令都没有」，整条手上路径既不选中也不切分——
+        /// 表现正是玩家报的「拖拽合并之后品质变 0，还把旁边那一堆也带成 0」。
+        ///
+        /// <b>判据是方法体，不是 <c>get_</c>/<c>set_</c> 前缀。</b> 按前缀放行会把带副作用的
+        /// 属性（惰性初始化、校验、通知）也当成字段访问，而重放一条带副作用的指令是静默的。
+        /// 这和 <see cref="IsTrivialGetter"/> 是同一条判据，只是多认了写侧。
+        /// </summary>
+        private static bool TrivialAccessor(Instruction i,
+            out FieldDefinition tf, out bool setter)
+        {
+            tf = null;
+            setter = false;
+
+            if (_accessors == null) return false;
+            if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) return false;
+            if (!(i.Operand is MethodReference mr) || !mr.HasThis) return false;
+            if (!TryResolve(mr, out MethodDefinition md)) return false;
+            if (!_accessors.TryGetValue(md, out KeyValuePair<FieldDefinition, bool> e)) return false;
+
+            tf = e.Key;
+            setter = e.Value;
+
+            return true;
+        }
+
+        /// <summary>
+        /// 平凡访问器表。<b>现场解析方法体是错的，必须先建表。</b>
+        ///
+        /// set 访问器自己也会被孪生——它的方法体里多出 <c>qua = Q0</c> 两条指令，
+        /// 从四条变成七条。于是**它一旦被改写，后面每一个调用点就再也认不出它是访问器**：
+        /// 分析遍（不改字节）全都认得，发射遍走到一半开始认不得，而且**不报错**
+        /// ——那些语句直接从语句表里消失了，没有 Unhandled、没有 Pending、没有 Blocker。
+        ///
+        /// 实测正是这样：15 个写入口里有 3 个（`SetHandItems`、`TakeItemFromPlayer`、`Import`）
+        /// 在发射遍掉了队，末态是「手上那一格拿到的是擦干净的 0」。
+        /// 表在任何改写之前建好，两遍共用，这条缝就不存在了。
+        /// </summary>
+        private static Dictionary<MethodDefinition, KeyValuePair<FieldDefinition, bool>> _accessors;
+
+        private static void BuildAccessorMap(ModuleDefinition module,
+            IDictionary<string, FieldDefinition> twin)
+        {
+            var map = new Dictionary<MethodDefinition, KeyValuePair<FieldDefinition, bool>>();
+
+            foreach (TypeDefinition t in AllTypes(module))
+            foreach (MethodDefinition m in t.Methods)
+            {
+                if (!m.HasBody || !m.HasThis) continue;
+
+                IList<Instruction> b = m.Body.Instructions;
+                FieldReference fr;
+                bool setter;
+
+                if (b.Count == 3 && m.Parameters.Count == 0
+                    && b[0].OpCode == OpCodes.Ldarg_0 && b[1].OpCode == OpCodes.Ldfld
+                    && b[2].OpCode == OpCodes.Ret)
+                {
+                    fr = b[1].Operand as FieldReference;
+                    setter = false;
+                }
+                else if (b.Count == 4 && m.Parameters.Count == 1
+                         && b[0].OpCode == OpCodes.Ldarg_0 && b[1].OpCode == OpCodes.Ldarg_1
+                         && b[2].OpCode == OpCodes.Stfld && b[3].OpCode == OpCodes.Ret)
+                {
+                    fr = b[2].Operand as FieldReference;
+                    setter = true;
+                }
+                else
+                {
+                    continue;
+                }
+
+                if (fr == null) continue;
+                if (!twin.TryGetValue(fr.DeclaringType.FullName + "::" + fr.Name,
+                        out FieldDefinition tf)) continue;
+
+                map[m] = new KeyValuePair<FieldDefinition, bool>(tf, setter);
+            }
+
+            _accessors = map;
+        }
+
         private static bool IsTrivialGetter(Instruction i)
         {
             if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) return false;
@@ -3142,6 +4009,7 @@ namespace ProjectEden.Preloader
             // 参数那一侧的品质在侧信道寄存器里，不在某个孪生局部里。
             "ldarg:PAY stloc",
             "call:out",
+            "call:forward",          // 中转：把自己的载荷参数原样传给下一个调用
 
             // local = split_inc(ref n, ref m, p)。**split_inc 一族的入口**：
             // 站点内搬运那 9 处 `X.inc -= 份额` 的被减数就是它定义的局部。
@@ -3181,16 +4049,19 @@ namespace ProjectEden.Preloader
             "ldflda:PAY dup ldind.i2 add stind.i2",
 
             // 表达式递归（加减乘除）打通的几种：取值器前缀、两个载荷相加、按系数缩放
-            "call:get_Value ldfld:PAY stloc",
             "calc stloc",
             "ldfld:PAY div mul ldc add stloc",
-            "call:get_package ldc stfld:PAY",
             "ldfld:PAY ldfld:PAY add stfld:PAY",
             "ldfld:PAY mul sub stloc",
+            "ldfld:PAY sub add stloc",
+            "ldfld:PAY stind.i4 [merge]",
+            "dup stloc ldfld:PAY stloc",
 
             // 集装机在两个缓存之间倒腾「正在叠的那一堆」
             "ldfld:PAY stfld:PAY",
             "ldfld:PAY sub stfld:PAY",
+            "ldfld:PAY add stfld:PAY",
+            "ldfld:PAY sub sub stfld:PAY",
             "sub stfld:PAY",
             "ldfld:PAY ldfld:PAY add stloc",
 
@@ -3225,6 +4096,7 @@ namespace ProjectEden.Preloader
         /// </summary>
         private static readonly HashSet<string> TwinShapes = new HashSet<string>(new[]
         {
+            "call:forward",                                        // 中转：载荷参数原样转给下一个调用
             "ldc stfld:PAY",                                        // X.inc = 常数
             "stfld:PAY",                                            // X.inc = 栈上的值
             "ldfld:PAY stloc",                                      // local = X.inc
@@ -3245,13 +4117,19 @@ namespace ProjectEden.Preloader
             "ldind.i4 ldflda:PAY call:split_inc add stind.i4",      // *out += split_inc(..., ref X.inc, ...)
             "ldind.i4 ldflda:PAY ldind.i4 call:split_inc add stind.i4",
             "call:split_inc stfld:PAY",                             // X.inc = split_inc(...)
-            "call:get_Value ldfld:PAY stloc",                       // V = kvp.Value.inc
             "calc stloc",                                           // V = 件数 × 每件品质分
-            "call:get_package ldc stfld:PAY",                       // package.X.inc = 常数
             "ldfld:PAY ldfld:PAY add stfld:PAY",                    // X.inc = A.inc + B.inc
             "ldfld:PAY mul sub stloc",                              // V = X.inc - 等级 × 件数
+            "ldfld:PAY sub add stloc",                              // V += 手上的点数 - 剩下的
+            "ldfld:PAY stind.i4 [merge]",                           // *out = 手上的点数（汇合点上的那一支）
+            "dup stloc ldfld:PAY stloc",                            // p = 玩家; n = p.件数; inc = p.点数
             "ldfld:PAY stfld:PAY",                                  // A.inc = B.inc
             "ldfld:PAY sub stfld:PAY",                              // A.inc = B.inc - n
+
+            // 分拣器：从带上取一把就累加一次，送出去之后按实际量扣减。
+            // 两者的目的地都是同一个载荷字段，值那一侧交给 TwinValue 递归。
+            "ldfld:PAY add stfld:PAY",                              // itemInc += 取到的那一把
+            "ldfld:PAY sub sub stfld:PAY",                          // itemInc -= 已送出 - 剩余
             "sub stfld:PAY",
             "ldfld:PAY ldfld:PAY add stloc",                        // V = A.inc + B.inc
             "ldfld:PAY call:AddCargo stloc",                        // 把品质传进被调方
@@ -3301,6 +4179,27 @@ namespace ProjectEden.Preloader
             // 品质面板是第 4 阶段的事，1c 在这里什么都不用做。
             "ldfld:PAY call:set_incServed",                         // 统计面板接过 incServed 数组
             "ldfld:PAY call:Add",                                   // 悬浮面板的物品汇总
+
+            // ── 鼠标手上那一格接进主干道之后冒出来的几条，逐条说明为什么不用孪生 ──
+
+            // 纯比较，没有目的地。`if (手上的点数 < 0) 归零` 这种钳位守卫。
+            // 品质那边不跟着钳——负数品质由 QualityRepairPatches 的巡检兜底，
+            // 而在这里跟着钳会把「读不出来所以是 0」和「真的是 0」搅在一起。
+            "ldfld:PAY ldc bge.s",
+            "ldfld:PAY ldc bgt.s",
+
+            // **委托调用，跟不下去。** `Player::IntendToTransferItems` 把手上的
+            // (id, 件数, 点数) 交给一个事件委托——被调方是运行时才定的，
+            // 没有可解析的载荷形参，也就没有槽位可写。这是说出来的缺口。
+            "ldfld:PAY call:Invoke",
+
+            // 通知回调：物品已经由上一条语句（AddItem，走侧信道）搬完了，
+            // 这一条只是告诉界面「配送包变了」。
+            "ldfld:PAY sub call:NotifyDeliveryPackageAddItem",
+
+            // 开发期的调试打印（PlayerAction_Test::Update 把手上的件数和点数拼成字符串）。
+            "ldstr stloc call:ToString ldstr ldfld:PAY stloc call:ToString call:Concat call:Log",
+
         }, StringComparer.Ordinal);
 
         /// <summary>
@@ -3344,9 +4243,64 @@ namespace ProjectEden.Preloader
 
         // ── 小工具 ─────────────────────────────────────────────
 
-        private static bool IsMainline(Instruction i, IDictionary<string, FieldDefinition> twin) =>
-            i.Operand is FieldReference fr &&
-            twin.ContainsKey(fr.DeclaringType.FullName + "::" + fr.Name);
+        /// <summary>
+        /// <c>MethodReference.Resolve()</c> 会抄——游戏程序集里引用的外部类型不一定解得开。
+        /// 包一层，让调用方能写成表达式。
+        /// </summary>
+        /// <summary>
+        /// 收窄型 <c>conv</c>——把 Int32 截成 1/2 字节。<b>品质永远不该跟着它走</b>：
+        /// 孪生字段和侧信道寄存器都是 Int32，而原值收窄是为了适配原版的窄字段。
+        /// <c>conv.i4</c> / <c>conv.r4</c> 不在此列：它们不丢位。
+        /// </summary>
+        private static bool IsNarrowingConv(Instruction i) =>
+            i.OpCode == OpCodes.Conv_I1 || i.OpCode == OpCodes.Conv_U1 ||
+            i.OpCode == OpCodes.Conv_I2 || i.OpCode == OpCodes.Conv_U2;
+
+        /// <summary>
+        /// 这个方法是不是在<b>搬货</b>：既调了能「产出」品质的方法（byref 载荷形参，
+        /// 如 <c>TakeItemFromGrid(…, out inc)</c>），又调了能「消费」品质的方法
+        /// （按值载荷形参，如 <c>AddItem(…, inc)</c>）。两者都有 = 东西从一个容器到了另一个。
+        /// </summary>
+        private static bool MovesPayload(MethodDefinition m,
+            IDictionary<MethodDefinition, List<int>> paramSlots)
+        {
+            var produces = false;
+            var consumes = false;
+
+            foreach (Instruction i in m.Body.Instructions)
+            {
+                if (i.OpCode != OpCodes.Call && i.OpCode != OpCodes.Callvirt) continue;
+                if (!(i.Operand is MethodReference mr)) continue;
+                if (!TryResolve(mr, out MethodDefinition cd)) continue;
+                if (!paramSlots.TryGetValue(cd, out List<int> cs)) continue;
+
+                foreach (int pi in cs)
+                    if (cd.Parameters[pi].ParameterType.IsByReference) produces = true;
+                    else consumes = true;
+
+                if (produces && consumes) return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryResolve(MethodReference mr, out MethodDefinition md)
+        {
+            try { md = mr.Resolve(); }
+            catch { md = null; }
+
+            return md != null;
+        }
+
+        private static bool IsMainline(Instruction i, IDictionary<string, FieldDefinition> twin)
+        {
+            if (i.Operand is FieldReference fr
+                && twin.ContainsKey(fr.DeclaringType.FullName + "::" + fr.Name))
+                return true;
+
+            // 自动属性的访问器：一次 call 就是一次载荷字段访问，见 <see cref="TrivialAccessor"/>。
+            return TrivialAccessor(i, out FieldDefinition _, out bool _);
+        }
 
         private static bool HasMainline(IList<Instruction> code, int from, int to,
             IDictionary<string, FieldDefinition> twin)
@@ -3399,6 +4353,18 @@ namespace ProjectEden.Preloader
             if (n.StartsWith("stloc", StringComparison.Ordinal)) return "stloc";
             if (n.StartsWith("stelem", StringComparison.Ordinal)) return "stelem";
             if (n.StartsWith("ldc", StringComparison.Ordinal)) return "ldc";
+
+            // 自动属性的访问器归一化成字段访问：形状表因此不用为每一个属性名各写一条。
+            if (TrivialAccessor(i, out FieldDefinition _, out bool isSet))
+                return isSet ? "stfld:PAY" : "ldfld:PAY";
+
+            // **非载荷的平凡取值器和普通 ldfld 一样，属于纯寻址，从形状里剥掉。**
+            //
+            // 不剥的话，「手上那一格」这一族的前缀（<c>get_player</c>、<c>get_mecha</c>、
+            // <c>get_gameData</c>、<c>get_mainPlayer</c>、<c>get_inhandItemCount</c>……）
+            // 会把同一件事拆成十几种形状，而发射器一条都不用改——
+            // <see cref="IsPureLoad"/> 本来就放行它们，重放路径早就是通的。
+            if (IsPureCall(i, 3)) return null;
 
             if (i.Operand is MethodReference mr && (n == "call" || n == "callvirt" || n == "newobj"))
                 return "call:" + mr.Name;

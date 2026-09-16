@@ -147,10 +147,18 @@ namespace ProjectEden.Patches
 
                     if (give <= 0) continue;
 
+                    // **机器自己造出来的那部分品质跟着货走，而且要从缓冲区里扣掉。**
+                    // 只搬件数不扣分，留在 quaProduced 里的那份会在下一次出货时再发一遍。
+                    // 比例要拿扣减前的件数算，所以在 produced[i] -= give 之前。
+                    int own = QualityCraftOut.DrainSlot(ref component, i, give, produced);
+
                     station.storage[slot].count += give;
                     component.produced[i] -= give;
 
-                    // 品质的唯一注入点：提纯配方的产物落进本建筑自己的槽位时按件数加分。
+                    if (own > 0) QualityAccess.GiveStationQua(ref station.storage[slot], own);
+
+                    // 提纯配方额外的铸造分：产物落进本建筑自己的槽位时按件数加分。
+                    // 它和上面那份是两回事——一个来自投料，一个来自配方等级，不会重复计数。
                     // 非提纯配方在表里查不到，一次字典查找就返回，tick 上不分配。
                     QualityRefineryPatches.OnProduced(ref station.storage[slot],
                         component.recipeId, give);

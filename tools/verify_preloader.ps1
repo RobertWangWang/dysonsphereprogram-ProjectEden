@@ -368,5 +368,40 @@ if ($dangling.Count -gt 0) {
   $fail++
 } else { Write-Host "ok: all branch targets resolve after write/re-read" -ForegroundColor Green }
 
+# --- check 11: the pipeline this script drives must BE the shipped pipeline -------------
+#
+# This script invoked CargoIncWidener.Apply directly, which is ONE of the stages
+# Patcher.Patch chains. When the quality stages were added, this script was not
+# grown with them -- so it kept reporting "all checks passed" for a binary that
+# had none of the quality rewrite in it.
+#
+# That is not hypothetical: a census run against this script's output concluded
+# "TryPickItemAtRear is not twinned", which is false. The real pipeline twins it.
+# An hour went into a preloader change that was never needed.
+#
+# Repo rule, already written down and violated anyway: when a transform grows a
+# new case, grow its checker first. This check makes the omission loud instead.
+$patcherType = $pre.GetType("ProjectEden.Preloader.Patcher")
+$stages = @()
+if ($patcherType) {
+  foreach ($mm in $patcherType.GetMethods([Reflection.BindingFlags]"NonPublic,Public,Static")) {
+    foreach ($ins in @()) { }
+  }
+  # Stage entry points are the *Apply methods this assembly exposes.
+  foreach ($tt in $pre.GetTypes()) {
+    $am = $tt.GetMethod("Apply", [Reflection.BindingFlags]"NonPublic,Public,Static")
+    if ($am) { $stages += $tt.Name }
+  }
+}
+$driven = @("CargoIncWidener")
+$missed = $stages | Where-Object { $driven -notcontains $_ }
+if ($missed.Count -gt 0) {
+  Write-Host ("WARNING: this script drives only {0}; the shipped Patcher also runs: {1}" -f ($driven -join ", "), ($missed -join ", ")) -ForegroundColor Yellow
+  Write-Host "         those stages are NOT covered by any check here." -ForegroundColor Yellow
+  Write-Host "         Do not read this script's output as validating the quality rewrite." -ForegroundColor Yellow
+} else {
+  Write-Host "ok: every *.Apply stage in the preloader is exercised by this script" -ForegroundColor Green
+}
+
 if ($fail -gt 0) { Write-Host "`n$fail check(s) FAILED -- do not deploy" -ForegroundColor Red; exit 1 }
 Write-Host "`nall checks passed" -ForegroundColor Green

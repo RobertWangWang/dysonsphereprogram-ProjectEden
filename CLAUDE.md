@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: ten 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a hand-crafted-only 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, a **综合化学厂** that is the first machine here to run **more than one `ERecipeType`** (chemical 2, electrochemical 9 and redox 10, all at 10000×) — the eight real gates on `assemblerRecipeType` become one table lookup, and its build recipe eats 1000 燔石化工厂 so the older plant is its prerequisite rather than its victim, a **氧化还原燃烧厂** that is the first entity here to carry **both an assembler and a generator** — it presses a reductant and an oxidiser into propellant grains on its own `ERecipeType` 17, feeds those grains straight into its own fuel bay without a belt, and burns them for 30 GW, with a three-row panel whose two picker rows choose the pair and whose slider sets the oxidiser ratio, a **活性透镜** — a *living* gravitational lens that takes **no new building**, goes into the stock 射线接收站 through the vanilla `powerCatalystId` mechanism, generates ×5 power and ×3 critical photons (two independent knobs) and **heals in the beam while ageing in the dark**, and six rule-bypass cheat switches that are **on** by default (flipped after 1.5.0 by owner decision; they were off before, and the whole point of keeping them in their own file behind one master switch is that this default is one config override away from being reversed). ~31,500 lines of C# in 106 files — 99 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by twenty-two JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: ten 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, a **综合化学厂** that is the first machine here to run **more than one `ERecipeType`** (chemical 2, electrochemical 9 and redox 10, all at 10000×) — the eight real gates on `assemblerRecipeType` become one table lookup, and its build recipe eats 1000 燔石化工厂 so the older plant is its prerequisite rather than its victim, a **氧化还原燃烧厂** that is the first entity here to carry **both an assembler and a generator** — it presses a reductant and an oxidiser into propellant grains on its own `ERecipeType` 17, feeds those grains straight into its own fuel bay without a belt, and burns them for 30 GW, with a three-row panel whose two picker rows choose the pair and whose slider sets the oxidiser ratio, a **活性透镜** — a *living* gravitational lens that takes **no new building**, goes into the stock 射线接收站 through the vanilla `powerCatalystId` mechanism, generates ×5 power and ×3 critical photons (two independent knobs) and **heals in the beam while ageing in the dark**, and six rule-bypass cheat switches that are **on** by default (flipped after 1.5.0 by owner decision; they were off before, and the whole point of keeping them in their own file behind one master switch is that this default is one config override away from being reversed). ~31,500 lines of C# in 106 files — 99 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by twenty-two JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
@@ -262,6 +262,8 @@ Model IDs must be **< `LDB.models.dataArray.Length + 64`** — `ModelProtoSet.On
 Identified at runtime by `AssemblerComponent.speed >= megaSpeedThreshold` — deliberately decoupled from `assemblerSpeed` so retuning speed doesn't break identification (GenesisBook uses the same discriminator, hence the SoftDependency guard).
 
 - `MegaAssemblerPatches` — belt-direct I/O through `SlotDataStore` (12 slots per building, keyed by `(planetId, entityId)`, persisted via DSPModSave), plus `RunExtraCycles`, which re-enters vanilla `InternalUpdate` N−1 extra times per tick. That is how the engine's hard ceiling of **one recipe cycle per tick** (60/s) is exceeded without hand-writing settlement logic — each extra call is complete vanilla logic, so nothing can be conjured out of nothing.
+
+  **A 10000× machine is almost immune to a brown-out, and that is a side effect rather than a design.** Vanilla throughput is linear in supply — `InternalUpdate` IL 0576 is `time += (int)(power * speedOverride)` — but at `speedOverride = 1e8` a single call adds one to two orders of magnitude more `time` than any recipe's `timeSpend`, so **a supply ratio of 0.11 settles exactly as much as 1.00**; then IL 0000's `if (power < 0.1f) return 0;` kills the building outright. The player-visible shape is "no slowdown at all, then suddenly dead". `powerScalesCycles` (megabuildings.json, default on) scales **the cycle count** by supply — the same lever `MegaLightPatches` uses, because `speed` must never move — **copying vanilla's own linearity rather than inventing a curve**, with a floor of 1 cycle/tick (a 1× machine at full speed) and vanilla's 10% gate left to do the actual stopping. Note power draw is unaffected either way: `SetPCState` computes from `workEnergyPerTick`, not `speed`, so there is no feedback loop between throttling and demand.
 - `MegaStationPatches` — lays storage out as requires→Demand / products→Supply, shuttles items between slots and the assembler, keeps drones and energy topped up. Calls `RefreshStationTraffic()` only when the layout actually changes.
 
   **The slot count is gated by `UIEntityBriefInfo.icons`, not by the station logic.** That is a fixed-length array in the prefab which the hover panel walks by slot count, so it used to pin mega buildings at 5. `StationExpandPatches` now resizes it in an `_OnCreate` prefix, and `MegaStationPatches.MaxSafeStorageKinds` follows that resize (`StationExpandPatches.ExpandedIconKinds`) instead of hardcoding 5 — mega buildings ship 30. The constraint that remains is **`megabuildings.json`'s count must not exceed `stations.json`'s**, since the latter is what sizes the icons array; `MegaBuildingRegistry.SafeStorageKinds` clamps with a warning, because the two settings live in different files and the symptom of getting it wrong ("the game crashes when I hover a mega building") points nowhere near the cause.
@@ -678,6 +680,22 @@ filter is what stops a mixed belt from eating items.
   `CargoShaderIncProbe`, `MultiProductUIPatches`, this). `LensPatches.ReportInsert` now names the
   refusing guard on every insert attempt. **Treat "add the status line" as part of writing the
   guard, not as a follow-up.**
+
+**Sixth time, and it changed what the status line has to say.** `QualityCraftPatches` shipped with
+full per-branch tracing and **no startup line**, so "手搓没有品质" produced a log with *zero* 手搓
+lines — which cannot distinguish **the patch was never applied** from **the patch is on and the
+player did not craft this session**. Per-branch tracing does not close that gap: every trace sits
+*downstream* of the hook, so all of them go silent together. The status line therefore must report
+**whether the hooks are attached**, read out of `Harmony.GetAllPatchedMethods()` — the applied
+state, not "I called PatchAll and no exception came back" — and it has to run **after** `PatchAll`,
+which is why `QualityCraftPatches.Report()` sits next to `RecipeTypeCompatPatches.Report()` rather
+than in the earlier report block. **The rule generalises: a feature's status line answers "is it
+wired up", and the branch traces answer "what did it decide" — one cannot substitute for the other.**
+
+The offline half of the same question is cheap and was done in the same round: enumerating callers
+proved `UIReplicatorWindow::OnOkButtonClick → AddTask → AddTaskIterate` is the **only** UI path, and
+`AddTask` IL 0019–0036 calls `AddTaskIterate` unconditionally once `TryAddTask` passes. So
+"applied + crafted" implies the line must appear, and one launch now settles which half is false.
 
 ### Advanced miner & water pumps — `src/Patches/AdvancedMiner/`
 
@@ -1623,6 +1641,33 @@ The lesson is the one already recorded for `kMaxCargoFlowSpeedPerSecond` and for
 **a sentence in this file is a claim until the IL is re-read.** A field being *read* a few
 instructions before a `brfalse` does not make it the thing the `brfalse` tests.
 
+**And that retraction was itself only half right — it cost a round of dead code.** It says
+"`UIReplicatorWindow` does NOT gate on `Handcraft`", which is true of `RefreshRecipeIcons`
+(the **drawing** path, where the flag only picks dimmed vs. not) and **false of
+`OnOkButtonClick`** (the **acting** path), which gates on it hard:
+
+```
+0138: ldfld RecipeProto::Handcraft
+013D: brtrue.s IL_016B            // true → carry on
+013F: ldstr "该配方" … "生产"       // false → popup
+016A: ret                         // ← returns BEFORE AddTask at IL 01DE
+```
+
+So a `Handcraft = false` recipe is drawn, is selectable, and **cannot be crafted** — the click
+pops 「该配方 X 生产」 and returns. Since `OreRegistry` writes `Handcraft = false` for every
+`ores.json` recipe, that covers all 80 of them.
+
+The cost: a branch was added to `QualityCraftPatches` to give hand-crafted **refine** recipes
+their tier's quality, on the reasoning that the machine path and the hand path would otherwise
+disagree. The reasoning was sound and the premise was false — refine recipes are `Handcraft =
+false`, so the branch could never execute. It was deleted, and the finding is recorded at the
+site.
+
+**The general shape, which this file already states one section down and this violated anyway:
+an early guard that returns for one shape does not mean no later guard handles the others — and
+a conclusion drawn from one method does not transfer to its sibling.** "Does this window gate on
+X" has to be answered per method, by enumerating the exits of the method that actually acts.
+
 **A third `kind`: `accumulator`.** Clones 蓄电器 (2206) and scales only `maxAcuEnergy` / `inputEnergyPerTick` / `outputEnergyPerTick`, carrying `isAccumulator` and `subId` across — `CreateEntityLogicComponents` gates on the former and `PowerSystem.NewAccumulatorComponent` reads all of them straight off `PrefabDesc`. **The config gives multipliers, never absolute joules**, because those values live in the prefab inside `resources.assets`: they cannot be read offline or by decompiling, so a hardcoded number would be a guess. `ApplyAccumulator` logs the resolved absolutes (GJ / MW) so they can be pinned if ever needed. A newly built accumulator always starts at `curEnergy = 0` — vanilla behaviour, not a bug.
 
 **The "full" variant is an item, not a building, and the empty↔full pairing lives on the *exchanger*.** 蓄电器 (2206) and 蓄电器（满）(2207) share one `ModelIndex` (46) and therefore one `PrefabDesc`; they differ only in `BuildIndex` (2207 is **0** — it takes no build-bar slot and is placed from the inventory), their `GridIndex`, and `FuelType` + `HeatValue` (the full one is mecha fuel). `MachineFullVariantEntry` reproduces exactly that, and derives the heat value from the capacity multiplier rather than hardcoding it.
@@ -1631,7 +1676,11 @@ What converts one into the other is the 能量枢纽, and **`PowerExchangerCompo
 
 **A fifth `kind`: `generator`.** Clones a power building and scales only `genEnergyPerTick` / `useFuelPerTick`; 风力发电机集群 is 风力涡轮机 (2203) at ×1000, i.e. 300 kW → 300 MW. `PowerSystem.NewGeneratorComponent` copies `photovoltaic` / `windForcedPower` / `gammaRayReceiver` / `geothermal` / `genEnergyPerTick` / `useFuelPerTick` / `fuelMask` / `powerCatalystId` out of `PrefabDesc` field by field (IL 0090–0195), so **`ApplyGenerator` re-copies every one of those explicitly** — miss one and you get a power plant that generates nothing, with no error anywhere. There is no clamp on the output: the wind branch is the whole of `EnergyCap_Wind` (`capacityCurrentTick = (long)(windStrength * genEnergyPerTick)`), and `genEnergyPerTick` is Int64. Multipliers, not absolutes, for the same `resources.assets` reason as the accumulator; the tooltip's 发电功率 row needs nothing — `ItemProto.GetPropValue` reads `prefabDesc.genEnergyPerTick × 60` directly. The source id is not a guess: `ACH_ThereIsNoWind.OnBuild` hardcodes 2203, and the registry additionally refuses a source whose `isPowerGen` is false. Since the cluster is one entity, it is also one grid connection and one collision box — the 1000× is in the power, not the footprint. **Verified in game**: it registers as `发电 300 kW → 300 MW（×1000），无燃料`, and placing one next to another turbine raises `WindTooClose(6)` — which only fires on `prefabDesc.windForcedPower`, so the clone provably carried the wind flag across rather than silently becoming an inert generator.
 
-**`recipeHandcraftOnly` = the recipe's `Type` is `None`.** The replicator lists a recipe whatever its `Handcraft` is, while `UIRecipePicker.RefreshIcons` skips on `filter != 0 && filter != recipe.Type` — and no machine's `assemblerRecipeType` is ever 0, so a Type-0 recipe is listed for hand-crafting and selectable by nothing. The one measured cost: `ItemProto.InitProductionMask` opens with `if (recipe.Type == 0) continue;`, so the product gets no `productionMask` bit — and the **only** reader of that bit in the whole assembly is `UIReferenceSpeedTip` (参考速率), which a handcraft-only recipe has no business appearing in anyway. Every other `RecipeProto.Type` test in the UI is `== 8` (分馏), so 0 is inert there. Two things it did need: `madeFromString`'s 0 branch returns a bare `"-"` (`RecipeTypeNamePatches` now says 手动合成), and **`MachineRegistry.RecipeTypeMachineName` had to start rejecting 0** — `station` / `accumulator` / `exchanger` entries never set `recipeType`, so that field defaults to 0 and any Type-0 recipe would otherwise have reported 「制造于 综合物流枢纽」.
+**`recipeHandcraftOnly` = the recipe's `Type` is `None`.** The replicator lists a recipe whatever its `Handcraft` is, while `UIRecipePicker.RefreshIcons` skips on `filter != 0 && filter != recipe.Type` — and no machine's `assemblerRecipeType` is ever 0, so a Type-0 recipe is listed for hand-crafting and selectable by nothing. The one measured cost: `ItemProto.InitProductionMask` opens with `if (recipe.Type == 0) continue;`, so the product gets no `productionMask` bit — and the **only** reader of that bit in the whole assembly is `UIReferenceSpeedTip` (参考速率), which a handcraft-only recipe has no business appearing in anyway. Every other `RecipeProto.Type` test in the UI is `== 8` (分馏), so 0 is inert there.
+
+**Only 小型速采机 still sets it.** 风力发电机集群 and 可燃性液体发电厂 were flipped to `false` (type 4, Assemble) by owner decision — clicking out a thousand turbines one at a time is not what a factory game is for. **Hand-crafting is not lost by flipping it**: `Handcraft = true` is written unconditionally in `MachineRegistry`, so the switch only controls `Type`, i.e. whether any *machine* may also select it. The `productionMask` cost above reverses with it, which is the right way round — a recipe that can be automated belongs in 参考速率. 小型速采机 keeps it because it is the first miner of a run and must not wait on a production line existing.
+
+Two things it did need: `madeFromString`'s 0 branch returns a bare `"-"` (`RecipeTypeNamePatches` now says 手动合成), and **`MachineRegistry.RecipeTypeMachineName` had to start rejecting 0** — `station` / `accumulator` / `exchanger` entries never set `recipeType`, so that field defaults to 0 and any Type-0 recipe would otherwise have reported 「制造于 综合物流枢纽」.
 
 **`megaTab: true` puts a `machines.json` building on the mod's own tab.** Neither number it needs can live in the JSON: the replicator page index is handed out by CommonAPI at Awake (`MegaBuildingRegistry.TabIndex`) and the build category is configured in `megabuildings.json`. So the entry gives only `gridRow` / `gridCol` / `buildSlot`, and `MachineRegistry.WantedGrid` / `WantedBuildIndex` fetch the rest — which works only because `MachineRegistry.OnPreAddData` is registered after `MegaBuildingRegistry`'s.
 
@@ -2110,7 +2159,370 @@ The verification script itself produced two rounds of false failures before it w
 
 `PilerComponent`'s own version is not retained by its `Import`, so there is nothing to branch on; its two cache fields are instead **clamped** (`Math.Min(x, 255)`) before being written at the original byte width. Bounded and deterministic: at most one in-progress stack per piler loses precision across a save, and it degrades rather than wrapping.
 
-### The runtime half — `src/Patches/Cargo/CargoWidening.cs`
+### The verifier covers one stage of five, and that produced a false finding
+
+**`tools/verify_preloader.ps1` invokes `CargoIncWidener.Apply` directly. The shipped
+`Patcher.Patch` chains five stages** — widener, `QualityFieldAdder`, `QualityChannelBuilder`,
+`QualityTransform`, `QualitySaveExtender` (plus `SerializationFixer`). So the binary the script
+writes and asserts against **has none of the quality rewrite in it**, and it still prints
+`all checks passed`.
+
+That is not a latent risk; it produced a wrong answer. A census run over that binary reported
+`CargoPath::TryPickItemAtRear` and `CargoTraffic::TryPickItemAtRear` as *not twinned*, and a
+preloader change was designed on top of that. Against the **real** pipeline both methods carry:
+
+```
+CargoPath::TryPickItemAtRear     00DE: ldfld Cargo::qua -> 00E3: stsfld Q0
+CargoTraffic::TryPickItemAtRear  008D: ldfld Cargo::qua -> 0092: stsfld Q0
+```
+
+**The rule this file already states and this violated: when a transform grows a new case, grow
+its checker first.** The script now enumerates every `*.Apply` stage in the preloader assembly
+and prints a WARNING naming the ones it does not drive — so "passed" can no longer be misread as
+"the quality rewrite is validated".
+
+**And the general habit: before measuring a rewritten artifact, prove the artifact is the one
+that ships.** One `Cargo::qua` field lookup would have caught it — the patched copy had zero
+quality twins, which is impossible for the real pipeline.
+
+To produce the real artifact, drive `Patcher.Patch` (not a single stage), with `BepInEx.dll` and
+`0Harmony.dll` loaded first — the patcher logs through BepInEx and otherwise throws only at
+`Invoke` time with an assembly-load error that names nothing of ours.
+
+### 品质是 Int32，跟着原值收窄是本期最贵的一类错——三次
+
+品质的目的地**全是 Int32**（孪生字段、侧信道寄存器、孪生局部），而原版的载荷字段是窄的
+（`Cargo.inc`、`InserterComponent.itemInc` 都是 Int16）。发射器靠**重放原值表达式**拼出品质
+表达式，于是原值末尾那条 `conv.i2` / `conv.u1` 会被一起重放到品质上——**截掉高位**。
+
+同一个错在一期里出现了三次，位置各不相同：
+
+1. **复制传播的合成**认不出 `ldloc ; conv ; stloc`（旁边两个分支早就跳了 conv，只有这一支没跳）
+   → 分拣器整族不搬品质 → 「储物柜里品质是 0」，查了四轮。
+2. **转发实参重放**带上了 conv → 写进侧信道的品质被截断。
+3. **字段赋值发射器**同样带上了 conv → 写进 `itemQua` 的品质被截断（一次扫出 22 处）。
+
+**症状按档位才发作，这是它难查的原因。** 铜每件 50 分正常，铁每件 100 分变负数——同样堆叠下
+铁的总分翻倍后越过 32767。而上限巡检接不住：它开头就是 `if (qua <= 0) return;`，
+所以负数会在存档里**永远待下去**（修法与当年给 `Cargo.inc` 加写入器同理：病因修掉，存量也得清）。
+
+两条防线，都不靠「下次记得」：
+
+- **剥离放在 `Build` 的单一出口上**（`StripNarrowing`），不是逐个发射器改。逐个改必然漏一个，
+  而漏掉的那个不报错。
+- **每次启动都断言**（`AssertNoNarrowedQuality`）：全模块扫描，任何一处「收窄之后写品质」
+  都是 Blocker，1c 整体不生效（游戏照常能玩，只是没品质），而不是静默把数截成负数。
+
+### A scrub is not coverage — the census that said the sorter was fine
+
+**`stsfld Qn` appears in two opposite roles**: carrying quality outward, and `ldc.i4.0 ; stsfld Qn`
+**clearing** it. A census that counts "does this method touch the channel" scores both as coverage,
+and that is how `InserterComponent::InternalUpdate` was cleared as healthy — it has 8 channel
+writes and **every one of them is a scrub**.
+
+Re-run excluding scrubs and the leak list goes from 94 to **178**, with the decisive entry being all
+three sorter tick variants (`InternalUpdate`, `InternalUpdate_Bidirectional`, `InternalUpdateNoAnim`):
+they move `itemInc`, never `itemQua`, and scrub the channel after every `PickFrom`. Since the sorter
+is the thing between a belt and a storage box, **quality could never reach a box** — the reported
+symptom, four rounds after the refinery itself was proven correct.
+
+```
+011B: ldloca.s V_0          // out stack
+011D: ldloca.s V_1          // out inc  -> a LOCAL, not a field
+011F: callvirt PlanetFactory::PickFrom(...)
+0124: ldc.i4.0
+0125: stsfld Q0             // no `ldsfld Q0 ; stloc <twin>` was ever emitted, so the scrub wins
+```
+
+`ScrubAfterCalls` skips the scrub when it sees a paired `ldsfld Qn ; stloc` read-back. Here the
+transform never emitted that read-back, so the guard had nothing to recognise and the scrub ran.
+`Unhandled` and `Pending` both came back **empty** — the transform believes it handled everything.
+
+**Two rules out of this.** *A diagnostic that cannot distinguish a write from an erase measures
+nothing*, and it is the same family as "log the boring state": the distinction has to be in the
+instrument, not in the reading. And: **when a census clears a suspect, check what the census counted
+before believing it** — this one cleared the actual culprit and sent four rounds elsewhere.
+
+### 「守恒」在合成上是假的——一条口号把算术后果当成了设计
+
+品质的规则原本写着「**品质是可加点数，永远守恒，只会被稀释**」，三件事共用一条：
+合并相加、拆分按比例、合成求和后按产出件数摊开。前两件成立，**第三件不成立**。
+
+合成把多件变少件，所以每件分数**必然往上翻**：50 分的铁块 ×2 加 50 分的齿轮 ×1
+造一台电动马达，就是 150 分一台。而翻多少倍由 `requireCounts` 决定——那是个纯粹的
+平衡数字，没人是为品质挑的（4:1 的配方翻四倍，1:4 的砍四分之一）。
+**它不是设计，是算术漏出来的**，而口号把它盖住了。
+
+更硬的证据是它和设计自己的头条冲突：启动日志每局都打「品质的来源只有提纯厂」，
+可在求和规则下，顺着生产链每一级都在凭配方比例造品质，铁块 50 → 齿轮 100 → 马达 200。
+
+**而且它已经在四处长出了互相矛盾的夹子**，是玩家问「为什么是 100」时扫 `MaxPerItem`
+的每一处用法才发现的：机器合成不夹、手搓夹在 100、存量巡检每 30 秒把箱子夹回
+`件数 × 100`、显示也夹在 100。于是同一台马达存的是 150、显示 100、进箱子 30 秒后
+真的变成 100——**玩家两次看到的都是 100，中间那个数变过**。
+
+改成**按件数加权平均**（产物每件分数 = 各投入每件分数按件数加权平均）一次解决三件事：
+口号变成真的、提纯厂重新是唯一来源、而且**构造上就出不了上限**，四个夹子里三个可以退役。
+代价要说清楚：**总分不再守恒**（多件变少件时点数会少）——但守恒从来不是给玩家的承诺，
+「好料造好东西」才是。
+
+**一般化的两条：**
+
+- **一条规则如果对 A、B 成立而对 C 只是「看起来像」，它在 C 上就是未经决定的。**
+  口号越顺口越危险——「只会被稀释」读起来像个不变量，实际只是两个场景的巧合。
+- **同一个上限在四个地方各夹各的，是「规则本身错了」的征兆，不是四个小 bug。**
+  正确的规则通常不需要夹子；需要在四处补夹子，说明被夹的那个量本来就不该长那么大。
+
+### 擦除在**被调方体内**时，调用方那边再怎么转译都够不着
+
+「擦除不等于覆盖」这条已经记过一次（分拣器那族）。这次的形态更窄，也更彻底：
+**擦除发生在被调方的方法体里**，于是调用方读到的必然是 0，而调用方那边**没有任何**
+转译能补救——要补救的那条指令不在它的方法体内。
+
+`Player.TakeItemFromPlayer(ref itemId, ref count, ref inc, bool fromPackage, ItemBundle)`
+两条分支都是这个形状：
+
+```
+// 背包那一支
+0020: callvirt StorageComponent::TakeTailItems(...)   // 被调方把拿走的品质写进 Q0
+0025: ldc.i4.0 ; stsfld Q0                            // 紧接着擦掉
+
+// 手上那一支
+00A6: call ProjectEdenQualityChannel::Split(...)      // 算出了拿走的那一份（V_5）
+00D8: ... sub ; stsfld Q0 ; call set_inhandItemInc    // 只拿它算了个余数写回手上
+00E6: ldc.i4.0 ; stsfld Q0                            // 然后擦掉，出参那一半从没发布过
+```
+
+`inc` 是**出参**，按协议它的孪生就该是「返回前写 Q0」，而这里两条分支都没有发布，
+只有擦除。于是 `EntityFastFillIn` 读回来永远是 0——**每一步都成功，功能整个不在**。
+
+**出路只有两条，选第二条。** 一是改 preloader 让这个方法发布出参品质（要教变换认识
+「出参的孪生是寄存器」这件事，是一大块新语义）；二是**在调用方那侧量**。
+这里选量，而且它**不是近似**：玩家那一侧（背包格子、手上那一格）都是孪生过的，
+品质已经正确扣掉了，所以「玩家少了多少分」精确等于「机器该多多少分」。
+
+**一般化：判断一条侧信道能不能在调用方补救之前，先看擦除指令在谁的方法体里。**
+在调用方体内（分拣器那族）→ 转译器能救；在被调方体内 → 只能改 preloader 或者改为测量。
+
+**同一个形状在 `Player.UseHandItems` 上又出现了一次，而它旁边还藏着一个更糟的。**
+那 61 条指令里两个分支各漏一半：分支 B（整摞用光）在 `0061` 发布品质、`0070`/`007B`
+两次擦除后返回，和上面一模一样；**分支 A（只用掉一部分）根本不扣品质**——
+`split_inc` 只劈了 `inc`，没有对应的 `ProjectEdenQualityChannel::Split`，
+于是 `set_inhandItemInc(剩余 inc)` 的孪生把 `qua` 写成了**原始全额**。
+手上剩下的货顶着整摞的点数，**单件分数越拿越高**。
+
+两条都由一个前后置对修掉（量整摞的分和件数，按用掉的件数把剩下的写回去），
+而**两个分支共用同一个式子**：分支 B 里原版已写 0，而「原分 − 全额 = 0」，两者一致。
+
+**而修好之后它仍然一行都不打，因为扣料压根没走那个作用域——本 mod 自己的作弊开关挡的。**
+`建造秒完成` 默认开着，而它是**本仓库自己重写的一条建造路径**：`InstantBuildPatches.Pay`
+从 `ConstructionBeforeGameTick` 的后置里用 `player.package.TakeTailItems` 付账，
+**在 `QualityBuildPatches` 那七个方法的作用域之外**（五把工具的 `CreatePrebuilds` +
+`DoUpgradeObject` + `PlaceItems`）。更糟的是它当时还特意把侧信道**清零**了，
+注释写着「建好的建筑不保留品质（建筑没有品质槽位）」——那句话在写的时候对，
+效果层出现之后就过时了：建筑确实没有品质槽位，但材料的品质会折进它的耗电。
+
+于是玩家放下一座 50 分材料的建筑，**日志一行没有、电费一分不省**，而每一步都「成功」了。
+
+**这是「本仓库为某个功能加的规则，悄悄限制了后来加的另一个功能」那一类，
+而这次两边都是我们自己的**——和催化剂槽位撞 `SyncStorageLayout`、钻头槽位撞
+`StorageExpandPatches.StorageCount` 完全同形。**给新功能划作用域时，
+要问的不是「原版从哪里扣料」，而是「这个存档里所有会扣料的路径有哪些」，
+包括本 mod 自己新开的那些。**
+
+修法是让那条路把品质接住（清 → 调 → **读** → 再清，而不是清 → 调 → 清），
+按桩号累计到付清为止，再挂进已有的 `QualityBuildStore.SetPending`；
+后面 `AddEntityDataWithComponents` 的 `Promote` 一路照旧。
+它还得有**自己的一次性日志**——那条路不走「建造扣料」，少了这行就又分不开了。
+
+**顺带一条协议上的混淆，值得单独记：「清」和「读」不是一回事。**
+那处原本写的是「调用前后各清一次」，理由完全正确（不清前面会消费别人留下的值，
+不清后面会把值留给下一个人）。但**出参方向的正确做法是「读回来再清」**——
+直接清掉等于把被调方刚算好的答案扔了。同一个 `Gate()` 式的写法服务两个方向时，
+读起来对称，实际不对称。
+
+**这一条还顺带证明了「状态行 ≠ 事件行」那条规矩的价值，是从反面证明的。**
+玩家问「建筑按分数省电了吗」，日志里事件行 0 条——而那**分不开**「补丁没生效」和
+「这局没建东西」，因为这个功能**没有开机状态行**。代价是回去逐条读 61 句 IL 才答得上。
+本文件记过六次，这是第七次：**状态行回答「接上了没有」，事件行回答「它决定了什么」。**
+
+### Quality on the pick side: the callee wrote it, our gate threw it away
+
+`CargoWidening.Gate()` clears the side-channel registers around **every** call this mod makes into
+the game's transport API. Its own doc comment says pick-type methods are the reverse direction
+(callee writes, caller reads) "so clear again after the call" — and that is exactly what made the
+quality vanish: the callee *had* written `Q0 = cargo.qua`, and the `finally { Gate(); }` wiped it
+before anything read it.
+
+So the fix is **read, then clear** — never skip the clear (a register outliving one call is how
+quality gets invented rather than lost; measured once at 1010 per item against a cap of 100).
+`PickAtRear` now has an `out int qua` overload; the old signature forwards to it, so call sites
+that do not want quality are unchanged.
+
+**The asymmetry worth remembering: on the insert side the protocol is "caller writes before the
+call", on the pick side it is "callee writes before returning".** One `Gate()` helper serving both
+directions reads as symmetric and is not.
+
+### `ioTargetTypedId` 的低 24 位不是实体号，每个分支各用各的池子
+
+`PlanetFactory.PickFrom` / `InsertInto` 的 `UInt32` 重载开头是两句掩码：
+
+```
+0008: ldarg.1 ; ldc.i4 16777215  ; and ; stloc.1   // id   = typedId & 0x00FFFFFF
+0010: ldarg.1 ; ldc.i4 -16777216 ; and ; stloc.2   // kind = typedId & 0xFF000000
+```
+
+然后按 `kind` 跳七个分支，而**每个分支把那 24 位当成自己那张池子的下标**——
+`0x01000000` → `cargoTraffic.beltPool`，`0x02000000` → `factorySystem.assemblerPool`，
+再往后是实验室 / 储物箱 / 物流站 / 电站。**没有一个分支查 `entityPool`。**
+`Int32` 重载才是按实体号来的（它开头就是 `entityPool[entityId].beltId`）。
+
+把低 24 位当实体号用**不会越界、不会抛异常**：它会查到一台毫不相干的机器，
+然后把那台机器的品质扣掉，发给这一次搬的货。**分数长在错的地方，一个字不报。**
+判据只能是先看 `kind`。
+
+**两个重载不是转调关系**（实测 1087 条 vs 1026 条指令，各自一份完整实现），
+所以按名字选目标的补丁必须两个都覆盖——而这又和另一条规矩撞上：
+它们的 `out stack / out inc` 被 preloader 加宽成了 `Int16&`，
+所以只能用 `TargetMethods()` **按首参类型**挑，参数表一写出来就静默解析不到。
+
+一般化：**一个 id 参数叫什么名字不是证据，解码它的那几条指令才是。**
+和「一个没有读者的具名常量只是主张」同一族。
+
+### 自动属性把一整条路藏起来了——名字启发式的第五次漏
+
+玩家报的是「合并两堆铜块，品质归零，而且旁边那几堆也跟着变 0」。根因是**鼠标手上那一格**
+（`Player.inhandItemInc`）：拖拽、拆分、手动合并、Shift 塞进建筑，全都要在手上过一道，
+而它整个不搬品质——手上没有品质，放下去就是往目的地写 0，把原来那一堆的分数冲掉。
+
+**它同时躲过了三道关，而三道关用的是同一种判据：名字。**
+
+| 关卡 | 判据 | 为什么漏 |
+|---|---|---|
+| 建孪生字段（1a） | `TwinName` 的四条命名规则 | IL 里的名字是 `<inhandItemInc>k__BackingField`，带尖括号，四条全不认 |
+| 选载荷参数 | 形参名 `LooksLikeInc` | 唯一写入口是 `set_inhandItemInc(Int32 **value**)`，名字是编译器给的 |
+| 切语句 / 选方法 | 方法体里有没有载荷字段指令 | 15 处写、81 处读**全部**走访问器，一条 `ldfld` 都不出现 |
+
+三条全部改成**按形状判定**：后备字段剥壳再套回去；方法体正好是
+`ldarg.0 ; ldarg.1 ; stfld 载荷 ; ret` 的就是平凡 set 访问器，它唯一的形参就是载荷参数
+（`TrivialSetterSlot`）；而 `Norm` 把**一次平凡访问器调用归一化成一次字段访问**
+（`TrivialAccessor` → `ldfld:PAY` / `stfld:PAY`），于是整张形状表一条都不用为属性名重写。
+
+**这是名字启发式第五次漏东西**（前四次：`_stack`、`itemInc`、`cacheCargoInc1`、这次），
+而这次的形态最隐蔽：前四次至少有一条 `ldfld`，这次连指令都没有。
+本文件早就写着「按名字挑，就会按名字漏」——**代价是那条规矩没被推到「凡是判据是名字的地方」**。
+
+顺带修掉三处同源的脆弱，每一条都是「表面上的小事挡住整条路」：
+
+- **`ExpectedFields` 相减相错了。** GPU 那三个不能加字段的载荷（`TrashObject` /
+  `DroneData` / `CourierData`）**本来就不在 `DeclaredPayload` 里**——是并列的另一张表，
+  不是它的子集。第一版把两者相减，于是 30 条清单期望出 27 个字段，1a 被自己的断言挡死，
+  报错还写着「载荷清单和程序集对不上」。**派生一个数之前，先确认两张表的包含关系。**
+- **「读一次载荷、送进一个带载荷形参的调用」不再逐个形状列举。** 前缀
+  （`get_inhandItemId`、`get_mecha`、几个 `ldc`……）的组合是无穷的，而要做的事只有一件：
+  在那个 call 之前把品质写进寄存器。按**语义**归一化成 `call:forward`，一条规则收掉十三种形状。
+  这和「整条记录读存档 → `SaveReadCore`」是同一个路子。
+- **「纯取值」改成递归判定**（`IsPureCall`）。原来只认三条指令的取值器，而
+  `UIMechaWindow::get_mecha` 是 `ldarg.0 ; call get_data() ; isinst Mecha ; ret` ——四条，
+  中间还有一次转型，于是 `mecha.player.inhandItemInc` 这一族整个重放不出来。
+
+**核对末态时又抓出两个，而且两个都只在真正的改写里发作——分析遍看不见。**
+
+- **一个判定的输入被这一遍自己改掉了。** set 访问器本身也要孪生，方法体从四条变成七条
+  （多了 `qua = Q0`）。于是「这条 call 是不是平凡访问器」这个**现场解析方法体**的判定，
+  在发射遍走到一半时开始返回 false：分析遍全认得，发射遍认不得，而且**一声不吭**——
+  那些语句直接从语句表里消失，没有 Unhandled、没有 Pending、没有 Blocker。
+  实测 15 个写入口掉了 3 个。修法是**在任何改写之前建表、两遍共用**（`BuildAccessorMap`）。
+  **规则：一个判定如果读的是这一遍会改的东西，它必须在改写开始前就固化。**
+  这是「两遍式」这套设计的一个盲区——两遍保证的是「表没齐就不改字节」，
+  保证不了「第二遍看到的世界和第一遍一样」。
+- **同一个目的地，两条路都写，后写的赢。** 第一版让调用点在 call 之前直接写孪生字段,
+  紧接着那次 call 就用 `Q0` 盖掉——而 `Q0` 这时往往已经被 `ScrubAfterCalls` 擦成 0
+  （`SetHandItems` 的品质由 `TakeItemFromGrid` 的出参接进局部，那次调用之后 Q0 就被擦了）。
+  表现是「每一处都写了，手上还是 0」。现在调用点一律写寄存器，由访问器落地。
+  **规则：一个字段的孪生只能有一个写入口；协议是「谁落地谁负责」，不是「两边都写保险」。**
+- **顺带补上第三种转发来源：常量。** `X.SetInc(0)` 这种「清空」原先不写寄存器，
+  于是被调方读到的是上一个人留下的品质——`ScrubAfterCalls` 擦的是 call **之后**，
+  救不了这一次。**品质是 0 和「不用管」是两回事**，写进去才是。孪生语句 1038 → **1105**。
+
+末态（跑完整条流水线、写盘、再读回来核对）：`Player.<inhandItemQua>` 存在；
+写入口 1 处（值取自侧信道），读它的方法 **23 个**——含 `UIStorageGrid::HandTake/HandPut`、
+`Player::UseHandItems/PutHandItems/ThrowHandItems`、`PlanetFactory::EntityFastTakeOut`。
+孪生语句 986 → **1105**，方法体 189 → **201**，孪生局部 251 → **268**，侧信道 785 → **887**；
+`Unhandled`/`Pending`/`Blockers` 全空，26168 个方法体悬空分支 0、收窄后写品质 0。
+
+**最后一条，和 IL 无关：`PlanetFactory::_test_take_player_inhand_inc` 名字里写着 test，
+差点被当成调试残留归进「不用孪生」。** 数了调用点才发现有两个，而且都是 Shift 点一下把
+手上的东西塞进建筑 / 传送带走的路（`EntityFastFillIn`、`BeltFastFillIn`）。
+**名字像什么不是证据，调用点才是**——和「一个没有读者的具名常量只是主张」同一族。
+
+### 加宽过的**字段**和加宽过的**签名**是同一个坑，而字段这一半没写下来，于是又崩了一次
+
+```
+MissingFieldException: Field not found: byte Cargo.stack
+  at QualityRepairPatches.ReportArrivalOnce
+```
+
+本文件为**方法签名**写过这条——所以 `CargoWidening` 用本程序集声明的委托去调游戏的搬运
+API，绝不直接 `call`。但同一条对**字段**同样成立，而那半句从来没写下来：插件是按
+**未加宽**的 `Assembly-CSharp` 编译的，源码里一句普通的 `cargo.stack` 会发出
+`ldfld byte Cargo::stack`，而运行时那个字段是 `Int16`，**解析不到**。
+
+编译不报错，Harmony 不报错，`verify_*` 也不报错——它只在那行代码**第一次真的执行**时炸，
+而这次它挂在每 30 秒一趟的巡检上，所以是进游戏几十秒后崩。
+
+**规矩：凡是 preloader 动过宽度的东西，插件侧一律运行时绑。** 现在这一族是
+`Cargo.inc` 和 `Cargo.stack`。读取器按字段**实际的**宽度发射（Byte / Int16 / Int32 都收），
+写死任何一种都会在另一种下静默失配——那正是这次的成因。
+
+（`CargoLedgerProbe` 和 `CargoShaderIncProbe` 里还有直接访问，那两个是**加宽生效时整体关掉**的
+开发探针，守卫在入口方法上，碰字段的方法根本不会被 JIT——它们是这条规矩的例外，不是漏网。）
+
+### 去重要按「这条指令被谁占了」算，不是按「谁的末指令是它」算
+
+转发合成用 `taken` 防止和真语句抢同一次调用，而 `taken` 里记的是每条语句的**末指令下标**。
+`V = X.inc … AddCargo(…)` 这类真语句的末指令是 `stloc`，**不是那次 call**——
+于是同一次调用被合成又认领了一遍。两条孪生语句改同一处：先插入的把后面的下标全顶走，
+后一条就落成「认得但拼不出来」，4 个 Blocker 全在 `PilerComponent::InternalUpdate`。
+
+它**潜伏了很久**：只有在转发实参放宽到「一整段算式」之后才够得着这些调用点，
+在那之前合成只认单条 `ldarg`/`ldloc`，永远碰不到已被真语句占住的那几处。
+现在另记一份「真语句覆盖到的全部下标」，只给转发合成用。
+
+同一处还有个对称的坑：**孤儿剪枝要按实参那一段剪，不能按整次调用的区间剪。**
+调用区间里总有 itemId、件数这类和品质无关的局部，按它剪会把每一条转发都误杀。
+所以转发语句额外记下 `ArgFrom`/`ArgTo`。
+
+**一句话：凡是「这条语句归谁」的判定，判据必须是指令的占用，而不是某个代表性下标。**
+
+### 1c 会撞坏本 mod 自己的转译器——**这是一整类回归，不是一个 bug**
+
+品质改写把语句插进了 **276 个原版方法体**。而本仓库有一批转译器是靠「紧挨着的那几条指令」
+定位锚点的——两者一撞，转译器**静默失配**：它要找的形状还在，只是中间多了几条别人的指令。
+
+第一例是活性透镜的传送带入口。`PowerGeneratorComponent.GameTick_Gamma` 里
+`PickFrom` 之后原本紧跟 `ldarg.0 ; ldfld catalystId`，1c 在中间插了
+`ldsfld Q0 ; stloc`（把出参的品质接回局部），于是两个取货口**同时**失配：
+
+```
+[Warning] 活性透镜·诊断：PickFrom 之后没认出「载入 this + ldfld catalystId」。
+          实际是 [ldsfld Q0] [stloc.s (23)] [ldsfld Q0]
+[Error  ] 活性透镜：应当改写 7 处，实际 5 处（… GameTick_Gamma.取货口 0 …）
+```
+
+**这个仓库的老规矩是它唯一被发现的原因。** 每个转译器都报替换计数并在数目不对时大声失败,
+所以一次启动的日志就是完整的审计：276 个被改写的方法体里，只有这一个转译器倒了,
+其余每一行都报着它期望的计数。**如果当初图省事不报计数，这里会是「活性透镜时好时坏」。**
+
+修法是共用的跳过器 `QualityAccess.SkipChannelNoise`，而不是把窗口从 3 条放宽到 8 条：
+
+- 只跳**认得出是我们自己的**两种成对形状——`ldsfld Q* ; stloc`（接回品质）和
+  `ldc.i4.0 ; stsfld Q*`（调用后擦除）；
+- **认不出就停**。放宽窗口会让锚点落到一条真正的原版指令上，而那是不报错的
+  ——用一个静默的错换掉一个响亮的错，是这份文件反复记过的那类亏。
+
+**给下一次的规矩：在 1c 改写过的方法体里写转译器，锚点之间必须容得下我们自己插的指令。**
+哪些方法体被改过，用「原版 vs 改写后逐方法比指令数」量出来，别靠记。
 
 Three things the preloader cannot do:
 

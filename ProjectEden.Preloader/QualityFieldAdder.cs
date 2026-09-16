@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Mono.Cecil;
@@ -44,13 +44,25 @@ namespace ProjectEden.Preloader
         }
 
         /// <summary>
-        /// 期望新增的孪生字段数。和 <see cref="QualityFieldAnalyzer"/> 的清单长度一致。
+        /// 期望新增的孪生字段数。
         ///
-        /// 31 → 29：<c>TrashObject</c> / <c>DroneData</c> / <c>CourierData</c> 会被原样上传到
-        /// <c>ComputeBuffer</c>，加字段会让 stride 和游戏里写死的那个对不上（实测启动即崩）。
+        /// <b>它是算出来的，不是写死的。</b> 原先是个常量 29，而它的唯一职责是
+        /// 「清单和程序集对不对得上」——于是<b>每次往清单里加一个载荷，它就把 1a 挡住</b>，
+        /// 而报错看上去像「新加的字段有问题」。实际上字段建得好好的，
+        /// 只是数字没跟着改——这是本仓库反复记过的「同一事实的第二份手维护拷贝」。
+        ///
+        /// 现在直接数清单：<b>就是声明的载荷总数，不减任何东西。</b>
+        /// GPU 那三个（<c>TrashObject</c> / <c>DroneData</c> / <c>CourierData</c>，加字段会让
+        /// <c>ComputeBuffer</c> 的 stride 和游戏里写死的那个对不上，实测启动即崩）
+        /// <b>本来就不在 DeclaredPayload 里</b>——它们是并列的另一张表，不是这张表的子集。
+        /// 第一版把两者相减，于是 30 条清单期望出 27 个字段，1a 被自己的断言挡死。
         /// 理由和后续路线见 <c>QualityFieldAnalyzer.GpuUploaded</c>。
+        ///
+        /// 断言本身保留：它拦的是「游戏更新把某个字段改名了」，那时清单长度不变而
+        /// 实际建出来的会少一个——那才是真问题。
         /// </summary>
-        internal const int ExpectedFields = 29;
+        internal static int ExpectedFields => QualityFieldAnalyzer.DeclaredPayloadCount
+                                              + QualityFieldAnalyzer.ExtraFieldCount;
 
         internal static Report Apply(ModuleDefinition module)
         {
@@ -125,6 +137,48 @@ namespace ProjectEden.Preloader
                 }
 
                 r.Added.Add($"{owner.FullName}::{src.Name} → {twinName} ({twinType.Name})");
+            }
+
+            // ── 品质独有的新槽位：没有对应的 inc，所以名字和类型都由清单直接给 ──
+            foreach (string spec in QualityFieldAnalyzer.ExtraFields)
+            {
+                string[] half = spec.Split(new[] { "::" }, StringSplitOptions.None);
+
+                if (half.Length != 2) { r.Blockers.Add($"新槽位写法不对：{spec}"); continue; }
+
+                int colon = half[1].LastIndexOf(':');
+
+                if (colon <= 0) { r.Blockers.Add($"新槽位缺类型：{spec}"); continue; }
+
+                string fieldName = half[1].Substring(0, colon);
+                string kind = half[1].Substring(colon + 1);
+
+                TypeDefinition owner = module.GetType(half[0]);
+
+                if (owner == null) { r.Blockers.Add($"新槽位找不到类型 {half[0]}（{spec}）"); continue; }
+
+                // 目前只用得到 Int32 和 Int32[]，不搞通用解析——**认不出就报错，不猜**
+                TypeReference ft = kind == "Int32" ? int32
+                    : kind == "Int32[]" ? new ArrayType(int32)
+                    : null;
+
+                if (ft == null) { r.Blockers.Add($"新槽位的类型 {kind} 不认识（{spec}）"); continue; }
+
+                FieldDefinition exist0 = owner.Fields.FirstOrDefault(f => f.Name == fieldName);
+
+                if (exist0 != null)
+                {
+                    r.AlreadyThere++;
+
+                    if (exist0.FieldType.FullName != ft.FullName)
+                        r.Blockers.Add($"{half[0]}::{fieldName} 已存在但类型是 {exist0.FieldType.FullName}");
+
+                    continue;
+                }
+
+                if (mutate) owner.Fields.Add(new FieldDefinition(fieldName, FieldAttributes.Public, ft));
+
+                r.Added.Add($"{half[0]}::（新槽位）{fieldName} ({ft.Name})");
             }
 
             if (r.Blockers.Count > 0) return r;
@@ -214,6 +268,31 @@ namespace ProjectEden.Preloader
                 r.Added.Add($"{src.DeclaringType.FullName}::{twinName}");
             }
 
+            // **新槽位也要核。** 漏了这一段，核到的数会比 ExpectedFields 少，
+            // 于是 1a 明明干完了、Verify 却报「没就位」，1c 整个不动——
+            // 而报错的措辞会把人引向清单，实际是核验少数了一族。
+            foreach (string spec in QualityFieldAnalyzer.ExtraFields)
+            {
+                string[] half = spec.Split(new[] { "::" }, StringSplitOptions.None);
+
+                if (half.Length != 2) { r.Blockers.Add($"新槽位写法不对：{spec}"); continue; }
+
+                int colon = half[1].LastIndexOf(':');
+                string fieldName = colon > 0 ? half[1].Substring(0, colon) : half[1];
+
+                TypeDefinition owner = module.GetType(half[0]);
+                FieldDefinition got = owner?.Fields.FirstOrDefault(f => f.Name == fieldName && !f.IsStatic);
+
+                if (got == null)
+                {
+                    r.Blockers.Add($"{half[0]}::{fieldName} 写盘之后不见了（新槽位）");
+
+                    continue;
+                }
+
+                r.Added.Add($"{half[0]}::{fieldName}");
+            }
+
             if (r.Added.Count != ExpectedFields)
                 r.Blockers.Add($"写盘后核到 {r.Added.Count} 个孪生字段，期望 {ExpectedFields}");
 
@@ -240,6 +319,32 @@ namespace ProjectEden.Preloader
         /// </summary>
         internal static string TwinName(string name)
         {
+            // **自动属性的后备字段：剥壳再套回去。**
+            //
+            // <c>Player.inhandItemInc</c>（鼠标手上那一格）在 IL 里叫
+            // <c>&lt;inhandItemInc&gt;k__BackingField</c>——下面四条规则一条都不匹配：
+            // 它不以 inc 开头、不以 Inc 结尾、后缀也不是数字。
+            //
+            // 代价是玩家报上来的那个：<b>凡是经过鼠标手的货都掉品质</b>。
+            // 50 个 50 分的铜拖到 50 个 0 分的铜上，合并后是 0 而不是 25；
+            // 再拖别的堆，那些堆也一样变 0。
+            //
+            // 这是<b>第四次</b>被名字启发式漏掉（前三次：`_stack`、`itemInc`、
+            // `cacheCargoInc1`）——**按名字挑，就会按名字漏**。
+            if (name.Length > 2 && name[0] == '<')
+            {
+                int close = name.IndexOf('>');
+
+                if (close > 1)
+                {
+                    string inner = TwinName(name.Substring(1, close - 1));
+
+                    if (inner != null) return "<" + inner + ">" + name.Substring(close + 1);
+                }
+
+                return null;
+            }
+
             if (name == "inc") return "qua";
             if (name == "_inc") return "_qua";
 

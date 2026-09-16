@@ -1,4 +1,4 @@
-using System.Threading;
+﻿using System.Threading;
 
 namespace ProjectEden.Patches
 {
@@ -28,6 +28,7 @@ namespace ProjectEden.Patches
         /// 随着搬运扩散出去，再想收回来就得追着整条主干道跑。
         /// </summary>
         internal const int MaxPerItem = 100;
+
 
         /// <summary>
         /// 产物进槽位之后调一次。<paramref name="units"/> 是这一次实际放进去的件数。

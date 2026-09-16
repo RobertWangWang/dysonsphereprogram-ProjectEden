@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 using HarmonyLib;
@@ -56,57 +56,94 @@ namespace ProjectEden.Patches
         {
             if (itemId <= 0) return;
 
-            int perItem = FromHoveredStorage(itemId);
+            int perItem = FromHoveredStorage(itemId, out int total);
 
-            // **0 分不画。** 没提纯过的货本来就是 0 分，给每一格都加一行
-            // 「品质 普通（0）」只是噪声——0 分和「查不到」在显示上应当一样。
-            if (perItem <= 0) return;
+            // **这里原先是 `if (perItem <= 0) return;`**，理由写的是「0 分和查不到
+            // 在显示上应当一样」。那条理由把两件不同的事混在了一起，玩家也正是这么报的
+            // （「没有提纯的正常材料 10 分，这个也没有显示」）：
+            //
+            // <list type="bullet">
+            // <item><b>查不到</b>（鼠标不在储物格上、格子空着）——不该画，现在仍然不画：
+            // <see cref="FromHoveredStorage"/> 那几条路是先 return 掉的，走不到这里；</item>
+            // <item><b>查到了，是 0 分</b>——这是「没提纯过的普通货」，它有分数，
+            // 就是底线分。该画。</item>
+            // </list>
+            //
+            // <b>普通材料就是 0 分，不顶底线。</b>（所有者定的）曾经试过「读取时顶到 10」，
+            // 而那会<b>把求和弄成假的</b>：品质存的是一格货的总分，普通货存 0 却显示 10，
+            // 一旦和提纯货混进同一格，总分里那 10 分压根不存在——100×0 + 100×50 摊下来是 25，
+            // 而按“每件都有分”的直觉应该是 30。读取时顶的底线和求和模型是互斥的。
+            if (perItem == NotFound) return;
 
             props = (props ?? "") + "品质".Translate() + "\n";
-            values = (values ?? "") + Describe(perItem) + "\n";
+            values = (values ?? "") + Describe(perItem, total) + "\n";
 
             rows++;
         }
 
         /// <summary>
-        /// 「顶尖（82）」。三档只是<b>显示分层</b>，内部一直是连续分数——
+        /// 「顶尖（82）　总 4100」。三档只是<b>显示分层</b>，内部一直是连续分数——
         /// 效果层将来按分数线性插值，不按档跳。
+        ///
+        /// <b>两个数各有各的用处，所以两个都写。</b> 括号里是<b>每件</b>分，它是
+        /// 可比较的那个量——「这堆料比那堆好吗」只有它答得了，总分随件数变，答不了。
+        /// 后面那个是<b>整格总分</b>，也就是真正存在字段里的数：品质是可加量，
+        /// 合并就是两堆总分相加，对账要用它。所有者点名要这一个。
+        ///
+        /// <b>总分按原样打印，不跟着每件分一起夹。</b> 夹的是显示上的每件分
+        /// （见 <see cref="FromHoveredStorage"/>），而总分是字段里的实数——
+        /// 两者在上限巡检的两次之间可能对不上，那时候**让它对不上正好是有用的信息**：
+        /// 「顶尖（100）　总 11140」一眼就能看出这一格越界了，等着被压回去。
+        /// 拿夹过的每件分乘件数倒推总分会把这个信号抹掉。
         /// </summary>
-        private static string Describe(int perItem)
+        private static string Describe(int perItem, int total)
         {
             string band = perItem >= TopFrom ? "顶尖".Translate()
                 : perItem >= GoodFrom ? "优秀".Translate()
                 : "普通".Translate();
 
-            return string.Format("{0}（{1}）".Translate(), band, perItem);
+            return string.Format("{0}（{1}）　总 {2}".Translate(), band, perItem, total);
         }
+
+        /// <summary>查不到。<b>与「查到了，是 0 分」严格区分</b>——
+        /// 前者不该画行，后者该画（普通货有底线分）。
+        /// 两者当初都返回 0，于是「0 分不画」连带把普通货也吞了。</summary>
+        private const int NotFound = -1;
 
         /// <summary>
         /// 鼠标底下那一格储物格的单件品质。不在储物格上、格子空着、
-        /// 或者那一格装的不是提示栏正在说的东西，都返回 0。
+        /// 或者那一格装的不是提示栏正在说的东西，都返回 <see cref="NotFound"/>。
+        /// 真的查到了就返回分数，<b>包括 0</b>。
+        ///
+        /// <paramref name="total"/> 是<b>整格总分的原始值</b>——查不到时为 0，
+        /// 查到了就照字段原样给出，不夹上限（理由见 <see cref="Describe"/>）。
         /// </summary>
-        private static int FromHoveredStorage(int itemId)
+        private static int FromHoveredStorage(int itemId, out int total)
         {
-            if (!QualityAccess.GridReady) return 0;
+            total = 0;
+
+            if (!QualityAccess.GridReady) return NotFound;
 
             UIStorageGrid ui = VFInput.mouseInStorage;
 
-            if (ui == null || ui.storage?.grids == null) return 0;
-            if (ui.mouseOnX < 0 || ui.mouseOnY < 0 || ui.colCount <= 0) return 0;
+            if (ui == null || ui.storage?.grids == null) return NotFound;
+            if (ui.mouseOnX < 0 || ui.mouseOnY < 0 || ui.colCount <= 0) return NotFound;
 
             int index = ui.mouseOnY * ui.colCount + ui.mouseOnX;
 
-            if (index < 0 || index >= ui.storage.grids.Length) return 0;
+            if (index < 0 || index >= ui.storage.grids.Length) return NotFound;
 
             // **同一样东西才算数。** 别的窗口（物品选取、配方面板）也会弹提示栏，
             // 而那时鼠标可能正好压在背包上——没有这一句，它们会挂上背包那一格的品质。
-            if (ui.storage.grids[index].itemId != itemId) return 0;
+            if (ui.storage.grids[index].itemId != itemId) return NotFound;
 
             int count = ui.storage.grids[index].count;
 
-            if (count <= 0) return 0;
+            if (count <= 0) return NotFound;
 
-            int per = QualityAccess.GetGridQua(ref ui.storage.grids[index]) / count;
+            total = QualityAccess.GetGridQua(ref ui.storage.grids[index]);
+
+            int per = total / count;
 
             // **显示也压在上限之内。**
             //

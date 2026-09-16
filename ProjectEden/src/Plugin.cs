@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using BepInEx;
@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.8.3";
+        public const string VERSION = "1.9.0";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -122,6 +122,16 @@ namespace ProjectEden
 
             // 要等转译器跑完才数得出改写了几处
             Patches.RecipeTypeCompatPatches.Report();
+            // 读的是 Harmony 自己的补丁表，所以必须在 PatchAll 之后
+            Patches.QualityCraftPatches.Report();
+            Patches.QualityRepairPatches.Report();
+            Patches.QualityCraftFlowPatches.Report();
+            Patches.QualityCraftOut.Report();
+            Patches.QualityFeedPatches.Report();
+            Patches.QualityHandUsePatches.Report();
+            Patches.QualityBuildPatches.Report();
+            Patches.QualityBuildRefundPatches.Report();
+            Patches.QualitySaveCensusPatches.Report();
 
             LDBTool.PreAddDataAction += MegaBuildingRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MegaBuildingRegistry.OnPostAddData;
