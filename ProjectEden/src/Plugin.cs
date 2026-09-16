@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.9.1";
+        public const string VERSION = "1.9.3";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -134,6 +134,13 @@ namespace ProjectEden
             Patches.QualitySaveCensusPatches.Report();
 
             LDBTool.PreAddDataAction += MegaBuildingRegistry.OnPreAddData;
+            // **燃料白名单的撑长不在这条链上，而在使用点，这是量出来的结论。**
+            // 曾经在这里排过一次（链首），实测无效：那一刻两座裂变电厂的 prefabDesc
+            // 还没连上，扫出来的最大掩码是 32，于是照旧按 64 格放过。
+            // 连接发生在 MegaBuildingRegistry.ProtoPreload() 里的 ItemProto.Preload，
+            // 而 InitProductionMask（拿 fuelMask 当下标的那个）就是同一个方法紧接着调的
+            // ——**「prefabDesc 都连好了」和「开始查表」之间没有任何时刻可以插进去。**
+            // 所以 FuelNeedsCapacityPatches 那个使用点前置不是保险，是唯一正确的位置。
             LDBTool.PostAddDataAction += MegaBuildingRegistry.OnPostAddData;
 
             // 自定义矿脉排在巨型建筑之后：那边的 PostAddData 会重跑 ProtoPreload，
@@ -148,6 +155,12 @@ namespace ProjectEden
             // 新生产设备同理：图标也是改色出来的，得排在 ProtoPreload 之后
             LDBTool.PreAddDataAction += MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MachineRegistry.OnPostAddData;
+
+            // 巨型建筑的能量枢纽段：**必须排在 MachineRegistry 之后**。
+            // 它要的空/满蓄电器物品号是那边注册的，而巨型建筑本身注册在机器之前——
+            // 早一步写进去的是 0，后果是「枢纽建好了、皮带接上了、一个柜子也不收」，
+            // 而且一声不吭
+            LDBTool.PostAddDataAction += MegaBuildingRegistry.ApplyExchangers;
 
             // 小型速采机的表要在 MachineRegistry 之后建：它读的是那一遍解析出来的 ItemId
             LDBTool.PostAddDataAction += Patches.MiniMinerPatches.OnPostAddData;
@@ -201,6 +214,11 @@ namespace ProjectEden
             // 炮塔弹药白名单是同一族的另一张预加载期静态表，LDBTool 同样没有替我们重跑
             LDBTool.PostAddDataAction += RefreshTurretNeeds;
 
+            // 燃料白名单的**核对**：撑长和重建已经在链首做过了（见那里的注释），
+            // 这里再跑一遍是为了核对末态——那时候所有注册器都已经把物品塞进 LDB。
+            // 理由同 RefreshFluidList：验的是结果，不是自己那一步
+            LDBTool.PostAddDataAction += RefreshFuelNeeds;
+
             // 增产剂普查：纯诊断，不改任何东西。Ability / HpMax / incItemId 都在
             // resources.assets 里，离线读不到；等级上限还要按集装层数现算
             LDBTool.PostAddDataAction += ProliferatorSurvey.OnPostAddData;
@@ -233,6 +251,16 @@ namespace ProjectEden
             // 只挪了它一个：另外两个普查读的是 proto 字段和 prefab，
             // 后面没有任何一步会改，跟着一起挪就成了照搬。
             LDBTool.PostAddDataAction += FuelSurvey.OnPostAddData;
+
+            // 模型号余量：一种会悄悄用完的资源，用完的症状是「建筑没有模型」而不是报错
+            LDBTool.PostAddDataAction += ProtoSlots.ReportModelBudget;
+
+            // 星体矿脉的状态行**必须排在这里，不能跟着 PatchAll 走**。
+            // 它要同时报两件事：转译改写了几份（PatchAll 时就定了）、配了几种矿
+            // （PreAddDataAction 才填）。第一版放在 Awake 里，于是每局都打
+            // 「一条都没配置」——**在它要测量的东西存在之前就测量了**，
+            // 真事实、假结论，而且把那条「5 份是否全部命中」的断言一起吞掉了
+            LDBTool.PostAddDataAction += Patches.StarVeinPatches.Report;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，
@@ -444,6 +472,195 @@ namespace ProjectEden
         /// <c>InitTurretNeeds</c> 自己是从 <c>dataArray</c> 整表重建的，幂等、不丢原版弹药，
         /// 而且 <c>turretNeeds</c> 是 <c>new int[16][]</c>、弹药类型最大才 6，不需要扩容。
         /// </summary>
+        /// <summary>
+        /// 把 <c>ItemProto.fuelNeeds</c> 撑到够用的长度，再让原版自己重建它。
+        ///
+        /// <b>这解锁了 bit 6 以上的燃料位。</b> 本文件长期记着「合法位只有 bit 0~5」，
+        /// 而那个上限的**唯一**来源是 <c>ItemProto..cctor</c> IL 0017 的
+        /// <c>ldc.i4.s 64 ; newarr</c> —— 一个写死的初始长度，不是任何类型宽度。
+        /// 读 IL 量出来的三件事：
+        ///
+        /// <list type="number">
+        /// <item><c>InitFuelNeeds</c> 的外层循环边界是 <c>fuelNeeds.Length</c>
+        /// （IL 005F–0066 的 <c>ldsfld ; ldlen ; blt</c>），**动态读的**。所以数组变长，
+        /// 它就多填几格，填法还是 <c>mask &amp; proto.FuelType</c>，语义不变。</item>
+        /// <item>全部 8 个读者无一例外是 <c>fuelNeeds[fuelMask] ; ldelem.ref</c>，
+        /// 没有一处做边界算术、没有一处遍历整张表。</item>
+        /// <item>整个程序集里，燃料掩码附近**没有任何** 63/64 的比较——不存在上限判定。
+        /// （<c>InitProductionMask</c> IL 029A 那个 64 是 <c>consumptionMask</c> 的位，
+        /// 和燃料位无关，是「同一个常数两种含义」的典型，别被它骗了。）</item>
+        /// </list>
+        ///
+        /// <b>真正的上限是 <c>PowerGeneratorComponent.fuelMask</c> 的宽度：Int16</b>
+        /// （<c>PrefabDesc.fuelMask</c> 是 Int32，抄过去会收窄）。所以可用到 bit 14，
+        /// 再往上碰符号位。
+        ///
+        /// 做法照抄 <see cref="RefreshFluidList"/>：<c>InitFuelNeeds</c> 整表重建、幂等，
+        /// 所以换一个更长的数组再跑一次就行，没有转译器。
+        /// </summary>
+        private static void RefreshFuelNeeds()
+        {
+            // **这一层 try 不是装饰。** 实测：本方法第一版在这里静默失败，
+            // 于是 PostAddDataAction 里排在它后面的**每一个**处理器都没跑
+            // ——增产剂普查、宇宙矩阵、vanillaEdits、燃料阶梯、英文核对、能量审计，
+            // 全部消失，而 BepInEx 日志和 Player.log 里一条异常都没有。
+            // 症状是「日志莫名短了一截」，指不到任何地方。
+            // 和「PatchAll 抛异常 = Awake 后面全死」是同一族，只是更隐蔽：那边至少有栈。
+            try
+            {
+                // 起止各一行：**抛异常**（起行有、止行无、错误行有）、**卡住**（起行有、别的都没有）、
+                // **这段代码没进 DLL**（起行都没有）——三种在日志里必须分得开。
+                // 上一局三者长得一模一样，白费了一次启动
+                Log.LogInfo("燃料白名单：开始重建");
+                RefreshFuelNeedsCore();
+                Log.LogInfo("燃料白名单：重建完成");
+            }
+            catch (Exception e)
+            {
+                Log.LogError(
+                    $"燃料白名单重建失败：{e}。**本条已被隔离**，后面的注册步骤照常跑——"
+                    + "但本 mod 的燃料可能喂不进对应的发电厂");
+            }
+        }
+
+        /// <summary>
+        /// 把 <c>fuelNeeds</c> 撑到装得下最宽的那座电厂的掩码，并让原版重新填满它。
+        ///
+        /// <b>它必须能在任意时刻被调用，因为它的使用点比它早。</b> 实测崩溃：
+        /// <c>ItemProto.InitProductionMask</c> IL 0265–0271 是
+        /// <c>fuelNeeds[desc.fuelMask] ; ldelem.ref</c> —— 拿掩码当下标。
+        /// 而它由 <c>MegaBuildingRegistry.OnPostAddData</c> 调用，那一条**排在整条
+        /// PostAddDataAction 的第一个**，比这里原本的注册位置早得多。
+        /// 新电厂的掩码是 64 / 128，数组却还是 64 格，于是
+        /// <c>IndexOutOfRangeException</c>，而报错里只出现 LDBTool 和本 mod 的名字。
+        ///
+        /// 这正是本仓库为矿种数组写过的那条：**排在使用点之前的准备步骤可以被跳过、
+        /// 重排或抢先，使用点不会。** 所以这段既在链首跑一次，也由
+        /// <c>FuelNeedsCapacityPatches</c> 在使用点再兜一次。
+        ///
+        /// <b>长度不够和格子是 null 都会炸，所以撑长之后必须立刻填。</b>
+        /// <c>InitProductionMask</c> 拿到 null 之后下一步就是 <c>ldlen</c>。
+        /// </summary>
+        internal static bool EnsureFuelNeedsCapacity()
+        {
+            const int VanillaLength = 64;
+            const int MaskCeiling = short.MaxValue; // PowerGeneratorComponent.fuelMask 是 Int16
+
+            ItemProto[] items = LDB.items?.dataArray;
+
+            if (items == null) return false;
+
+            // 需要多长，由**发电机的掩码**决定——读者拿它当下标
+            var maxMask = 0;
+            var widest = "";
+
+            foreach (ItemProto item in items)
+            {
+                PrefabDesc desc = item?.prefabDesc;
+
+                if (desc == null || !desc.isPowerGen || desc.fuelMask <= maxMask) continue;
+
+                maxMask = desc.fuelMask;
+                widest = $"{item.Name}({item.ID})";
+            }
+
+            if (maxMask > MaskCeiling)
+            {
+                Log.LogError(
+                    $"燃料位：{widest} 的 fuelMask = {maxMask} 超过 Int16 上限 {MaskCeiling}。"
+                    + "PowerGeneratorComponent.fuelMask 是 Int16，抄过去会收窄成别的值，"
+                    + "那座电厂会去查一张错的白名单。把它降到 bit 14 以内");
+
+                return false;
+            }
+
+            int want = maxMask + 1;
+
+            if (want < VanillaLength) want = VanillaLength;
+
+            int[][] needs = ItemProto.fuelNeeds;
+            int had = needs?.Length ?? 0;
+
+            if (had >= want) return false;
+
+            // 整表重建，所以不用搬旧内容——但**必须立刻重建**，空着的格子是 null
+            ItemProto.fuelNeeds = new int[want][];
+            ItemProto.InitFuelNeeds();
+
+            Log.LogInfo(
+                $"燃料位：把燃料白名单从 {had} 格撑到 {want} 格（最宽的电厂是 {widest}，掩码 {maxMask}）。"
+                + "原版那个 64 只是 ItemProto..cctor 里写死的初始长度，"
+                + "InitFuelNeeds 的循环边界读的是数组自身长度");
+
+            return true;
+        }
+
+        private static void RefreshFuelNeedsCore()
+        {
+            ItemProto[] items = LDB.items?.dataArray;
+
+            // 报无聊的那一面：静默返回和「这段代码没进 DLL」在日志里长得一模一样
+            if (items == null)
+            {
+                Log.LogWarning("燃料白名单：LDB.items 还没建好，跳过");
+
+                return;
+            }
+
+            // 撑长（需要的话）并重建。撑长那一步可能早在使用点的兜底里就做过了，
+            // 这里再跑一次 InitFuelNeeds 是为了把本 mod 的物品也填进去——
+            // 兜底那次可能发生在 LDB 还没齐的时候
+            EnsureFuelNeedsCapacity();
+            ItemProto.InitFuelNeeds();
+
+            int[][] needs = ItemProto.fuelNeeds;
+
+            if (needs == null)
+            {
+                Log.LogWarning("燃料白名单为空，本 mod 的燃料可能进不了发电厂");
+
+                return;
+            }
+
+            // **核对末态，不核对自己那一步**：凡是某座电厂的掩码认得的燃料，
+            // 都必须真的出现在那座电厂查的那张表里。只数「我加了几个」的话，
+            // 别人先把同一件事做掉时会报假警——流体白名单那条已经栽过一次
+            var broken = new List<string>();
+            var reachable = 0;
+
+            foreach (ItemProto item in items)
+            {
+                if (item == null || item.FuelType == 0) continue;
+
+                foreach (ItemProto plant in items)
+                {
+                    PrefabDesc desc = plant?.prefabDesc;
+
+                    if (desc == null || !desc.isPowerGen || desc.fuelMask == 0) continue;
+                    if ((desc.fuelMask & item.FuelType) == 0) continue;
+
+                    int[] list = desc.fuelMask < needs.Length ? needs[desc.fuelMask] : null;
+
+                    if (list != null && Array.IndexOf(list, item.ID) >= 0)
+                    {
+                        reachable++;
+
+                        continue;
+                    }
+
+                    broken.Add($"{item.Name}({item.ID}) 进不了 {plant.Name}(掩码 {desc.fuelMask})");
+                }
+            }
+
+            if (broken.Count > 0)
+                Log.LogError(
+                    $"燃料白名单核对失败 {broken.Count} 项：{string.Join("、", broken.ToArray())}。"
+                    + "这些燃料喂不进对应的发电厂，而且不会报错——只会一直烧不起来");
+            else
+                Log.LogInfo(
+                    $"燃料白名单核对通过：{needs.Length} 格，{reachable} 组（燃料 × 电厂）配对可达");
+        }
+
         private static void RefreshTurretNeeds()
         {
             ItemProto.InitTurretNeeds();

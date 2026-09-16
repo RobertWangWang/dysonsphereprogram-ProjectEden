@@ -599,6 +599,88 @@ namespace ProjectEden.Model
         ///
         /// 三台槽的高度是错开的。等高会读成一段栏杆——和燃烧筒那排压机同一个教训。
         /// </summary>
+        /// <summary>
+        /// 奇点储能厂：**三条弧形扶壁向内斜撑，在半空把一根电浆柱箍住；底层一排弹匣架**。
+        ///
+        /// <b>母题是「捏住」，不是「托住」。</b> 已有的十一座里已经有细塔（同位提纯厂）、
+        /// 精馏柱群（燔石化工厂）、对撞环（观微对撞机）和矮方块，所以这一座必须靠
+        /// <b>向内倾斜</b>这件事本身立住——扶壁如果是竖直的，它就退化成又一座塔。
+        ///
+        /// 三道发光箍越往上越紧，画的是磁约束的收缩点；而底层那排横置弹匣架是**唯一**
+        /// 说明它在装卸货而不是在反应的元素——没有它，这座建筑看着像个反应堆。
+        ///
+        /// 发光只出现在箍和柱心，外壳一律冷灰：这座建筑的颜色标识交给 tint
+        /// （图标也从同一个 tint 算，所以两边天生同步）。
+        /// </summary>
+        private static void SingularityVault(MeshKit k)
+        {
+            // ── 底座：一层宽台，一层收窄 ──
+            k.AddBox(new Vector3(0f, 0.10f * U, 0f), new Vector3(2.5f * U, 0.20f * U, 2.5f * U),
+                     S.Concrete, S.Grating);
+            k.AddBox(new Vector3(0f, 0.28f * U, 0f), new Vector3(1.9f * U, 0.16f * U, 1.9f * U),
+                     S.PlateDark, S.PlateLight);
+
+            const float deck = 0.36f * U;
+            const float colH = 1.70f * U;
+            const float colR = 0.17f * U;
+
+            // ── 中央电浆柱：石英外管 + 里面更细的芯 ──
+            k.AddCylinder(new Vector3(0f, deck, 0f), colR, colH, 16, S.Pipe);
+            k.AddCylinder(new Vector3(0f, deck + 0.04f * U, 0f), colR * 0.52f, colH * 0.93f, 12, S.Glow);
+
+            // 三道磁箍：**越往上越紧**，收缩点画在这里。等距会读成装饰，递减才读得出「在捏」
+            for (var i = 0; i < 3; i++)
+            {
+                float t = 0.30f + 0.26f * i;
+                float squeeze = 1.95f - 0.45f * i;
+
+                k.AddTorus(new Vector3(0f, deck + colH * t, 0f),
+                           colR * squeeze, 0.055f * U, 16, 8, S.Glow);
+                k.AddCylinder(new Vector3(0f, deck + colH * t - 0.05f * U, 0f),
+                              colR * (squeeze + 0.25f), 0.10f * U, 16, S.Accent, S.PlateDark);
+            }
+
+            // 柱顶封头
+            k.AddCylinder(new Vector3(0f, deck + colH, 0f), colR * 1.5f, 0.14f * U, 16,
+                          S.PlateRivet, S.PlateLight);
+
+            // ── 三条扶壁：从底座外缘斜撑到柱顶附近，**向内倾** ──
+            // 用一串逐渐内移、逐渐抬高的短箱拼出弧线；直接一根斜柱会读成脚手架
+            for (var leg = 0; leg < 3; leg++)
+            {
+                double a = System.Math.PI * 2.0 * leg / 3.0 + 0.5;
+                float cx = (float)System.Math.Cos(a);
+                float cz = (float)System.Math.Sin(a);
+
+                for (var s = 0; s < 5; s++)
+                {
+                    float t = s / 4f;
+                    // 半径按二次曲线收进来：底下张得开、越往上越贴柱子
+                    float r = (0.95f - 0.62f * t * t) * U;
+                    float y = deck + colH * (0.06f + 0.86f * t);
+                    float thick = (0.20f - 0.05f * t) * U;
+
+                    k.AddBox(new Vector3(cx * r, y, cz * r),
+                             new Vector3(thick, 0.34f * U, thick),
+                             s == 4 ? S.Accent : S.PlateLight, S.PlateDark);
+                }
+            }
+
+            // ── 底层弹匣架：横置的柜位，**这是唯一说明它在装卸货的元素** ──
+            for (var side = 0; side < 2; side++)
+            {
+                float z = side == 0 ? 0.80f * U : -0.80f * U;
+
+                k.AddBox(new Vector3(0f, deck + 0.20f * U, z),
+                         new Vector3(1.5f * U, 0.40f * U, 0.28f * U), S.PlateDark, S.PlateRivet);
+
+                // 三个柜位：留缝，才看得出是一格一格的
+                for (var slot = 0; slot < 3; slot++)
+                    k.AddBox(new Vector3((-0.46f + 0.46f * slot) * U, deck + 0.20f * U, z),
+                             new Vector3(0.34f * U, 0.26f * U, 0.34f * U), S.Glow, S.PlateDark);
+            }
+        }
+
         private static void RefineryPlant(MeshKit k)
         {
             // ── 底座：两层，上层收窄留出台阶 ──
@@ -683,6 +765,7 @@ namespace ProjectEden.Model
                 case 6508: OmniChemPlant(kit); break;
                 case 6509: RedoxBurner(kit); break;
                 case 6659: RefineryPlant(kit); break;
+                case 6676: SingularityVault(kit); break;
                 default: return false;
             }
 

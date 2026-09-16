@@ -89,6 +89,18 @@ namespace ProjectEden.Patches
                          nameof(EntityData.stationId),
                          nameof(EntityData.powerGenId),
                          nameof(EntityData.powerNodeId),
+                         // **第四条，又是被一次崩溃逼出来的。** 奇点储能厂多带一个
+                         // PowerExchangerComponent，而 powerExcId 的判断（IL 0196）排在
+                         // assemblerId（00A7）之后，于是它赢了，打开 UIPowerExchangerWindow，
+                         // 当场 NullReferenceException（_OnOpen IL 0111）。
+                         //
+                         // 上一条笔记的原话是「教训不是『再加一个 id』，是这一族必须一次
+                         // 枚举干净并计数」——而这次仍然是加完组件才被崩溃教会的。
+                         // 这次真的数了：OnPlayerInspecteeChange 共 23 个组件判断，
+                         // 巨型建筑现在命中六个——assemblerId、stationId、powerConId、
+                         // powerGenId、powerNodeId、powerExcId；powerConId 不开窗口，
+                         // 其余四个必须全压掉，只留制造台窗口。
+                         nameof(EntityData.powerExcId),
                      })
             {
                 var matcher = new CodeMatcher(code);
@@ -125,15 +137,16 @@ namespace ProjectEden.Patches
                 done++;
             }
 
-            if (done == 3)
+            if (done == 4)
                 ProjectEdenPlugin.Log.LogInfo(
                     "UIGame.OnPlayerInspecteeChange：已接管巨型建筑的窗口选择"
-                    + "（stationId / powerGenId / powerNodeId 三处）；"
+                    + "（stationId / powerGenId / powerNodeId / powerExcId 四处）；"
                     + "物流站窗口改由 MegaBothWindowsPatches 自己开，不走原版的记账");
             else
                 ProjectEdenPlugin.Log.LogError(
-                    $"UIGame.OnPlayerInspecteeChange：只改写了 {done} 处，应为 3 处"
-                    + "——巨型建筑点开后会是别的窗口而不是制造台窗口，选不了配方");
+                    $"UIGame.OnPlayerInspecteeChange：只改写了 {done} 处，应为 4 处"
+                    + "——巨型建筑点开后会是别的窗口而不是制造台窗口，选不了配方；"
+                    + "少改 powerExcId 那一处还会在点开奇点储能厂时直接抛 NullReferenceException");
 
             return code;
         }

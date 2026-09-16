@@ -4064,6 +4064,128 @@ gets its own line (**once per kind**), so "which ones does this mod actually tri
 > upload login. The game does that for any clean save anyway — this only restores clean-save behaviour.
 
 
+## XXXIII. Fission: one vein, two ways of turning nuclear energy into electricity
+
+Vanilla has no uranium. This line runs from a vein to two power stations, and **what separates the two
+stations is not how much power they make — it is whether the heat has to pass through water.**
+
+### A strictly conserving chain of heat values
+
+```
+Uranium Ore 5 MJ ──×6──> Enriched Uranium 30 MJ ──×5──> Uranium Fuel Rod 150 MJ
+                                              └──×3──> Thin-Film Fission Fuel 75 MJ
+```
+
+**The enrichment ratio of 6 is not a pick**: natural uranium is 0.7% U-235, enriched to about 4.2% — exactly
+six times. Every step of the chain conserves, so the three new recipes need **no audit exemption at all**.
+Nuclear energy comes from mass defect rather than chemical bonds, but as long as the upstream item carries
+that energy itself, this mod's coal-anchored energy audit passes it without special-casing.
+
+Mining is not a recipe and is not audited, so the chain starts at the ore — the same way coal comes out of
+the ground already carrying 2.7 MJ.
+
+**The rod's 150 MJ is derived too**: U-235 fission has 0.234× the specific energy of D-³He, and anchored on
+the deuteron rod's measured 600 MJ that lands exactly on 150. **Fission sits below fusion**, which is where
+it belongs.
+
+### Two stations: η is a capture fraction, not an "efficiency bonus"
+
+| | Fission Power Station | Fragment Direct Converter |
+|---|---|---|
+| Fuel | Uranium Fuel Rod, 150 MJ | Thin-Film Fission Fuel, 75 MJ |
+| Power | **21.6 MW** | **12.96 MW** |
+| Energy efficiency | **0.35** | **0.60** |
+| Turbine? | yes | **none** |
+
+**0.35 is not a penalty — it is the real thermal efficiency of a pressurised water reactor.** Core outlet
+temperature is capped near 330 °C by cladding materials, and the Carnot ceiling sits right there. Vanilla's
+0.8 for the thermal plant and 1.0 for the fusion plant are vanilla's own generous numbers and this mod
+leaves them alone; the new tier gets the real value precisely so that the 0.60 below means something.
+
+**0.60 = 0.80 × 0.75, and both terms have a source**: charged fragments carry 80% of fission energy (the rest
+goes to neutrons and prompt gammas, which cannot be collected), and an electrostatic collector runs about
+75%. The fragments are already fast charged ions, so as long as the fuel layer is thin enough for them to
+escape, they can be collected as current directly — which is why this building has **not one moving part**.
+
+**The cost sits on the fuel side, not the station side.** A film holds half what a rod does, because the fuel
+must be spread a few micrometres thin; any thicker and the fragments never escape, leaving only heat. So the
+two are a real choice: **burn water for throughput, convert directly to save uranium.**
+
+The two fuels are **deliberately not interchangeable, and physics decides that**: one needs thick pellets to
+sustain a chain reaction, the other needs to be thin enough for fragments to fly out.
+
+### Unlocked along the way: there are more than six fuel bits
+
+Vanilla's fuel bits were long believed to stop at bit 5 (masks 1/2/4/8/16/32), and this mod had already
+filled every one. The fission line needed two more, so it was measured:
+
+**The only source of that ceiling is a hardcoded `new int[64][]` in `ItemProto..cctor`.** `InitFuelNeeds`
+reads its loop bound from the array's own length, all eight readers are a plain `fuelNeeds[fuelMask]` lookup,
+and nowhere in the assembly is there a 63/64 comparison anywhere near a fuel mask. So growing the array and
+letting vanilla rebuild it is the whole unlock — no preloader, no transpiler.
+
+The real ceiling is the Int16 width of `PowerGeneratorComponent.fuelMask`, i.e. **bit 14** — nine more bits,
+not one.
+
+> Uranium ore and enriched uranium take a bit **no power station holds**. That is not an oversight: a reactor
+> eats fuel assemblies, not powder. Their heat values exist only to keep the chain conserving.
+
+## XXXIV. Black holes and neutron stars: veins placed by star type, and shipping electricity
+
+Vanilla's unipolar magnet only grows beside black holes and neutron stars — and **that fact is not
+written in the planet theme table**. The two minerals in this section travel the same road.
+
+### Why this needed a new mechanism
+
+The startup log prints the whole planet theme table, and across all 25 themes **vein type 14 (unipolar
+magnet) appears in zero rare slots**; meanwhile `PlanetAlgorithm.GenerateVeins` reads `planet.star.type`
+and increments that slot directly. So "a black hole mineral" simply cannot be expressed in the data
+layer — it has to be inserted into the generation path, keyed on star type.
+
+**And doing that comes with one line you may not cross: never consume vanilla's random draws.** Between
+the generator's construction and the rare-vein rolls, the number of draws is **data-dependent**; one
+extra draw in between shifts every later one — and the symptom is not an error, it is **a quietly
+different map of ores**. So these two veins carry their own generator, seeded from the planet's seed.
+
+| Mineral | Where | Chance per system | Use |
+|---|---|---|---|
+| **Accretion Glass** | black holes + neutron stars | 0.5, 2 spots | → ionised glass → the plasma vault's chamber wall |
+| **Horizon Core** | **black holes only** | 0.35, 1 spot | → core stabiliser → the only way into the overload tier |
+
+**The difference in distribution is not a balance knob**: accretion glass is flung from an accretion
+disc, and both black holes and neutron stars have those; a horizon core is dense matter pinned by tidal
+fields near the horizon, and **only a black hole has a horizon**.
+
+Both are **guaranteed on the first planet of a qualifying system** — black holes are rare enough already,
+and pure probability makes "extremely rare" and "absent this whole run" the same thing to a player.
+
+> ⚠️ **This does not work with GalacticScale installed.** It replaces vein generation wholesale, so the
+> five methods this mod rewrites are never called. The startup log says so outright rather than leaving
+> you to guess.
+
+### The Singularity Vault Station: the twelfth mega building
+
+A plasma vault holds **179.8 GJ** (333× a vanilla full accumulator) and an overload vault **359.6 GJ**;
+the Singularity Vault Station is what charges and discharges them: **60 GW, exactly 3 seconds per vault**
+either way — 20 a minute, which one belt can keep up with.
+
+**It does not add generating capacity.** Discharging 60 GW requires that someone charged 60 GW in first
+(round trip 1.00, as vanilla). What it buys is that **shipping power between stars becomes practical** —
+in DSP electricity only crosses planets inside accumulators, and vanilla's 540 MJ apiece is far too
+granular. The charging side needs 60 GW, i.e. **two redox combustion plants**.
+
+The whole line carries **no heat value at all**: energy never passes through a recipe, it is drawn from
+the grid by the exchanger. That is exactly how vanilla's accumulator works, which is why the energy
+audit cannot see it — and should not: what it consumes is real electricity on a real grid.
+
+**One building serves both tiers.** A row appears under the exchanger window: `◀ serving: … ▶`, switching
+which vault this station handles; the choice is **saved by vanilla itself**. It refuses to switch while
+vaults are still inside, and says why — switching would strand them.
+
+> A charged vault is **deliberately not mecha fuel**. Vanilla's full accumulator, at 540 MJ, feeds the
+> mecha reactor; at 333× that is unlimited range. Capacity and "may it fuel the mecha" are two separate
+> axes, and the second one is switched off here.
+
 ## Config Quick Reference
 
 | File | What it controls |

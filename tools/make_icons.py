@@ -2021,6 +2021,53 @@ def _sieve(body, pore_fill, pore_edge, pore_gloss, side_pore, lumps=()):
     return d
 
 
+def singularity_vault():
+    """奇点储能厂：**三条向内倾的扶壁夹住一根发光的电浆柱，底下一排柜位**。
+
+    <b>识别点是「夹」这个动作，不是柱子。</b> 前十一张里已经有细高塔（同位提纯厂）、
+    精馏柱群、对撞环和矮胖罐；一根竖直的柱子在这套图标里毫无辨识度。
+    所以两条扶壁必须画成**明显内倾**并在柱顶交汇——倾角一旦拉直，它立刻退回「又一座塔」。
+
+    柱腰三道亮箍**间距递减**（越往上越密），画的是磁约束的收缩点；等距会读成装饰。
+    底下那排小方格是柜位，也是唯一说明它在**装卸货**而不是在反应的元素——
+    去掉它，这张图看着就是个反应堆。
+
+    主色跟着 megabuildings.json 的 tint 走，所以图标和建成后的颜色天生同步。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6676)
+    glow = "#9fd4ff"
+
+    # 底座
+    _prism(d, 0, 33, 44, 9, dark)
+    _prism(d, 0, 25, 38, 8, p, gloss=0.18)
+
+    # 中央电浆柱：细，而且顶端不封死——上方留给扶壁交汇
+    d.append(dw.Rectangle(-6.5, -38, 13, 58, fill=p[1], stroke=dark[3], stroke_width=1.3))
+    d.append(dw.Rectangle(-3.0, -36, 6, 54, fill=glow, fill_opacity=0.85))
+
+    # 三道磁箍：**间距递减**，越往上越密
+    for y, w in ((8.0, 21.0), (-8.0, 18.0), (-20.0, 15.0)):
+        d.append(dw.Rectangle(-w / 2, y, w, 5.4, fill="#dff0ff",
+                              stroke=dark[3], stroke_width=1.1))
+
+    # 两条扶壁：明显内倾，在柱顶交汇。**倾角是这张图的全部**
+    for sx in (-1, 1):
+        d.append(dw.Lines(sx * 34, 24, sx * 24, 24, sx * 7, -38, sx * 1, -38,
+                          close=True, fill=p[2], stroke=dark[3], stroke_width=1.3))
+
+    # 柱顶封头，压住三者的交汇处
+    d.append(dw.Rectangle(-11, -44, 22, 8, fill=p[0], stroke=dark[3], stroke_width=1.3))
+
+    # 底层柜位：三格，留缝
+    for i in range(3):
+        d.append(dw.Rectangle(-24 + 16 * i, 12, 11, 11, fill=glow,
+                              stroke=dark[3], stroke_width=1.2))
+
+    return d
+
+
 def refinery_plant():
     """同位提纯厂：**一排电解槽 + 一根区域熔炼杆，杆腰上一圈亮环**。
 
@@ -2889,6 +2936,283 @@ def refined_oil_fuel_rod():
     return d
 
 
+def uranium_ore():
+    """铀矿石：沥青铀矿——**黑得发亮的石块，断口带一圈黄绿次生边**。
+
+    <b>识别点是「黑体 + 黄绿边」，不是「绿石头」。</b> 沥青铀矿本身是黑的、有沥青光泽；
+    黄绿是它风化出来的次生铀矿（钙铀云母那一族，也正是铀玻璃的颜色）。
+    画成整块绿的话，它和锂、莫桑石那几张冷色矿石就分不开了。
+
+    这也是本表里唯一一块**自己发光**的矿石——那圈荧光是它和普通石头的全部区别。
+    """
+    d = canvas()
+
+    body = "#2b2b30"
+    facet = "#43434b"
+    glow = "#b7e04a"
+
+    d.append(dw.Path(fill=body, stroke="#15151a", stroke_width=2.5, stroke_linejoin="round")
+             .M(-28, 8).L(-18, -22).L(6, -30).L(26, -12).L(22, 18).L(-6, 30).Z())
+
+    d.append(dw.Path(fill=facet, fill_opacity=0.9)
+             .M(-18, -22).L(6, -30).L(10, -8).L(-10, 0).Z())
+    d.append(dw.Path(fill="#000000", fill_opacity=0.28)
+             .M(10, -8).L(26, -12).L(22, 18).L(4, 24).Z())
+
+    # 次生铀矿的黄绿边：只沿断口走一圈，不铺满
+    d.append(dw.Path(stroke=glow, stroke_width=3.2, fill="none", stroke_linejoin="round",
+                     stroke_opacity=0.85)
+             .M(-10, 0).L(10, -8).L(4, 24))
+    d.append(dw.Path(stroke=glow, stroke_width=2.0, fill="none", stroke_opacity=0.6)
+             .M(-18, -22).L(-10, 0).L(-28, 8))
+
+    d.append(dw.Ellipse(-14, -14, 4.0, 2.6, fill="#ffffff", fill_opacity=0.32))
+
+    return d
+
+
+def enriched_uranium():
+    """浓缩铀：**一小罐粉末，罐身一道刻度**——重点在「少」。
+
+    <b>它必须一眼比矿石「小而贵」。</b> 六份矿石才出一份，所以画的是个矮胖的
+    密封小罐而不是一堆料：容器比内容物显眼，正是浓缩这件事的样子。
+    罐身那道刻度线画在很低的位置，说明里头没多少。
+
+    颜色从矿石那圈黄绿继承下来，但提纯成纯净的亮黄——铀黄饼就是这个色。
+    """
+    d = canvas()
+
+    shell = _pal("#8d9299")
+    cake = "#d8c21f"
+
+    _cyl(d, 0, -12, 22, 32, shell, cap_gloss=0.22)
+
+    # 观察窗里的黄饼：只占下半截，「装得不满」是这张图的话
+    d.append(dw.Path(fill="#3a3a30", stroke=shell[3], stroke_width=1.2)
+             .M(-11, -4).L(11, -4).L(11, 16).L(-11, 16).Z())
+    d.append(dw.Path(fill=cake)
+             .M(-9.4, 6).L(9.4, 6).L(9.4, 14.4).L(-9.4, 14.4).Z())
+    d.append(dw.Path(fill="#f0e07a", fill_opacity=0.5)
+             .M(-9.4, 6).L(9.4, 6).L(9.4, 8.2).L(-9.4, 8.2).Z())
+
+    # 刻度：三道短线，最低那道正对着料面
+    for y, w in ((2.0, 5.0), (8.0, 8.0), (13.0, 5.0)):
+        d.append(dw.Path(stroke=shell[3], stroke_width=1.4, fill="none")
+                 .M(13, y).L(13 + w, y))
+
+    return d
+
+
+def uranium_fuel_rod():
+    """铀燃料棒：**一束细管，不是一根**——真实的燃料组件就是一束。
+
+    <b>和精炼油燃料棒的分界点在这里</b>：那张是单根粗棒配观察窗，这张是三根细管
+    并排、上下用格架箍住。燃料组件之所以长这样，是因为单根棒凑不成链式反应，
+    要几百根一起插进堆芯——「成束」这件事本身就是它的物理。
+
+    颜色走冷灰钛合金包壳，只在格架和顶塞上点一点铀黄。
+    """
+    d = canvas()
+
+    clad = _pal("#a8aeb6")
+    grid = _pal("#5d646d")
+
+    for x in (-13.0, 0.0, 13.0):
+        _cyl(d, x, -24, 5.4, 50, clad, cap_gloss=0.25)
+
+    # 上下两道格架：把三根箍成一束
+    for y in (-14.0, 16.0):
+        d.append(dw.Path(fill=grid[2], stroke=grid[3], stroke_width=1.2)
+                 .M(-20, y).L(20, y).L(20, y + 6).L(-20, y + 6).Z())
+        d.append(dw.Path(fill=grid[0], fill_opacity=0.45)
+                 .M(-20, y).L(20, y).L(20, y + 1.8).L(-20, y + 1.8).Z())
+
+    # 顶塞的铀黄：唯一的暖色，说明管子里装的是什么
+    for x in (-13.0, 0.0, 13.0):
+        d.append(dw.Ellipse(x, -24, 3.4, 3.4 * ISO, fill="#d8c21f", fill_opacity=0.9))
+
+    return d
+
+
+def thin_film_fission_fuel():
+    """薄膜裂变燃料：**一张薄片，边缘有碎片飞出去**。
+
+    <b>「薄」和「碎片飞得出来」是同一件事，所以两者必须画在一起。</b>
+    厚芯块的燃料棒画成束，这张就得画成片——侧视一条几乎没有厚度的亮线，
+    上面那层是铀膜，下面那条深色是石墨烯衬底。
+
+    斜着飞出去的三道短线是裂变碎片：它们带电、能直接收集成电流，
+    而这正是这块燃料存在的全部理由。画在图上比任何描述都直接。
+    """
+    d = canvas()
+
+    sub = _pal("#33383d")
+    film = "#c9b53a"
+
+    # 衬底：一块斜放的薄板
+    d.append(dw.Path(fill=sub[2], stroke=sub[3], stroke_width=1.6, stroke_linejoin="round")
+             .M(-30, 10).L(2, -6).L(30, 6).L(-2, 22).Z())
+    # 铀膜：薄到只剩一条亮边
+    d.append(dw.Path(fill=film, stroke="#8a7a14", stroke_width=1.0, stroke_linejoin="round")
+             .M(-30, 6).L(2, -10).L(30, 2).L(-2, 18).Z())
+    d.append(dw.Path(fill="#efe08c", fill_opacity=0.55)
+             .M(-30, 6).L(2, -10).L(12, -5.7).L(-20, 10.3).Z())
+
+    # 裂变碎片：斜着飞出去，带一个箭头尖
+    for (x0, y0, x1, y1) in ((-6, -12, -14, -28), (6, -8, 12, -26), (18, -2, 28, -16)):
+        d.append(dw.Path(stroke="#8fe3ff", stroke_width=2.6, fill="none", stroke_linecap="round")
+                 .M(x0, y0).L(x1, y1))
+        d.append(dw.Circle(x1, y1, 3.0, fill="#8fe3ff"))
+
+    return d
+
+
+def accretion_glass():
+    """吸积熔晶：**黑曜石一样的断面，内部封着紫色的电离辉光**。
+
+    <b>和铀矿石的分界要画在「光从哪来」上。</b> 铀矿石是黑体 + 断口一圈黄绿次生边
+    ——光在外面；这一块是黑体 + **内部**透出来的紫，像封在玻璃里的一段闪电。
+    骤冷成玻璃态的设定要靠「贝壳状断口」表达：玻璃断裂是弧形的，晶体是平面的，
+    所以轮廓上那几道弧不是装饰，是它「来不及结晶」这件事本身。
+    """
+    d = canvas()
+
+    body = "#171320"
+    facet = "#2c2440"
+    glow = "#a86cff"
+
+    d.append(dw.Path(fill=body, stroke="#0a0810", stroke_width=2.5, stroke_linejoin="round")
+             .M(-26, 6).L(-14, -24).L(10, -30).L(28, -10).L(20, 20).L(-8, 30).Z())
+
+    # 贝壳状断口：两道弧，玻璃才这么裂
+    d.append(dw.Path(fill=facet, fill_opacity=0.95)
+             .M(-14, -24).C(-2, -14, 6, -2, 4, 14).C(-8, 8, -16, -6, -14, -24).Z())
+    d.append(dw.Path(fill=facet, fill_opacity=0.6)
+             .M(10, -30).C(16, -16, 20, -2, 18, 16).C(10, 4, 6, -12, 10, -30).Z())
+
+    # 内部的电离辉光：从中心往外渗，不是描边
+    d.append(dw.Ellipse(-1, -3, 13, 16, fill=glow, fill_opacity=0.32))
+    d.append(dw.Ellipse(-1, -3, 7.5, 9.5, fill=glow, fill_opacity=0.42))
+    d.append(dw.Path(stroke=glow, stroke_width=2.4, fill="none", stroke_linecap="round",
+                     stroke_opacity=0.95)
+             .M(-7, -16).L(1, -5).L(-4, 2).L(5, 13))
+
+    d.append(dw.Ellipse(-12, -16, 3.6, 2.4, fill="#ffffff", fill_opacity=0.28))
+
+    return d
+
+
+def horizon_core():
+    """视界凝核：**一块几乎全黑的致密核，周围的星光被掰弯**。
+
+    <b>它和吸积熔晶的分界必须画在「光从哪来」上，否则两块黑石头分不开。</b>
+    吸积熔晶是内部透出紫光——光在里面；这一块自己**不发光**，识别信息全在
+    它周围那几道**错位的弧**上：引力透镜把背景的光掰成了不连续的弧段。
+
+    所以这张图的主角其实是背景，不是那块核。三道弧各自断开、且断口错位，
+    是透镜效应最省笔墨的画法——连起来就成了普通的光环，那是另一个意思。
+    """
+    d = canvas()
+
+    core = "#0b0d14"
+    rim = "#2a3350"
+    arc = "#9fd2ff"
+
+    # 被掰弯的背景光：三段弧，半径不同、断口互相错开
+    for r, a0, a1, w, op in ((30, 205, 320, 2.6, 0.85),
+                             (30, 20, 118, 2.6, 0.7),
+                             (22, 250, 340, 1.9, 0.55),
+                             (22, 55, 150, 1.9, 0.45),
+                             (37, 150, 200, 1.5, 0.35)):
+        pts = []
+
+        for s in range(17):
+            ang = math.radians(a0 + (a1 - a0) * s / 16.0)
+            pts += [math.cos(ang) * r, math.sin(ang) * r]
+
+        d.append(dw.Lines(*pts, close=False, fill="none", stroke=arc,
+                          stroke_width=w, stroke_opacity=op, stroke_linecap="round"))
+
+    # 核：近黑，只有一圈极窄的边说明它有形状
+    d.append(dw.Circle(0, 0, 14.5, fill=core, stroke=rim, stroke_width=2.0))
+    # 不给高光——高光会让它读成「球」，而它该读成「洞」
+    d.append(dw.Circle(0, 0, 9.0, fill="#000000", fill_opacity=0.85))
+
+    return d
+
+
+def ionised_glass():
+    """电离玻璃：**一块半透的紫板，断面里冻着一层层电流纹路**。
+
+    <b>它必须一眼看出是「板材」，而不是又一块矿石。</b> 吸积熔晶是不规则的多边形石块，
+    这一张是**规整的矩形板 + 可见厚度**——加工过的东西有直边，这是最省笔墨的区别。
+
+    板子里那几道平行的亮纹是「沿外加场排齐的电离态」，也就是它和普通黑玻璃的
+    全部差别；纹路画成平行且等距，正好和熔晶那种乱纹相对。
+    """
+    d = canvas()
+
+    face = "#4a2f6e"
+    edge = "#2a1a40"
+    lit = "#c89cff"
+
+    # 板面（等距摆放，露出厚度）
+    d.append(dw.Path(fill=edge, stroke="#150d22", stroke_width=2.0, stroke_linejoin="round")
+             .M(-30, 6).L(0, -10).L(30, 6).L(0, 22).Z())
+    d.append(dw.Path(fill=face, stroke="#150d22", stroke_width=2.0, stroke_linejoin="round")
+             .M(-30, 0).L(0, -16).L(30, 0).L(0, 16).Z())
+
+    # 冻住的电流纹：平行等距，和熔晶的乱纹相对
+    for t in (0.28, 0.5, 0.72):
+        ax, ay = -30 + 30 * t, 0 - 16 * t
+        bx, by = 0 + 30 * t, 16 - 16 * t
+        d.append(dw.Path(stroke=lit, stroke_width=2.0, fill="none", stroke_opacity=0.9,
+                         stroke_linecap="round").M(ax, ay).L(bx, by))
+
+    d.append(dw.Path(fill="#ffffff", fill_opacity=0.16)
+             .M(-30, 0).L(0, -16).L(0, -9).L(-24, 3).Z())
+
+    return d
+
+
+def core_stabiliser():
+    """凝核稳定剂：**一个笼子，里面关着视界凝核**。
+
+    <b>母题是「关住」，所以笼子必须比核显眼。</b> 视界凝核那张图的主角是被掰弯的背景光；
+    这一张的主角是壳——六根卡西米尔晶体棱骨合拢成一个约束腔，核缩在正中，
+    而且**周围的光不再弯了**，这正是「稳住了」的视觉表达，也是两张图的分界。
+    """
+    d = canvas()
+
+    cage = "#7fe3d6"
+    cage_dark = "#2d6b64"
+
+    # 约束腔：六棱，画成两个交错的三角更像「合拢」而不是「一个框」
+    for rot in (0.0, 60.0):
+        pts = []
+
+        for i in range(3):
+            a = math.radians(rot + 120 * i - 90)
+            pts += [math.cos(a) * 30, math.sin(a) * 30]
+
+        d.append(dw.Lines(*pts, close=True, fill="none", stroke=cage_dark, stroke_width=4.6,
+                          stroke_linejoin="round"))
+        d.append(dw.Lines(*pts, close=True, fill="none", stroke=cage, stroke_width=2.2,
+                          stroke_linejoin="round"))
+
+    # 核：缩得很小，而且周围没有弯曲的光——被稳住了
+    d.append(dw.Circle(0, 0, 9.5, fill="#0b0d14", stroke="#2a3350", stroke_width=1.8))
+    d.append(dw.Circle(0, 0, 5.5, fill="#000000", fill_opacity=0.9))
+
+    # 六个节点，说明棱骨是被主动驱动的
+    for i in range(6):
+        a = math.radians(60 * i - 90)
+        d.append(dw.Circle(math.cos(a) * 30, math.sin(a) * 30, 3.4, fill=cage,
+                           stroke=cage_dark, stroke_width=1.2))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -2941,6 +3265,8 @@ if __name__ == "__main__":
     render(omni_chem(), "omni-chem")
     render(redox_burner(), "redox-burner")
     render(refinery_plant(), "refinery-plant")
+    # 第十二座。识别点是「夹」这个动作——扶壁内倾并在柱顶交汇，拉直就退回「又一座塔」
+    render(singularity_vault(), "singularity-vault")
 
     # 提纯线的耗材
     render(electrolyte(), "electrolyte")
@@ -2953,6 +3279,23 @@ if __name__ == "__main__":
 
     # 凝胶燃料棒：和三档药柱同为柱体，靠「金属壳 + 观察窗」分开
     render(refined_oil_fuel_rod(), "refined-oil-fuel-rod")
+
+    # 裂变线。四张各占一个识别点：黑体黄绿边 / 小罐装不满 / 成束细管 / 薄片带碎片
+    render(uranium_ore(), "uranium-ore")
+
+    # 黑洞矿。和铀矿石的分界画在「光从哪来」：铀是断口外一圈黄绿，它是内部透出的紫
+    render(accretion_glass(), "accretion-glass")
+    # 和上面那张的分界画在「光从哪来」：吸积熔晶内部透紫，这一块自己不发光、
+    # 靠周围被掰弯的背景光认出来
+    render(horizon_core(), "horizon-core")
+
+    # 黑洞矿的两条下游。板材靠直边和平行纹路区别于矿石；笼子靠「光不再弯」
+    # 表达「稳住了」，正好和视界凝核那张相对
+    render(ionised_glass(), "ionised-glass")
+    render(core_stabiliser(), "core-stabiliser")
+    render(enriched_uranium(), "enriched-uranium")
+    render(uranium_fuel_rod(), "uranium-fuel-rod")
+    render(thin_film_fission_fuel(), "thin-film-fission-fuel")
 
     # 三档药柱：氧化还原燃烧厂压出来的燃料
     render(bipropellant(), "bipropellant")

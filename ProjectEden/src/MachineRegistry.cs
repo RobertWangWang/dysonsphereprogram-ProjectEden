@@ -130,6 +130,39 @@ namespace ProjectEden
         /// </summary>
         internal static bool IsCustomType(int recipeType) => recipeType >= 9 && recipeType != 15;
 
+        /// <summary>
+        /// 按 <c>machines.json</c> 的 key 反查这台机器的物品号。
+        ///
+        /// <b>只看已经注册过的</b>（<c>Machines</c> 是按配置顺序追加的），所以引用的那台
+        /// 必须排在前面——和能量枢纽的 <c>pairMachineKey</c> 是同一条约束，理由也一样：
+        /// 注册期 LDB 里还没有本 mod 的任何东西，只能靠这份内部账本。
+        /// </summary>
+        internal static int MachineItemIdByKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return 0;
+
+            for (var i = 0; i < Machines.Count; i++)
+                if (Machines[i].Entry != null && Machines[i].Entry.key == key)
+                    return Machines[i].ItemId;
+
+            return 0;
+        }
+
+        /// <summary>
+        /// 按 key 反查这台蓄电器的<b>满变体</b>物品号。枢纽要的 <c>fullId</c> 就是它。
+        /// 不是蓄电器（<c>accumulator.fullVariant</c> 没配）就返回 0。
+        /// </summary>
+        internal static int MachineFullItemIdByKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return 0;
+
+            for (var i = 0; i < Machines.Count; i++)
+                if (Machines[i].Entry != null && Machines[i].Entry.key == key)
+                    return Machines[i].FullItemId;
+
+            return 0;
+        }
+
         internal static string RecipeTypeMachineName(int recipeType)
         {
             if (recipeType <= 0) return null;
@@ -291,7 +324,7 @@ namespace ProjectEden
                 ProtoSlots.ReserveItemId(machine.ItemId);
                 ProtoSlots.ReserveModelId(machine.ModelId);
                 ProtoSlots.ReserveGrid(machine.Grid, ProtoSlots.GridKind.Item);
-                ProtoSlots.ReserveBuildIndex(machine.BuildIndex);
+                ProtoSlots.ReserveBuildIndex(machine.BuildIndex, machine.Entry?.displayName);
 
                 CloneModel(machine, source);
                 AddItem(machine, source);
@@ -490,7 +523,17 @@ namespace ProjectEden
                 ? machine.Entry.accumulator.capacityMultiplier
                 : 1f;
 
-            long heat = full.heatValue > 0L ? full.heatValue : (long)(source.HeatValue * cap);
+            // **−1 = 明确「它不是燃料」**，和 0（按容量倍率推）是两件事。
+            //
+            // 需要这一档是因为倍率一旦大起来，「顺带也是机甲燃料」就变成白送的数值膨胀：
+            // 原版满蓄电器 540 MJ 是机甲燃料，容量放大 333 倍之后那就是机甲无限续航。
+            // 而容量本身要放大——这一对东西的用途正是「把电打包运走」。
+            // 两条轴必须能分开配，否则只能在「电池不够大」和「机甲开挂」之间二选一。
+            var notFuel = full.fuelType < 0 || full.heatValue < 0L;
+
+            long heat = notFuel ? 0L
+                : full.heatValue > 0L ? full.heatValue
+                : (long)(source.HeatValue * cap);
 
             var item = new ItemProto
             {
@@ -513,7 +556,7 @@ namespace ProjectEden
                 Grade = 0,
                 Upgrades = new int[0],
                 DescFields = source.DescFields,
-                FuelType = full.fuelType > 0 ? full.fuelType : source.FuelType,
+                FuelType = notFuel ? 0 : full.fuelType > 0 ? full.fuelType : source.FuelType,
                 HeatValue = heat,
                 // 机甲反应堆功率加成：ratio = ReactorInc + 1，乘到 reactorPowerGen 上
                 ReactorInc = full.reactorInc != 0f ? full.reactorInc : source.ReactorInc,
@@ -531,8 +574,10 @@ namespace ProjectEden
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"「{full.displayName}」已注册：物品 {machine.FullItemId}，" +
-                $"燃料类型 {item.FuelType}，热值 {Energy(heat)}（源 {Energy(source.HeatValue)} ×{cap:0.##}），" +
-                $"机甲功率 ×{item.ReactorInc + 1f:0.##}（源 ×{source.ReactorInc + 1f:0.##}）");
+                (notFuel
+                    ? "**不作燃料**（配置里显式关掉了：容量倍率一大，机甲燃料那一轴就是白送的数值膨胀）"
+                    : $"燃料类型 {item.FuelType}，热值 {Energy(heat)}（源 {Energy(source.HeatValue)} ×{cap:0.##}），"
+                      + $"机甲功率 ×{item.ReactorInc + 1f:0.##}（源 ×{source.ReactorInc + 1f:0.##}）"));
         }
 
         /// <summary>
@@ -938,11 +983,19 @@ namespace ProjectEden
                     ? item.id
                     : OreRegistry.FindItemIdByRef(item.@ref);
 
+                // **本文件自己的 key 也能引**，比如「以电浆蓄能柜为基础件再加凝核稳定剂」。
+                // 只认**先于本条注册**的机器（Machines 是按顺序追加的），和能量枢纽那条
+                // pairMachineKey 的约束一样：引用一台还没注册的机器，拿到的会是 0。
+                // 没有这一档就只能在建造配方里写死 ID，而本 mod 的物品 ID 撞车时会顺延，
+                // 写死的数字会一声不吭地指到别人家去
+                if (id <= 0 && !string.IsNullOrEmpty(item.@ref)) id = MachineItemIdByKey(item.@ref);
+
                 if (!string.IsNullOrEmpty(item.@ref) && id <= 0)
                 {
                     ProjectEdenPlugin.Log.LogError(
                         $"{e.displayName} 的建造配方里，引用名「{item.@ref}」解析不出物品——" +
-                        "它得是 ores.json 里 items 段某条的 key，或者矿种的 key 加 .ore / .ingot 后缀。配方未注册");
+                        "它得是 ores.json 里 items 段某条的 key、矿种的 key 加 .ore / .ingot 后缀、" +
+                        "`vanilla:中文名`，或者 machines.json 里**排在本条之前**的某台机器的 key。配方未注册");
 
                     return;
                 }

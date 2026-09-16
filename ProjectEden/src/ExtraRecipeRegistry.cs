@@ -91,7 +91,7 @@ namespace ProjectEden
 
                 Utils.ProtoSlots.ReserveRecipeId(entry.id);
                 Utils.ProtoSlots.ReserveGrid(MegaBuildingRegistry.GridIndex(entry.gridRow, entry.gridCol),
-                    Utils.ProtoSlots.GridKind.Recipe);
+                    Utils.ProtoSlots.GridKind.Recipe, entry.name);
 
                 ProjectEdenPlugin.Log.LogInfo(
                     $"已注册配方「{entry.name}」（{(ERecipeType)entry.type}，格位 {recipe.GridIndex}）：" +

@@ -241,6 +241,36 @@ namespace ProjectEden.Utils
 
         /// <summary>rare 模式：矿脉的储量/浓度系数</summary>
         public float richness;
+
+        /// <summary>
+        /// <b>star 模式</b>：按<b>星体类型</b>投放，而不是按星球主题。
+        /// 取值是 <c>EStarType</c> 的名字：<c>BlackHole</c> / <c>NeutronStar</c> /
+        /// <c>WhiteDwarf</c> / <c>GiantStar</c> / <c>MainSeqStar</c>。写错会在注册时报错。
+        ///
+        /// <b>为什么需要这一档：单极磁石根本不走主题表。</b> 实测——主题表 25 张里
+        /// 矿种 14 出现 0 次，而 <c>PlanetAlgorithm.GenerateVeins</c> IL 016A 读
+        /// <c>planet.star.type</c>、随后直接 <c>veinSpots[14]++</c>。所以黑洞矿只能
+        /// 沿着同一条路走，见 <c>StarVeinPatches</c>。
+        /// </summary>
+        public string[] starTypes;
+
+        /// <summary>star 模式：命中之后放几处矿脉簇</summary>
+        public int spots;
+
+        /// <summary>star 模式：每簇的矿脉数（对应 <c>ThemeProto.VeinCount</c>）</summary>
+        public float count;
+
+        /// <summary>star 模式：储量浓度（对应 <c>ThemeProto.VeinOpacity</c>）</summary>
+        public float opacity;
+
+        /// <summary>
+        /// star 模式：该星系的**第一颗行星保底出一处**。
+        ///
+        /// 黑洞星系本来就少，纯概率会让「极稀有」和「整局没有」在玩家那里
+        /// 变成同一件事——莫桑石为这条付过一次账（chance 0.02 时期望不到一颗，
+        /// 玩家扫完整个星区报「没找到」，而注册、主题、矿表全是对的）。
+        /// </summary>
+        public bool guarantee;
     }
 
     /// <summary>
@@ -376,6 +406,23 @@ namespace ProjectEden.Utils
         public int ingotFuelType;
 
         public long ingotHeatValue;
+
+        /// <summary>
+        /// <b>矿石</b>的燃料位与热值，规则同上面那一对（只给一半会警告并忽略）。
+        ///
+        /// <b>存在的理由是能量审计要的是一条完整的链。</b> 核燃料这一族的能量来自
+        /// 质量亏损，不是化学键——如果只给末端的燃料棒配热值，那么「矿石 → 浓缩物」
+        /// 这一级就成了凭空造能量，审计会在那里炸；而给整条链都配上，每一级就都守恒，
+        /// <b>一条豁免都不需要</b>。挖矿本身不是配方、不进审计，所以链的起点在矿石上，
+        /// 和煤矿带着 2.7 MJ 出土是同一回事。
+        ///
+        /// <b>热值不等于「有发电厂烧得了它」。</b> 铀矿石和浓缩铀给的是一个没有任何
+        /// 发电厂持有的位（bit 10）：反应堆吃的是燃料组件，不是粉末。这不是半对燃料——
+        /// 半对燃料是「有热值没有位」，那种烧出来是 0 电；这是「有位但世上没有那种炉子」。
+        /// </summary>
+        public int oreFuelType;
+
+        public long oreHeatValue;
 
         // ── 配方 ─────────────────────────────────────────────
 

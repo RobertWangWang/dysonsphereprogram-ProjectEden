@@ -229,6 +229,22 @@ namespace ProjectEden.Utils
         /// </summary>
         public MegaGeneratorEntry generator;
 
+        /// <summary>
+        /// 能量枢纽段。配了这一段，这座巨型建筑就<b>同时</b>是一台能量枢纽——
+        /// 给蓄电器充电、或者把充满的蓄电器放回电网。
+        ///
+        /// <b>为什么是枢纽而不是发电机。</b> 发电机会把燃料**吃掉**；枢纽放完电
+        /// 把空壳还给你。一座每分钟吃 20 个壳、一个不还的电厂不是电池，是材料黑洞。
+        /// 原版把「充电 → 搬走 → 放电」这件事建模成枢纽，不是发电机，这里照它走。
+        ///
+        /// 组件模型允许同一台实体挂多个：<c>PlanetFactory.CreateEntityLogicComponents</c>
+        /// 里 <c>isPowerExchanger</c>（IL 08A9）和 <c>isPowerGen</c>（059E）、
+        /// <c>isAssembler</c>（1122）、<c>isStation</c>（14FE）都是独立的顺序 if。
+        ///
+        /// 留空（null）就是普通的巨型建筑。
+        /// </summary>
+        public MegaExchangerEntry exchanger;
+
         public float tintR;
         public float tintG;
         public float tintB;
@@ -289,6 +305,50 @@ namespace ProjectEden.Utils
     /// 所以只能给倍率；这边的 prefab 是物流运输站，根本没有发电字段可乘，
     /// 只能直接写。注册时会把换算成 MW 的结果打进日志。
     /// </summary>
+    /// <summary>
+    /// 巨型建筑的能量枢纽段：它服务哪一对空/满蓄电器，以及充放功率。
+    ///
+    /// <b>一台枢纽天然只服务一对。</b> <c>PowerExchangerComponent.emptyId / fullId</c>
+    /// 直接来自 <c>PrefabDesc</c>，整个组件（皮带进出、状态机、能量结算）从头到尾
+    /// 只认这两个 ID——想服务多对就得把 <c>InternalUpdate</c> 里每一处都接管掉，不划算。
+    /// 再建一座正是原版建模这件事的方式。
+    /// </summary>
+    [Serializable]
+    internal class MegaExchangerEntry
+    {
+        /// <summary>
+        /// 它服务的那台蓄电器在 <c>machines.json</c> 里的 key。
+        ///
+        /// <b>不写物品号。</b> 蓄电器是 <c>MachineRegistry</c> 注册的，而巨型建筑注册在它<b>之前</b>
+        /// ——那一刻蓄电器的 ID 还没分配。所以这一段整个在 <c>PostAddDataAction</c> 才落地，
+        /// 到那时按 key 反查得到真实 ID。写死号在这里尤其危险：本 mod 的物品 ID 撞车会顺延。
+        /// </summary>
+        public string vaultMachineKey;
+
+        /// <summary>
+        /// 这台枢纽<b>还能改去服务</b>的其它蓄电器（machines.json 的 key）。
+        /// 留空就只服务 <see cref="vaultMachineKey"/> 那一对。
+        ///
+        /// <b>原版一台枢纽只服务一对，而这条能成立是量出来的：</b>
+        /// <c>PowerExchangerComponent.emptyId / fullId</c> 虽然来自 <c>PrefabDesc</c>，
+        /// 但它们是<b>逐组件字段，而且进存档</b>（<c>Export</c> @00B2/@00BE、
+        /// <c>Import</c> @00CA/@00D6）。所以逐台改写之后，**原版自己就把选择存下来了**
+        /// ——不需要 IModCanSave，也不需要像合金配比那样自建存储。
+        ///
+        /// 切换入口不是新加的界面：枢纽窗口里那两个柜位图标的点击处理
+        /// （<c>OnEmptyOrFullUIButtonClick</c>）本来就读 <c>player.inhandItemId</c>，
+        /// 所以「手上拿着另一档的柜子去点柜位」这个最自然的动作，正好可以当作切档。
+        /// </summary>
+        public string[] alsoServes;
+
+        /// <summary>
+        /// 充放功率，单位是**每 tick 的焦耳**（一秒 60 tick）。
+        /// 60 GW 就是 1000000000。<c>PrefabDesc.exchangeEnergyPerTick</c> 是 Int64，够用。
+        /// </summary>
+        public long energyPerTick;
+    }
+
+    [Serializable]
     internal class MegaGeneratorEntry
     {
         /// <summary>每 tick 的发电上限（焦耳）。×60 就是瓦。</summary>

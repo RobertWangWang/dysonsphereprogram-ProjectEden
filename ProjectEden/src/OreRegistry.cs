@@ -1090,47 +1090,63 @@ namespace ProjectEden
             {
                 OreEntry e = ore.Entry;
 
-                if (!ore.HasIngot || e.ingotFuelType == 0 && e.ingotHeatValue == 0L) continue;
+                if (ore.HasIngot)
+                    done += WriteFuel(ore.IngotItemId, e.ingotName, e.ingotFuelType, e.ingotHeatValue,
+                        "ingot") ? 1 : 0;
 
-                if (e.ingotFuelType == 0 || e.ingotHeatValue <= 0L)
-                {
-                    ProjectEdenPlugin.Log.LogWarning(
-                        $"「{e.ingotName}」的 ingotFuelType={e.ingotFuelType}、" +
-                        $"ingotHeatValue={e.ingotHeatValue} 只配了一半，两个都要有才烧得起来，已忽略");
-
-                    continue;
-                }
-
-                ItemProto proto = LDB.items.Select(ore.IngotItemId);
-
-                if (proto == null)
-                {
-                    ProjectEdenPlugin.Log.LogError(
-                        $"「{e.ingotName}」在 LDB 里找不到（ID {ore.IngotItemId}），燃料属性未写入");
-
-                    continue;
-                }
-
-                if (proto.Name != e.ingotName)
-                {
-                    ProjectEdenPlugin.Log.LogError(
-                        $"ID {ore.IngotItemId} 实际叫「{proto.Name}」而配置里写的是「{e.ingotName}」——" +
-                        "指错了东西，拒绝写入燃料属性");
-
-                    continue;
-                }
-
-                proto.FuelType = e.ingotFuelType;
-                proto.HeatValue = e.ingotHeatValue;
-
-                done++;
-
-                ProjectEdenPlugin.Log.LogInfo(
-                    $"「{e.ingotName}」可作燃料：类型 {e.ingotFuelType}，" +
-                    $"热值 {e.ingotHeatValue / 1000000.0:0.##} MJ");
+                // 矿石这一侧：核燃料链要求每一级都带热值，否则审计会在没带的那一级炸
+                done += WriteFuel(ore.OreItemId, e.oreName, e.oreFuelType, e.oreHeatValue, "ore") ? 1 : 0;
             }
 
-            if (done > 0) ProjectEdenPlugin.Log.LogInfo($"矿锭燃料属性：共 {done} 项");
+            if (done > 0) ProjectEdenPlugin.Log.LogInfo($"矿物燃料属性：共 {done} 项");
+        }
+
+        /// <summary>
+        /// 把一对 (燃料位, 热值) 写到一个矿物 proto 上。
+        ///
+        /// <b>名字要和配置交叉核对。</b> 物品 ID 撞车时 <c>ResolveItemId</c> 会顺延，
+        /// 而写死的号一旦指错，燃料属性就悄悄长到别人家的物品上——这条规矩
+        /// <c>MetalPropertyPatches</c> 也守着，理由一样。比的是 <c>Proto.Name</c>
+        /// 而不是 <c>proto.name</c>：后者是翻译过的，英文客户端上必然匹配失败。
+        /// </summary>
+        private static bool WriteFuel(int itemId, string name, int fuelType, long heatValue, string field)
+        {
+            if (fuelType == 0 && heatValue == 0L) return false;
+
+            if (fuelType == 0 || heatValue <= 0L)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"「{name}」的 {field}FuelType={fuelType}、{field}HeatValue={heatValue} 只配了一半，"
+                    + "两个都要有才烧得起来，已忽略");
+
+                return false;
+            }
+
+            ItemProto proto = LDB.items.Select(itemId);
+
+            if (proto == null)
+            {
+                ProjectEdenPlugin.Log.LogError($"「{name}」在 LDB 里找不到（ID {itemId}），燃料属性未写入");
+
+                return false;
+            }
+
+            if (proto.Name != name)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"ID {itemId} 实际叫「{proto.Name}」而配置里写的是「{name}」——"
+                    + "指错了东西，拒绝写入燃料属性");
+
+                return false;
+            }
+
+            proto.FuelType = fuelType;
+            proto.HeatValue = heatValue;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"「{name}」可作燃料：类型 {fuelType}，热值 {heatValue / 1000000.0:0.##} MJ");
+
+            return true;
         }
 
         internal static void OnPostAddData()
@@ -1490,8 +1506,70 @@ namespace ProjectEden
         {
             PlacementEntry place = ore.Entry.placement;
 
-            if (place != null && place.mode == "rare") ExtendRareSlots(ore, place);
+            if (place != null && place.mode == "star") RegisterStarVein(ore, place);
+            else if (place != null && place.mode == "rare") ExtendRareSlots(ore, place);
             else ExtendNormalSpots(ore, place);
+        }
+
+        /// <summary>
+        /// star 模式：不写主题表，改为登记给 <see cref="Patches.StarVeinPatches"/>，
+        /// 由它在 <c>GenerateVeins</c> 里按星体类型投放。
+        ///
+        /// <b>星体类型名按名字解析，解析不出就整条拒绝并列出合法值。</b>
+        /// 写错一个名字如果只是静默跳过，表现就是「这矿整局都没有」，
+        /// 而注册、图标、配方全是对的——本仓库最怕的那种失败形状。
+        /// </summary>
+        private static void RegisterStarVein(Ore ore, PlacementEntry place)
+        {
+            if (place.starTypes == null || place.starTypes.Length == 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"{ore.Entry.veinName} 的 placement.mode 是 star，却没写 starTypes，这条不投放");
+
+                return;
+            }
+
+            var types = new List<EStarType>();
+
+            foreach (string name in place.starTypes)
+            {
+                if (Enum.IsDefined(typeof(EStarType), name ?? ""))
+                {
+                    types.Add((EStarType)Enum.Parse(typeof(EStarType), name));
+
+                    continue;
+                }
+
+                ProjectEdenPlugin.Log.LogError(
+                    $"{ore.Entry.veinName} 的 starTypes 里「{name}」不是合法的星体类型，"
+                    + $"合法值：{string.Join("、", Enum.GetNames(typeof(EStarType)))}");
+            }
+
+            if (types.Count == 0)
+            {
+                ProjectEdenPlugin.Log.LogError($"{ore.Entry.veinName} 的 starTypes 一个都没解析出来，这条不投放");
+
+                return;
+            }
+
+            Patches.StarVeinPatches.Veins.Add(new Patches.StarVeinPatches.StarVein
+            {
+                VeinId = ore.VeinId,
+                Name = ore.Entry.veinName,
+                StarTypes = types.ToArray(),
+                Chance = place.chance,
+                Spots = place.spots > 0 ? place.spots : 1,
+                Count = place.count > 0f ? place.count : 1f,
+                Opacity = place.opacity > 0f ? place.opacity : 1f,
+                Guarantee = place.guarantee,
+            });
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"{ore.Entry.veinName} 按**星体类型**投放："
+                + $"{string.Join("/", place.starTypes)}，概率 {place.chance}，"
+                + $"{(place.spots > 0 ? place.spots : 1)} 处"
+                + $"{(place.guarantee ? "，该星系首颗行星保底" : "")}"
+                + "；只对还没生成过的星球生效");
         }
 
         /// <summary>

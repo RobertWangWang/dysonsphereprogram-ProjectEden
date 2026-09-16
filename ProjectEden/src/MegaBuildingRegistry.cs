@@ -125,9 +125,12 @@ namespace ProjectEden
                 Utils.ProtoSlots.ReserveItemId(entry.itemId);
                 Utils.ProtoSlots.ReserveRecipeId(entry.recipeId);
                 Utils.ProtoSlots.ReserveModelId(modelId);
-                Utils.ProtoSlots.ReserveGrid(GridIndexOf(entry), Utils.ProtoSlots.GridKind.Item);
-                Utils.ProtoSlots.ReserveGrid(GridIndexOf(entry), Utils.ProtoSlots.GridKind.Recipe);
-                Utils.ProtoSlots.ReserveBuildIndex(Config.buildCategory * 100 + entry.slot);
+                Utils.ProtoSlots.ReserveGrid(GridIndexOf(entry), Utils.ProtoSlots.GridKind.Item,
+                    entry.displayName);
+                Utils.ProtoSlots.ReserveGrid(GridIndexOf(entry), Utils.ProtoSlots.GridKind.Recipe,
+                    entry.displayName);
+                Utils.ProtoSlots.ReserveBuildIndex(
+                    Config.buildCategory * 100 + entry.slot, entry.displayName);
             }
 
             // 额外配方要在同一阶段注册，且共用 RecipeIds 这个免科技解锁集合
@@ -527,19 +530,36 @@ namespace ProjectEden
             modelPrefabDesc.barHeight = desc.barHeight;
             modelPrefabDesc.barWidth = desc.barWidth;
 
-            // 这三项决定它是一台什么样的组装机，以及有多快
-            modelPrefabDesc.isAssembler = true;
+            // **配了枢纽段的建筑既不是组装机也不是物流站。**
+            //
+            // 它不生产任何东西，也不收发货——皮带进空柜、出满柜，就这一件事。
+            // 强行留着那两个组件会同时引出两个真问题，实测都踩过：
+            //
+            // (1) 点开它会弹**制造面板**，而它没有配方（recipeType 0），面板是空的；
+            // (2) 更糟的是**窗口之争**：UIGame.OnPlayerInspecteeChange 里 23 个组件 id
+            //     依次判断、后匹配的赢，powerExcId(IL 0196) 排在 assemblerId(00A7) 之后，
+            //     于是它打开 UIPowerExchangerWindow 并当场 NullReferenceException。
+            //
+            // 上一版的修法是把 powerExcId 也压掉，结果**模式按钮跟着没了**——充电／放电／
+            // 待机三个按钮就在那个窗口上，于是蓄能柜永远充不满，「满」变体注册了却拿不到。
+            // 那是拿一个坏掉的修法去补另一个坏掉的设计。
+            //
+            // 把组件减到只剩枢纽，这两件事**结构上**就不存在了：没有装配机就没有制造面板，
+            // 没人抢窗口，原版枢纽窗口自然打开，模式按钮回来。
+            var exchangerOnly = entry.exchanger != null && entry.exchanger.energyPerTick > 0L;
+
+            modelPrefabDesc.isAssembler = !exchangerOnly;
             modelPrefabDesc.assemblerRecipeType = (ERecipeType)entry.recipeType;
             modelPrefabDesc.assemblerSpeed = Config.assemblerSpeed;
 
             // 克隆的是物流运输站的 prefab，保留站点身份即可复用整套运输机调度：
             // 储物格、停机坪锚点、供需配对都是现成的。采集类站点身份要关掉，
             // 那是轨道采集器/矿脉采集站的行为，和组装机无关。
-            modelPrefabDesc.isStation = Config.stationEnabled;
+            modelPrefabDesc.isStation = Config.stationEnabled && !exchangerOnly;
             modelPrefabDesc.isCollectStation = false;
             modelPrefabDesc.isVeinCollector = false;
 
-            if (Config.stationEnabled)
+            if (Config.stationEnabled && !exchangerOnly)
             {
                 modelPrefabDesc.stationMaxItemCount = Config.stationMaxItemCount;
                 modelPrefabDesc.stationMaxItemKinds = SafeStorageKinds(Config.stationMaxItemKinds);
@@ -554,6 +574,15 @@ namespace ProjectEden
             modelPrefabDesc.workEnergyPerTick = entry.workEnergyPerTick;
 
             ApplyGenerator(ref modelPrefabDesc, entry);
+
+            // 枢纽也要挂节点，理由和发电机完全一样（见 ApplyGridHookup 的注释）。
+            // 发电机那一半由 ApplyGenerator 内部调用，所以这里只补「只有枢纽」的情形，
+            // 免得两边都挂一次
+            // **模板按能力反查，不写死物品号。** 原版 proto 在 resources.assets 里离线
+            // 枚举不出来，硬写一个号万一指错，抄过来的就是别人家的连接距离和覆盖半径，
+            // 而且一声不吭。要抄的对象很好认：原版自己那台能量枢纽——它干的正是这件事
+            if (exchangerOnly && entry.generator == null)
+                ApplyGridHookup(ref modelPrefabDesc, VanillaExchangerItemId(entry), entry);
 
             LDBTool.PreAddProto(model);
         }
@@ -612,6 +641,87 @@ namespace ProjectEden
                 $"「{entry.displayName}」同时是发电机：发电 {gen.genEnergyPerTick * 60 / 1e9:0.##} GW，" +
                 $"耗燃料 {gen.useFuelPerTick * 60 / 1e9:0.##} GW，能量利用率 {eta:0.###}，" +
                 $"燃料掩码 {desc.fuelMask}");
+        }
+
+        /// <summary>
+        /// 把能量枢纽段落到 prefab 上：它服务哪一对空/满蓄电器，以及充放功率。
+        ///
+        /// <b>这一段必须在 PostAddDataAction 跑，不能跟其余部分一起在 PreAddDataAction。</b>
+        /// 它要的 <c>emptyId</c> / <c>fullId</c> 是 <c>MachineRegistry</c> 注册的蓄电器物品号，
+        /// 而巨型建筑注册在机器<b>之前</b>——那一刻那两个号还不存在。
+        /// 早一步写进去的会是 0，而 0 的后果是「枢纽建好了、皮带接上了、一个柜子也不收」，
+        /// 一声不吭。所以按 key 反查，并且在这里就把查不到吼出来。
+        ///
+        /// 晚写不要紧：<c>prefabDesc</c> 只在**建造实体时**被读走一次，而这座建筑还没有
+        /// 任何存量实体（trap 1 说的「值烘焙进存档」对新建筑不成立）。
+        /// </summary>
+        internal static void ApplyExchangers()
+        {
+            if (Config?.buildings == null) return;
+
+            foreach (MegaBuildingEntry entry in Config.buildings)
+            {
+                MegaExchangerEntry exc = entry?.exchanger;
+
+                if (exc == null || exc.energyPerTick <= 0L) continue;
+
+                int emptyId = MachineRegistry.MachineItemIdByKey(exc.vaultMachineKey);
+                int fullId = MachineRegistry.MachineFullItemIdByKey(exc.vaultMachineKey);
+
+                if (emptyId <= 0 || fullId <= 0)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"「{entry.displayName}」的能量枢纽段：按 key「{exc.vaultMachineKey}」"
+                        + $"反查不到蓄电器（空 {emptyId} / 满 {fullId}）。"
+                        + "那台得是 machines.json 里 kind 为 accumulator、且配了 fullVariant 的机器。"
+                        + "**枢纽段未生效**——建好之后它一个柜子也不会收");
+
+                    continue;
+                }
+
+                ItemProto item = LDB.items.Select(entry.itemId);
+                PrefabDesc desc = item?.prefabDesc;
+
+                if (desc == null || desc == PrefabDesc.none)
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"「{entry.displayName}」拿不到自己的 prefabDesc，枢纽段未生效");
+
+                    continue;
+                }
+
+                desc.isPowerExchanger = true;
+                desc.emptyId = emptyId;
+                desc.fullId = fullId;
+                desc.exchangeEnergyPerTick = exc.energyPerTick;
+
+                // 默认那一对排在最前，其余的登记给切档用
+                Patches.MegaExchangerDefaultPatches.RegisterPair(
+                    exc.energyPerTick, emptyId, fullId, exc.vaultMachineKey);
+
+                if (exc.alsoServes != null)
+                    foreach (string key in exc.alsoServes)
+                    {
+                        int e2 = MachineRegistry.MachineItemIdByKey(key);
+                        int f2 = MachineRegistry.MachineFullItemIdByKey(key);
+
+                        if (e2 > 0 && f2 > 0)
+                        {
+                            Patches.MegaExchangerDefaultPatches.RegisterPair(
+                                exc.energyPerTick, e2, f2, key);
+
+                            continue;
+                        }
+
+                        ProjectEdenPlugin.Log.LogError(
+                            $"「{entry.displayName}」的 alsoServes 里「{key}」反查不到蓄电器"
+                            + $"（空 {e2} / 满 {f2}），这一档切不过去");
+                    }
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"「{entry.displayName}」同时是能量枢纽：服务「{exc.vaultMachineKey}」"
+                    + $"（空 {emptyId} / 满 {fullId}），充放功率 {exc.energyPerTick * 60 / 1e9:0.##} GW");
+            }
         }
 
         /// <summary>
@@ -684,7 +794,61 @@ namespace ProjectEden
         private static void ApplyGridHookup(ref PrefabDesc desc, MegaGeneratorEntry gen,
                                             MegaBuildingEntry entry)
         {
-            int sourceId = gen.connectFromItemId > 0 ? gen.connectFromItemId : 2204;
+            ApplyGridHookup(ref desc, gen != null && gen.connectFromItemId > 0
+                ? gen.connectFromItemId : 2204, entry);
+        }
+
+        /// <summary>
+        /// 把「挂上电网」那组参数从一座真的发电建筑身上抄过来。
+        ///
+        /// <b>发电机和能量枢纽都需要它，而且理由是同一条实测。</b>
+        /// <c>PowerGeneratorComponent.networkId</c> 和
+        /// <c>PowerExchangerComponent.networkId</c> 的写入点，除各自的 Import 之外，
+        /// <b>只有 <c>PowerSystem.OnNodeAdded / OnNodeRemoving</c></b>，而 OnNodeAdded
+        /// 的唯一调用者是 <c>NewNodeComponent</c>。所以：
+        /// <c>isPowerGen</c> / <c>isPowerExchanger</c> 只表示「它能干那件事」，
+        /// <b><c>isPowerNode</c> 才表示「它挂在电网上」</b>。
+        ///
+        /// 本 mod 的巨型建筑克隆自物流运输站——**纯耗电体，没有节点**。
+        /// 漏了这一步的症状是最难查的那种：**每一步都成功，功能整个不在**
+        /// ——面板打开、模式能选、额定功率写着 60 GW，而「电网 #0、供电率 OFF」，
+        /// 一焦耳都进不去。氧化还原燃烧厂为这条付过一次账，枢纽这次又付了一次。
+        /// </summary>
+        /// <summary>
+        /// 找原版那台能量枢纽的物品号，**按能力认，不按号认**。
+        ///
+        /// 原版 proto 在 <c>resources.assets</c> 里，离线枚举不出来；写死一个号万一指错，
+        /// 抄过来的就是别人家的连接距离和覆盖半径，而且一声不吭。
+        /// 判据用 <c>isPowerExchanger</c>——那就是「它是一台能量枢纽」这件事本身。
+        /// 找不到就退回 0，让 <see cref="ApplyGridHookup"/> 去吼。
+        /// </summary>
+        private static int VanillaExchangerItemId(MegaBuildingEntry entry)
+        {
+            ItemProto[] items = LDB.items?.dataArray;
+
+            if (items == null) return 0;
+
+            foreach (ItemProto item in items)
+            {
+                // 只认原版的：本 mod 自己的枢纽还没建好，抄自己等于什么都没抄
+                if (item == null || item.ID >= 6000) continue;
+
+                PrefabDesc d = item.prefabDesc;
+
+                if (d != null && d.isPowerExchanger) return item.ID;
+            }
+
+            ProjectEdenPlugin.Log.LogError(
+                $"「{entry.displayName}」：LDB 里找不到任何原版能量枢纽，接电网的参数抄不到。"
+                + "它会有面板、能选模式、额定功率也对，但**电网是 #0**，一焦耳都进不去");
+
+            return 0;
+        }
+
+        private static void ApplyGridHookup(ref PrefabDesc desc, int sourceId, MegaBuildingEntry entry)
+        {
+            if (sourceId <= 0) return;
+
 
             ItemProto source = LDB.items.Select(sourceId);
             PrefabDesc src = source?.prefabDesc;
@@ -702,8 +866,10 @@ namespace ProjectEden
             {
                 ProjectEdenPlugin.Log.LogWarning(
                     $"「{entry.displayName}」：物品 {sourceId}（{source.Name}）的 isPowerNode 是 false，" +
-                    "它大概不是一座发电建筑。接电网的参数仍会照抄，但很可能接不上——" +
-                    "把 generator.connectFromItemId 指到一座真的电厂上");
+                    "它自己都没挂在电网上，抄它是抄不来连接能力的。参数仍会照抄，但很可能接不上" +
+                    "——发电机那一路把 generator.connectFromItemId 指到一座真的电厂；" +
+                    "枢纽那一路是按 isPowerExchanger 反查的，查到这个说明原版枢纽本身就没有节点，" +
+                    "那得重新想模板");
             }
 
             desc.isPowerNode = src.isPowerNode;

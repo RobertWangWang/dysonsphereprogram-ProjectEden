@@ -336,6 +336,53 @@
       "//recipeType": "18。ERecipeType 没有上限（CLAUDE.md 已核实：枚举没有 Max 哨兵、没有按它下标的数组、两个 switch 都走 default、productionMask 不是按类型给位），9~14 和 16、17 已占，顺取 18。",
       "//model": "700。702~727 全被占了，700 是 664~727 这段自由区里仅剩的一个。**模型 ID 进存档**，所以启动日志里要是说「期望的模型 ID 700 不可用，改用 X」，就得把 X 写回来这里钉死。",
       "//slot": "建造栏第 1 类第 12 槽。和第 11 槽一样超出界面的 10 个按钮，启动时会有一条 WARNING，靠滚动到得了——BuildMenuSlotGuardPatches 的那条提示说的就是这个。",
+      "//singularity-vault": "**奇点储能厂：第十二座巨型建筑，也是第一座能量枢纽型的。** 它不生产任何东西——它把电从电网抽进电浆蓄能柜，或者把充满的柜子放回电网。",
+      "//why-exchanger": "**为什么是枢纽不是发电机。** 发电机会把燃料吃掉；枢纽放完电把空壳还给你。一座每分钟吃 20 个柜子、一个不还的电厂不是电池，是材料黑洞。原版把「充电 → 搬走 → 放电」建模成枢纽（蓄电器那一对），这里照它走。组件模型允许同一台实体挂多个：CreateEntityLogicComponents 里 isPowerExchanger（IL 08A9）和 isPowerGen（059E）、isAssembler（1122）、isStation（14FE）都是独立的顺序 if。",
+      "//power": "60 GW = 1e9 J/tick。一块电浆蓄能柜 179.82 GJ，所以充满或放完正好 3 秒——20 块/分，一条传送带供得上。PrefabDesc.exchangeEnergyPerTick 是 Int64，这个量级毫无压力。",
+      "//not-free-energy": "**它不增加总发电量。** 放电 60 GW 的背后必须有人先充进去 60 GW（往返效率 1.00，和原版蓄电器一致）。这条线的意义是把电**打包运走**——DSP 里跨星球送电只能靠蓄电器，而原版一块 540 MJ 实在太碎。",
+      "//recipeType": "**4（Assemble），而它在这里只有一个用途：让这座建筑本身做得出来。** 配了枢纽段之后 isAssembler 会被关掉（见 MegaBuildingRegistry 里那段注释），所以 assemblerRecipeType 对它没有意义；但同一个字段还决定**建造配方的 Type**，留 0 的话那条配方是 Type None——只能手搓，而这座建筑要 200 台蓄电器加 500 个能量矩阵，手搓不现实。填 4 就能进制造台。",
+      "//no-assembler": "它不生产、不收发货：没有装配机组件也没有物流站组件，只有能量枢纽。这样点开它就是原版枢纽窗口（三个模式按钮在那儿），既不会弹空的制造面板，也不会有几个窗口抢同一次点击——那一场争抢上一版直接抛了 NullReferenceException。",
+      "//no-audit": "整条储能线一个热值都没有：能量走 PrefabDesc.maxAcuEnergy 和这里的 exchangeEnergyPerTick，不是 ItemProto.HeatValue，**不进能量审计**——而那是对的，它消耗的是电网里真实存在的电。",
+      "itemId": 6676,
+      "modelId": 691,
+      "recipeId": 6686,
+      "displayName": "奇点储能厂",
+      "description": "三条弧形扶壁从底座斜撑上来，在半空把一根石英柱箍住。柱子里是一段被磁场捏细的电浆，而底层那排弹匣架不停地吞进空柜、吐出满柜——它不生产任何东西，只是把电网里此刻多出来的功率，压进能带着走的容器里。等到几十光年外需要的时候，再原样还回去。",
+      "iconName": "singularity-vault",
+      "recipeType": 4,
+      "machineTypeName": "储能设备",
+      "//grid": "**第 1 行第 13 列，而这个位置也是踩过一次才定的。** 第一版填的是第 2 行第 1 列，实测和 recipes.json 里钉着同一格的「原油X射线裂解」撞在一起——合成面板上那一格显示的是那条配方，储能厂看不见。**这一页的格位同样由两个配置文件共享**：巨型建筑在第 1 行（1~12 列，其中第 7 列是 machines.json 的风力发电机集群），recipes.json 的克隆配方从第 2 行开始。所以新巨型建筑应该继续往第 1 行右边排，不要下到第 2 行。col 13 仍在可见范围内——UIReplicatorWindow.RefreshIcons 裁掉的是 col >= 14。",
+      "gridRow": 1,
+      "gridCol": 13,
+      "//slot": "**14，而且这个号是踩过一次才定的。** 第一版填 13，实测把 machines.json 里钉着 1213 的小型速采机挤到了 1214——巨型建筑注册在机器之前，抢号的那一刻对方还没登记进占用账本。**第 12 类的槽位是两个配置文件共享的**（1~6、8~12 是巨型建筑，7 是风力发电机集群，13 是小型速采机），加新建筑前两边都要数一遍。和铀矿脉抢走模型 719、引发九座建筑连环位移是同一种错。",
+      "//slot-past-12": "13 以上超出原版 UIBuildMenu.StaticLoad 的 `slot <= 12`，所以 protos[12,14] 会是空的、开机核对那行会报「格位为空」——**这是预期的**，由 BuildMenuScrollPatches 的 _full 表接管（它按 BuildIndex 从 LDB 重建，支持到 36 槽），靠子项滑动就能翻到。小型速采机在 13 上也是这个情况。",
+      "slot": 14,
+      "idleEnergyPerTick": 1000000,
+      "workEnergyPerTick": 2000000,
+      "modelScale": 0.6,
+      "modelHeightScale": 1.4,
+      "tintR": 0.63,
+      "tintG": 0.72,
+      "tintB": 0.95,
+      "//exchanger": "**一座建筑服务两档，逐台可切。** 原版一台枢纽只认一对空/满（emptyId/fullId 来自 PrefabDesc），但实测那两个字段是**逐组件**的、而且进存档（Export @00B2/@00BE、Import @00CA/@00D6）——所以逐台改写之后，原版自己就把选择存下来了，不用 IModCanSave。切档的入口不是新界面：枢纽窗口里柜位图标的点击处理本来就读 player.inhandItemId，所以**拿着过载柜去点柜位**就切过去了，图标当场变。只在两边都空着时才切——柜子还在里头就改 id，那些柜子会变成取不出来的幽灵。",
+      "exchanger": {
+        "vaultMachineKey": "plasma-vault",
+        "alsoServes": [
+          "overload-vault"
+        ],
+        "energyPerTick": 1000000000
+      },
+      "recipeItemIds": [
+        2206,
+        6002
+      ],
+      "recipeItemCounts": [
+        200,
+        500
+      ],
+      "recipeTimeSpend": 900
+    },
+    {
       "itemId": 6659,
       "modelId": 700,
       "recipeId": 6671,

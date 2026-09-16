@@ -60,6 +60,223 @@
       ]
     },
     {
+      "//": "**裂变发电站：烧水那一路。** 铀燃料棒在堆芯里发热，热量烧水推汽轮机——和火力发电厂是同一套下游，区别只在热从哪来。所以它整台克隆自火力发电厂。",
+      "//efficiency": "**0.35 = 真实核电站的热效率。** 这不是罚分，是蒸汽循环本身的上限：堆芯出口温度受包壳材料限制，压水堆约 330°C，卡诺天花板就压在那里。原版火力发电厂 0.8、微型聚变 1.0 都是原版自己给的慷慨数字，本 mod 不去改它们；新加的这一档按真实值给，正是为了让下面那座直转堆的 0.60 有意义。",
+      "//fuelMask": "64 = bit 6。**这一位是量出来的**：原版那个「只有 bit 0~5」的上限，唯一来源是 ItemProto..cctor 里写死的 new int[64][]，而 InitFuelNeeds 的循环边界读的是数组自身长度——所以撑长数组再让原版自己重建就解锁了，见 ProjectEdenPlugin.RefreshFuelNeeds。真上限是 PowerGeneratorComponent.fuelMask 的 Int16 宽度，即 bit 14。",
+      "//power": "×10 = 21.6 MW，排在微型聚变发电站（15 MW）之上、人造恒星（72 MW）之下。裂变是「稳定的大基荷」，不是尖端科技，这个位次对得上它在科技树里的身份。",
+      "//modelId": "697 是实测的空位（启动日志的「模型号余量」那一行报出来的）。**别照 ResolveModelId 的回退建议钉号**——它扫到的第一个空位可能是别的注册器钉着、只是还没登记的号，铀矿脉为此引发过九座建筑的连环位移。",
+      "key": "fission-plant",
+      "enabled": true,
+      "kind": "generator",
+      "displayName": "裂变发电站",
+      "description": "几百根铀燃料棒插进堆芯，彼此漏出的中子把对方点燃，凑成一次刚好自持的链式反应。放出来的能量九成以上是碎片撞进周围物质时变成的热——于是这座电站的下游和烧煤的那座没有分别：烧水、推汽轮机、并网。真正的差别在于，一根棒能烧上很久。",
+      "copyFromItemId": 2204,
+      "itemId": 6666,
+      "modelId": 697,
+      "tint": [
+        0.62,
+        0.92,
+        0.7
+      ],
+      "iconHue": 155.0,
+      "iconSaturationScale": 1.15,
+      "iconMinSaturation": 0.2,
+      "iconValueScale": 1.0,
+      "gridIndex": 0,
+      "buildIndex": 0,
+      "generator": {
+        "powerMultiplier": 10.0,
+        "efficiency": 0.35,
+        "fuelMask": 64
+      },
+      "recipeId": 6680,
+      "recipeHandcraftOnly": false,
+      "recipeTimeSpend": 600,
+      "recipeGridIndex": 0,
+      "//recipeItems": "10 台火力发电厂对应 ×10 的功率，和可燃性液体发电厂那条「一百台就是一百台」同一个写法。钛合金是压力容器和堆内构件。",
+      "recipeItems": [
+        {
+          "id": 2204,
+          "count": 10
+        },
+        {
+          "ref": "vanilla:钛合金",
+          "count": 40
+        },
+        {
+          "id": 6002,
+          "count": 10
+        }
+      ]
+    },
+    {
+      "//": "**碎片直转堆：不烧水那一路。** 裂变碎片本身就是高速带电离子，只要燃料层薄到它们飞得出来，就能直接收集成电流——整座建筑没有汽轮机。",
+      "//efficiency": "**0.60 = 0.80 × 0.75，两项都有出处。** 0.80 是裂变能量里带电碎片占的份额（其余是中子和瞬发γ，收集不到）；0.75 是静电收集极的效率。所以它比烧水的 0.35 高出近一倍——**直转卖的不是「多发电」，是「少浪费」**。",
+      "//tradeoff": "代价在燃料侧而不在这里：薄膜裂变燃料每件只有 75 MJ（铀燃料棒 150 MJ 的一半），因为燃料必须摊成几微米的薄层，同样体积装不了多少铀。功率也只有 13 MW。所以两座电站是一对真选择——要总量选烧水，要省铀选直转。",
+      "//fuelMask": "128 = bit 7。和裂变发电站的 64 **互不通用是物理决定的**：一个要厚芯块维持链式反应，一个要薄到碎片飞得出来。",
+      "key": "fragment-converter",
+      "enabled": true,
+      "kind": "generator",
+      "displayName": "碎片直转堆",
+      "description": "一叠薄如蝉翼的燃料膜和收集极交替排着，中间留着真空。裂变碎片带着两个原子核分开时的全部动能冲过间隙、撞进收集极，在那里直接变成电流——没有蒸汽，没有叶片，没有一个会转的零件。安静得听不出它在发电。",
+      "copyFromItemId": 2204,
+      "itemId": 6667,
+      "modelId": 696,
+      "tint": [
+        0.55,
+        0.85,
+        1.0
+      ],
+      "iconHue": 195.0,
+      "iconSaturationScale": 1.2,
+      "iconMinSaturation": 0.22,
+      "iconValueScale": 1.05,
+      "gridIndex": 0,
+      "buildIndex": 0,
+      "generator": {
+        "powerMultiplier": 6.0,
+        "efficiency": 0.6,
+        "fuelMask": 128
+      },
+      "recipeId": 6681,
+      "recipeHandcraftOnly": false,
+      "recipeTimeSpend": 600,
+      "recipeGridIndex": 0,
+      "//recipeItems": "**不含火力发电厂**，因为它没有汽轮机——整座建筑是收集极堆叠。石墨烯当收集极、高纯硅块当绝缘与馈通、钛合金做真空壳。",
+      "recipeItems": [
+        {
+          "ref": "vanilla:石墨烯",
+          "count": 60
+        },
+        {
+          "ref": "vanilla:高纯硅块",
+          "count": 40
+        },
+        {
+          "ref": "vanilla:钛合金",
+          "count": 30
+        },
+        {
+          "id": 6002,
+          "count": 20
+        }
+      ]
+    },
+    {
+      "//": "**电浆蓄能柜：把电打包运走用的高密度蓄电器。** 它和原版蓄电器是同一种东西，只是大了两个数量级——所以整台克隆 2206，只改容量和进出功率。",
+      "//capacity": "×333 = 179.8 GJ，原版满蓄电器是 540 MJ。这个倍率不是拍的：它要让一块能喂奇点储能厂放电三秒（60 GW × 3 s = 180 GJ），而三秒一块正好是一条传送带供得上的节奏（20 块/分）。",
+      "//not-fuel": "**满变体显式不作燃料（fuelType −1）。** 原版满蓄电器 540 MJ 能进机甲反应堆；放大 333 倍就是机甲无限续航。容量和「能不能当机甲燃料」是两条轴，这里把后一条关掉——高密度储能这条线要的是前者。",
+      "//audit": "蓄电器的能量走 PrefabDesc.maxAcuEnergy，不是 ItemProto.HeatValue，**不进能量审计**。能量由枢纽从电网抽走，那是真实存在的电，和原版蓄电器一模一样。",
+      "key": "plasma-vault",
+      "enabled": true,
+      "kind": "accumulator",
+      "displayName": "电浆蓄能柜",
+      "description": "电离玻璃围成的环形腔，里头兜着一团始终维持在简并态边缘的电浆。能量不是存在化学键里，而是存在那团电浆自己的压力里——所以同样的体积能塞进几百倍的电，代价是腔壁一旦失压，存进去的东西会在一瞬间全部还给你。",
+      "copyFromItemId": 2206,
+      "itemId": 6672,
+      "modelId": 693,
+      "gridIndex": 0,
+      "buildIndex": 0,
+      "tint": [
+        0.7,
+        0.55,
+        1.0
+      ],
+      "iconHue": 280.0,
+      "iconSaturationScale": 1.25,
+      "iconMinSaturation": 0.2,
+      "iconValueScale": 1.0,
+      "accumulator": {
+        "capacityMultiplier": 333.0,
+        "//inputMultiplier": "自充电速率也要跟着放大，否则一台 180 GJ 的柜子挂在电网上要充到天荒地老。真正的充能路径是枢纽，但摆在电网里慢慢充也该是可行的。实际绝对值由注册日志打出来，要钉再回填。",
+        "inputMultiplier": 200.0,
+        "outputMultiplier": 200.0,
+        "fullVariant": {
+          "itemId": 6673,
+          "displayName": "电浆蓄能柜（满）",
+          "description": "充满的电浆蓄能柜。腔内的压力已经顶到设计上限，外壳摸上去是温的——那是约束场自己的损耗。它是这条线真正的产品：一块能装进传送带、能跨星系运输的电。",
+          "copyFromItemId": 2207,
+          "gridIndex": 0,
+          "//fuelType": "**−1 = 显式不是燃料**，理由见上面的 //not-fuel。0 会继承原版的 8（机甲燃料），那正是要避免的。",
+          "fuelType": -1,
+          "heatValue": 0
+        }
+      },
+      "recipeId": 6684,
+      "recipeTimeSpend": 600,
+      "recipeGridIndex": 0,
+      "//recipeItems": "电离玻璃做腔壁，这是它唯一的用途；钛合金做外壳；1 台原版蓄电器当基础件，和锂电池那条一个写法。",
+      "recipeItems": [
+        {
+          "id": 2206,
+          "count": 1
+        },
+        {
+          "ref": "ionised-glass",
+          "count": 12
+        },
+        {
+          "ref": "vanilla:钛合金",
+          "count": 8
+        }
+      ]
+    },
+    {
+      "//": "**过载蓄能柜：同一条线的上一档，容量翻倍。** 唯一的入口是凝核稳定剂——视界凝核那条线的全部意义。",
+      "//capacity": "×666 = 359.6 GJ。翻倍而不是再翻一个数量级：它要和电浆蓄能柜共用同一座枢纽的节奏（60 GW 放六秒），玩家换的是「同样的带子运走两倍的电」。",
+      "key": "overload-vault",
+      "enabled": true,
+      "kind": "accumulator",
+      "displayName": "过载蓄能柜",
+      "description": "在电浆腔外再套一层凝核约束。视界凝核把腔内的时空压得比外面稍慢一点，于是同样的压力上限能兜住两倍的能量——代价是这层壳里封着一块从黑洞边上捞回来的东西，而没有人敢保证它会一直安分。",
+      "copyFromItemId": 2206,
+      "itemId": 6674,
+      "modelId": 692,
+      "gridIndex": 0,
+      "buildIndex": 0,
+      "tint": [
+        0.55,
+        0.48,
+        1.0
+      ],
+      "iconHue": 258.0,
+      "iconSaturationScale": 1.4,
+      "iconMinSaturation": 0.26,
+      "iconValueScale": 0.92,
+      "accumulator": {
+        "capacityMultiplier": 666.0,
+        "inputMultiplier": 200.0,
+        "outputMultiplier": 200.0,
+        "fullVariant": {
+          "itemId": 6675,
+          "displayName": "过载蓄能柜（满）",
+          "description": "充满的过载蓄能柜。约束场把内部的时间拖慢了万分之一，从外面看，那团电浆的翻涌像是被按了慢放。",
+          "copyFromItemId": 2207,
+          "gridIndex": 0,
+          "fuelType": -1,
+          "heatValue": 0
+        }
+      },
+      "recipeId": 6685,
+      "recipeTimeSpend": 900,
+      "recipeGridIndex": 0,
+      "//recipeItems": "以电浆蓄能柜为基础件再加凝核稳定剂——这样「过载档是上一档的升级」在配方上直接读得出来，不用靠描述去说。",
+      "recipeItems": [
+        {
+          "ref": "plasma-vault",
+          "count": 1
+        },
+        {
+          "ref": "core-stabiliser",
+          "count": 2
+        },
+        {
+          "ref": "ionised-glass",
+          "count": 8
+        }
+      ]
+    },
+    {
       "key": "electrochem",
       "enabled": true,
       "displayName": "电化学厂",

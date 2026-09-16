@@ -66,14 +66,67 @@ namespace ProjectEden.Utils
             Recipe,
         }
 
-        internal static void ReserveGrid(int grid, GridKind kind)
+        /// <summary>登记过这个格位的是谁。<b>只为报重复用</b>，见 <see cref="ReserveGrid"/>。</summary>
+        private static readonly Dictionary<long, string> GridOwners = new Dictionary<long, string>();
+
+        internal static void ReserveGrid(int grid, GridKind kind) { ReserveGrid(grid, kind, null); }
+
+        /// <summary>
+        /// 登记一个合成面板格位。
+        ///
+        /// <b>重复登记会吼出来，而且必须吼。</b> 巨型建筑和 recipes.json 的克隆配方都是
+        /// <b>手工钉死</b>格位的（它们要在面板上排成整齐的一块），两边都只登记、不解析
+        /// ——于是同一格被登记两次时没有任何人会发现。实测撞过一次：奇点储能厂配的
+        /// 第 2 行第 1 列，正是「原油X射线裂解」钉着的格子，面板上那一格显示的是那条配方，
+        /// 建筑看不见，而开机日志一个字都没说。
+        ///
+        /// <b>这里不自动挪，只报。</b> 自动挪会把刻意排齐的一块打乱，而且挪走的是谁全看
+        /// 注册顺序；手工钉的东西撞车了，就该由人去改配置。
+        /// </summary>
+        internal static void ReserveGrid(int grid, GridKind kind, string label)
         {
             if (grid <= 0) return;
 
-            (kind == GridKind.Item ? ReservedItemGrids : ReservedRecipeGrids).Add(grid);
+            HashSet<int> set = kind == GridKind.Item ? ReservedItemGrids : ReservedRecipeGrids;
+            long key = (long)(int)kind << 32 | (uint)grid;
+
+            if (!set.Add(grid))
+            {
+                GridOwners.TryGetValue(key, out string first);
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"合成面板{(kind == GridKind.Item ? "物品" : "配方")}格位 {grid} 被登记了两次："
+                    + $"{(string.IsNullOrEmpty(first) ? "先前某条" : first)} 和 "
+                    + $"{(string.IsNullOrEmpty(label) ? "本条" : label)}。"
+                    + "**面板上那一格只会显示其中一个**，另一个从此看不见，而且不报错。"
+                    + "这两处格位都是手工钉的（megabuildings.json 排第 1 行、recipes.json 从第 2 行起），"
+                    + "去改其中一边");
+            }
+
+            if (!string.IsNullOrEmpty(label)) GridOwners[key] = label;
         }
 
-        internal static void ReserveBuildIndex(int index) { if (index > 0) ReservedBuildIndices.Add(index); }
+        /// <summary>
+        /// 谁占了这个建造栏槽位。**只为报错用**——位移警告必须说得出「是谁抢的」。
+        ///
+        /// <b>不记名字的话，那条警告的建议是错的。</b> 它只会说「槽位 1213 被占用，
+        /// 改用 1214，请把配置固定为 1214」，而照做只是把冲突往后推一格：真正的问题是
+        /// <b>另一个配置文件里有人钉着 1213，只是它注册得比你晚</b>。
+        /// 第 12 类的槽位由 megabuildings.json 和 machines.json 共享，两边都不写这件事。
+        /// 实测踩过：奇点储能厂抢走了小型速采机的 1213。
+        /// </summary>
+        private static readonly Dictionary<int, string> BuildIndexOwners = new Dictionary<int, string>();
+
+        internal static void ReserveBuildIndex(int index) { ReserveBuildIndex(index, null); }
+
+        internal static void ReserveBuildIndex(int index, string label)
+        {
+            if (index <= 0) return;
+
+            ReservedBuildIndices.Add(index);
+
+            if (!string.IsNullOrEmpty(label)) BuildIndexOwners[index] = label;
+        }
 
         /// <summary>
         /// 本 mod 这一轮登记过的物品 / 配方 ID。
@@ -228,9 +281,62 @@ namespace ProjectEden.Utils
         ///
         /// 找不到就从上界往下倒着找——低位号全是原版的，从下往上找纯属浪费。
         /// </summary>
+        /// <summary>
+        /// 报还剩几个模型号可用。
+        ///
+        /// <b>这是一种会悄悄用完的资源，而用完的症状不是报错。</b>
+        /// 上限是 <c>LDB.models.dataArray.Length + 64</c>（本机实测 728），而原版自己
+        /// 一直排到 700 以上——**能用的只有 701~727 那 27 个**，本 mod 已经占掉大半。
+        /// 一旦扫不到空位，<see cref="ResolveModelId"/> 返回 0，建筑就没有模型，
+        /// 而那时候才发现已经太晚：模型号进存档，回头改号会让老存档里的实体渲染成别的东西。
+        ///
+        /// 所以每局都把余量打出来，**在还剩几个的时候就能看见**，而不是等它变成 0。
+        /// </summary>
+        internal static void ReportModelBudget()
+        {
+            ModelProto[] all = LDB.models?.dataArray;
+
+            if (all == null) return;
+
+            // **必须用注册那一刻的上界，不是现在的。** 上界是 dataArray.Length + 64，
+            // 而 dataArray 会随着本 mod 自己注册模型一起变长——到 PostAddData 时它已经
+            // 涨到 758，而真正决定能不能分配的是 PreAddData 那一刻的 728。
+            // 第一版就是拿现在的长度算的，于是把 750~757 报成「空着」，
+            // 而那几个号 ResolveModelId 永远分配不到。
+            // 和矿种数组那条是同一族：**衡量一张还在变的表的当前内容，报的是真事实、假结论。**
+            int bound = _modelBound > 0 ? _modelBound : all.Length + 64;
+            var free = new List<int>();
+
+            for (int id = bound - 1; id > 0 && free.Count < 8; id--)
+                if (!ModelIdTaken(id))
+                    free.Add(id);
+
+            if (free.Count == 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"模型号已用尽：上限 {bound}，一个空位都没有了。再加建筑或矿脉会拿到 0 号模型，"
+                    + "那是「建好了但什么都不显示」，而且不报错");
+
+                return;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"模型号余量：上限 {bound}，从高往低还空着 {(free.Count >= 8 ? "至少 8" : free.Count.ToString())} 个"
+                + $"（{string.Join("、", free.ConvertAll(x => x.ToString()).ToArray())}）。"
+                + "模型号进存档，新建筑请把这里报出来的号固定到配置里");
+        }
+
+        /// <summary>
+        /// 注册那一刻的模型号上界。<see cref="ReportModelBudget"/> 必须用它，
+        /// 而不是报告时现算——那时 <c>dataArray</c> 已经被本 mod 自己撑长了。
+        /// </summary>
+        private static int _modelBound;
+
         internal static int ResolveModelId(int wanted, string label)
         {
             int bound = LDB.models.dataArray.Length + 64;
+
+            if (_modelBound == 0) _modelBound = bound;
 
             if (wanted > 0 && wanted < bound && !ModelIdTaken(wanted)) return wanted;
 
@@ -425,8 +531,19 @@ namespace ProjectEden.Utils
                     if (Taken(index)) continue;
 
                     if (index != wanted)
-                        ProjectEdenPlugin.Log.LogInfo(
-                            $"{label}的建造栏槽位 {wanted} 已被占用，改用 {index}（第 {cat} 类第 {s} 槽）");
+                    {
+                        // 说出是谁抢的。只报「被占用了」的话，读日志的人会照建议把配置钉成
+                        // 新号，而那只是把冲突往后推一格——真正要改的是**先注册的那一方别去抢**
+                        BuildIndexOwners.TryGetValue(wanted, out string thief);
+
+                        ProjectEdenPlugin.Log.LogWarning(
+                            $"{label}的建造栏槽位 {wanted} 已被"
+                            + (string.IsNullOrEmpty(thief) ? "占用" : $"**{thief}**占用")
+                            + $"，改用 {index}（第 {cat} 类第 {s} 槽）。"
+                            + "**别照这条把配置钉成新号**——第 12 类的槽位由 megabuildings.json 和 "
+                            + "machines.json 共享，而巨型建筑注册在机器之前；该改的是先注册的那一方"
+                            + "换一个没人钉的号");
+                    }
 
                     return index;
                 }
