@@ -3371,6 +3371,7 @@
       "description": "菌丝基体按阵列长开，菌落在其间代谢供养。长成之后整块都是活的。",
       "recipeId": 6644,
       "type": 11,
+      "//timeSpend": "这个 180 是注册时的值，**运行时会被 lab.json 的 matrixTimeSpend 覆盖掉**——那一项按 LabComponent.matrixIds 扫「全部矩阵」，生物矩阵在表里，所以一起改。要单独给它一个和别的矩阵不一样的时间，得先把 matrixTimeSpend 填 0。",
       "timeSpend": 180,
       "gridIndex": 1601,
       "//icon": "不配 icon 也不配 iconFrom，让它跟着产物走——产物的图标是改色出来的，配方要是自己去指原版矩阵，拿到的是没改色的那张，两边就对不上了。见 OreRegistry.SyncStandaloneRecipeIcons。",

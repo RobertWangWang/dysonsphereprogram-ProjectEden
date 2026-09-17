@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.9.5";
+        public const string VERSION = "1.9.6";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -252,6 +252,18 @@ namespace ProjectEden
             // 后面没有任何一步会改，跟着一起挪就成了照搬。
             LDBTool.PostAddDataAction += FuelSurvey.OnPostAddData;
 
+            // 矩阵配方时间：**必须排在 BioMatrixPatches 之后**（它按 LabComponent.matrixIds 扫，
+            // 那张表是 BioMatrixPatches 接长的），而且**必须在 PostAddDataAction 里**——
+            // LDBTool 在这个动作之后才调 RecipeProto.InitRecipeItems，
+            // timeSpend/extraTimeSpend 正是在那里从 TimeSpend 算出来的，所以改是白捡的。
+            LDBTool.PostAddDataAction += MatrixLabPatches.ApplyMatrixTime;
+
+            // 矩阵生产时间：同样是「原版数值只能在运行时读」，而且**必须排在这里**——
+            // 它按 LabComponent.matrixIds 遍历，那张表是 BioMatrixPatches 接长的；
+            // 而它要打的宇宙矩阵配方，第七种原料是 UniverseMatrixPatches 加的。
+            // 排在两者之前就会报一张「六种矩阵、宇宙矩阵六种原料」的真事实、假末态。
+            LDBTool.PostAddDataAction += MatrixSurvey.OnPostAddData;
+
             // 模型号余量：一种会悄悄用完的资源，用完的症状是「建筑没有模型」而不是报错
             LDBTool.PostAddDataAction += ProtoSlots.ReportModelBudget;
 
@@ -300,6 +312,8 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
             LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;
+            LDBTool.PostAddDataAction -= MatrixLabPatches.ApplyMatrixTime;
+            LDBTool.PostAddDataAction -= MatrixSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= MinerStationSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= BioMatrixPatches.OnPostAddData;

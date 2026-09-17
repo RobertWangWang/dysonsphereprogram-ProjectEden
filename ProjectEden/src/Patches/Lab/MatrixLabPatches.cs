@@ -27,8 +27,14 @@ namespace ProjectEden.Patches
     /// 尺度：RecipeProto.InitRecipeItems 里 timeSpend = TimeSpend × 10000、
     /// extraTimeSpend = TimeSpend × 100000，TimeSpend 的单位是 tick。1 倍速 = 10000。
     /// 最慢的矩阵是引力矩阵 24 秒 = 1440 tick：timeSpend 1440 万、extraTimeSpend 1.44 亿。
-    /// 取 1 亿（10000 倍速）时 extraSpeed = speed × incTableMilli × 10 到 2.5 亿、
-    /// extraTime 峰值约 3.9 亿，离 Int32 的 21.4 亿还有一个数量级。
+    /// 取 1 亿（10000 倍速）时 extraSpeed = speed × incTableMilli × 10 到 <b>4 亿</b>，
+    /// 离 Int32 的 21.4 亿还差 5.4 倍。
+    ///
+    /// 上面这些数字<b>是 MatrixSurvey 每局实测出来的，不是手算的</b>——它按
+    /// LabComponent.matrixIds 扫出最慢配方，再拿 Cargo.incTableMilli 的实际最大值核对。
+    /// 这一段原本写的是 2.5 亿，那是按增产剂 Mk.III（表里的第 4 级）算的，
+    /// 而喷涂表一共十一级、满级 +40%，本 mod 的活性增产剂够得着。
+    /// 换句话说：手算的那个数<b>当时就偏小，而且没有任何东西会告诉你</b>。
     /// </summary>
     [HarmonyPatch]
     internal static class MatrixLabPatches
@@ -117,6 +123,132 @@ namespace ProjectEden.Patches
             _matrixCapScaled = wanted * MatrixScale;
 
             ProjectEdenPlugin.Log.LogInfo($"研究模式每种矩阵存量上限：10 → {wanted}");
+        }
+
+        // ── 矩阵配方时间 ──────────────────────────────────────
+
+        /// <summary>
+        /// 把每一种研究矩阵的配方时间改成配置值（<c>lab.json</c> 的 <c>matrixTimeSpend</c>，单位帧）。
+        ///
+        /// <b>判据是 <c>LabComponent.matrixIds</c>，不是七条硬编码的配方号。</b>
+        /// 要求是「全部矩阵」，而那个数组<b>就是引擎自己对「什么算研究矩阵」的回答</b>；
+        /// 生物矩阵已由 <see cref="BioMatrixPatches"/> 接在它后面，所以一起覆盖到，
+        /// 将来再加第八种也不用回来改这里。把七个配方号抄进配置，是本文件反复记过的
+        /// 「同一个事实存了 N 份手工副本」——总有一天只更新其中三份。
+        ///
+        /// <b>时机必须在 <c>PostAddDataAction</c>，而且要排在 <c>BioMatrixPatches</c> 之后。</b>
+        /// 两件事：一是 <c>matrixIds</c> 是它接长的，早了就只扫到六种；
+        /// 二是 LDBTool 在这个动作<b>之后</b>才调 <c>RecipeProto.InitRecipeItems</c>，
+        /// 而 <c>timeSpend = TimeSpend × 10000</c> / <c>extraTimeSpend = × 100000</c>
+        /// 正是在那里算的（IL @003C / @004A）——所以改 <c>TimeSpend</c> 是白捡的，
+        /// 不需要自己去刷 <c>recipeExecuteData</c>。和宇宙矩阵加第七种原料同一个时机。
+        ///
+        /// <b>存档安全：改的是值，不是数组长度。</b> 本仓库的老账分得很清——
+        /// 改 <c>Items</c>/<c>Results</c> 的<b>长度</b>会让 <c>Export</c> 写出的
+        /// <c>served</c>/<c>produced</c> 条数对不上，而改 <c>TimeSpend</c> 只是个值。
+        /// 已建成的研究站也不用运行时补：<c>LabComponent.Import</c> @0381–0391
+        /// 是从 <c>RecipeProto.recipeExecuteData</c> 这张静态表里<b>重新取</b>的，
+        /// 读档就拿到新值。存档里那个 <c>time</c> 要是比新的 <c>timeSpend</c> 还大，
+        /// 下一帧直接结算掉，不会卡住。
+        ///
+        /// <b>副作用一条，已知且已被压住：</b><c>ProtoSignature.CalculateSignature</c>
+        /// 把 <c>TimeSpend</c> 写进签名（IL @0180），所以这一改会触发
+        /// <c>ABN_ProtoData</c> 的 recipes(4) 判定——本 mod 光是注册配方就已经在触发它了，
+        /// <c>abnormality.json</c> 默认把它整个压住。
+        /// </summary>
+        internal static void ApplyMatrixTime()
+        {
+            int wanted = Config?.matrixTimeSpend ?? 0;
+
+            if (wanted <= 0)
+            {
+                // 报无聊的那一面：保持原版和「这段代码没上线」不能长得一样
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"矩阵配方时间：未启用（lab.json 的 matrixTimeSpend = {wanted}），保持原版");
+
+                return;
+            }
+
+            // 原版自己的下限：RecipeProto.Preload @00B7 是 `if (TimeSpend < 1) TimeSpend = 1`。
+            // 抄它的阈值，而不是自己定一个，两边就不会在边界上打架
+            if (wanted < 1) wanted = 1;
+
+            int[] ids = LabComponent.matrixIds;
+
+            if (ids == null || ids.Length == 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    "矩阵配方时间：LabComponent.matrixIds 是空的，一条都没改 —— 这不正常，原版至少有六种");
+
+                return;
+            }
+
+            RecipeProto[] recipes = LDB.recipes?.dataArray;
+
+            if (recipes == null)
+            {
+                ProjectEdenPlugin.Log.LogError("矩阵配方时间：LDB.recipes 还没建好，一条都没改");
+
+                return;
+            }
+
+            var changed = 0;
+            var kinds = 0;
+
+            foreach (int id in ids)
+            {
+                var hit = false;
+
+                foreach (RecipeProto recipe in recipes)
+                {
+                    if (recipe?.Results == null) continue;
+
+                    var makes = false;
+
+                    for (var i = 0; i < recipe.Results.Length; i++)
+                        if (recipe.Results[i] == id)
+                            makes = true;
+
+                    if (!makes) continue;
+
+                    hit = true;
+
+                    if (recipe.TimeSpend == wanted) continue;
+
+                    int before = recipe.TimeSpend;
+
+                    recipe.TimeSpend = wanted;
+                    changed++;
+
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"  配方「{recipe.Name}」时间：{before} 帧（{before / 60.0:0.##} 秒）"
+                        + $" → {wanted} 帧（{wanted / 60.0:0.##} 秒）");
+                }
+
+                if (hit)
+                {
+                    kinds++;
+
+                    continue;
+                }
+
+                // 一种矩阵扫不到产出配方，说明槽位表和配方表脱节，
+                // 而它在日志里和「我没扫」长得一样，所以显式说出来
+                ItemProto item = LDB.items?.Select(id);
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"矩阵配方时间：{item?.Name ?? id.ToString()}({id}) 没有任何配方产出它，跳过");
+            }
+
+            if (changed == 0)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"矩阵配方时间：{kinds} 种矩阵都已经是 {wanted} 帧了，一条都没改 —— "
+                    + "如果这不是你预期的，检查 matrixTimeSpend 是不是和原版值撞上了");
+            else
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"矩阵配方时间：{kinds} 种矩阵、改了 {changed} 条配方 → 每条 {wanted / 60.0:0.##} 秒。"
+                    + "注意研究站里的产能不会因此变化——引擎每帧只结算一个周期，"
+                    + "本 mod 的速度早已让每条配方都在一帧内填满，改的是手搓时间和面板显示");
         }
 
         /// <summary>供 IL 调用：研究模式矩阵存量上限（放大值）。</summary>
@@ -324,6 +456,9 @@ namespace ProjectEden.Patches
     {
         /// <summary>矩阵制造速度，10000 = 1 倍速。0 保持原版。</summary>
         public int assembleSpeed;
+
+        /// <summary>每一种研究矩阵的配方时间，单位帧（60 帧 = 1 秒）。0 保持原版。</summary>
+        public int matrixTimeSpend;
 
         /// <summary>生产模式每个原料格的存量上限（个）。0 保持原版。</summary>
         public int assembleStorage;

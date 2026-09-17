@@ -340,6 +340,11 @@ Only **production mode** (the side that makes matrices) is changed. **Research s
 - **Matrix production 10000x** (covers both the Matrix Lab and the Self-evolution Lab)
 - **10,000,000 each for input and output slots**
 - **250,000 of each matrix in research mode** (vanilla 10)
+- **All seven matrix recipes take 1 second** (vanilla: Electromagnetic 3 / Energy 6 / Structure 8 / Information 10 / Gravity 24 / Universe 15 seconds; the Bio Matrix was 3)
+
+> **This does not make labs produce faster — it changes hand-crafting.** The engine settles at most one recipe cycle per tick, and the 10000x above already fills every matrix recipe within a single tick, so a lab's output was and remains 60 per second. What actually changes is **how long one matrix takes to hand-craft** in the replicator, and the number of seconds shown in the panel.
+>
+> The set it covers is the engine's own matrix table (`LabComponent.matrixIds`), so the Bio Matrix is included. To retune it or restore vanilla, use `matrixTimeSpend` in `lab.json` (in **ticks**, 60 ticks = 1 second; 0 keeps vanilla) — drop an override in the profile, no rebuild needed.
 
 ### Automatic supply and shipping
 
