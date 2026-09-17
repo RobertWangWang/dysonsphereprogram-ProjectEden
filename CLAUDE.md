@@ -1292,6 +1292,88 @@ Making the icons punchier again is one `mul` argument in one function, not nine 
 
 **Budget: 788–2036 triangles per building** (≈ 2.4k–6.1k vertices), the same order as a vanilla building. Face subdivision is capped at 6 per edge precisely so one large flat wall cannot explode.
 
+### Stacked buildings blow out, and material tuning cannot fix it — `src/Patches/AdvancedMiner/StackedRenderPatches.cs`
+
+**The reported symptom was "a few hundred 小型速采机 stacked on one vein go blinding white". It
+took nine rounds, and the root cause was none of the eight things tried before it.** The whole
+episode is recorded because every wrong turn was a rule this file already states, applied to the
+wrong object.
+
+**The mechanism: coincident copies of a transparent or additive layer accumulate.** Opaque
+geometry stacked at the same position merely z-fights — one fragment per pixel survives, so N
+copies look like one. But a `Blend One One` layer with ZWrite off and ZTest **LEqual** (equal depth
+*passes*) adds N times, and an alpha-blended layer converges toward opaque as N grows. A 大型采矿机
+carries **four** materials, two of which are exactly those cases (queue 3000 additive, queue 3001
+glass). Vanilla never hits this because its build-spacing rule forbids stacking; **this repo lifts
+that rule** (`MinerBuildRulePatches`) and ships a fixed-rate miner whose whole design is "stack
+more of them", so several hundred coincident buildings is a normal state here.
+
+**Therefore per-copy material tuning is structurally the wrong lever.** Whatever each copy's
+contribution is reduced to, multiplying it by the stack count brings the total back. Eight rounds
+were spent discovering this the expensive way. The fix is `stackedRenderLimit` in
+`advancedminer.json`: draw at most N coincident same-proto buildings and withhold the rest from the
+renderer.
+
+**`EntityData.modelId == 0` is a vanilla-supported state, which is what makes withholding safe.**
+`RemoveEntityWithComponents` IL 07DB is `ldfld EntityData::modelId ; brfalse` — a zero `modelId`
+skips the whole `RemoveModel` block; and `CreateEntityDisplayComponents` opens with two `ret`s (null
+`ModelProto`, null `prefabDesc`) whose surviving entities are exactly that state. So the engine
+already copes.
+
+**Withhold in a postfix, never by returning false from a prefix.**
+`CreateEntityDisplayComponents` also builds the minimap block and computes inserter poses; skipping
+the method loses those. Let vanilla run, then `RemoveModel` + zero the field — the same pattern the
+vein-circle limiter uses. Colliders, clicking, the minimap and every logic component are untouched;
+only the GPU side changes.
+
+**Promote a replacement when the drawn one is dismantled.** Otherwise removing the visible building
+makes the whole stack vanish, which reads as "I just dismantled all of them" — a worse symptom than
+the one being fixed. Promotion calls `GPUInstancingManager.AddModel` directly rather than re-calling
+`CreateEntityDisplayComponents`, which would add a *second* minimap block.
+
+#### What the nine rounds actually cost, and the four rules they re-taught
+
+**1. Material properties can only be measured, never recalled.** They live in `resources.assets`.
+Four separate rounds were lost to guessed property names: `_EmissionColor` (**does not exist on any
+of the four shaders**), `_Color` alone (the albedo chain continues into `_AlbedoMultiplier`),
+and the PBR metallic/smooth/specular trio (useless against an **Unlit** layer, which by definition
+ignores lighting). `MaterialProbe` now dumps a material's shader, queue, keywords and every declared
+property with its value. **`materialScales` takes property names as data** precisely so the next
+wrong guess costs a config edit rather than a build.
+
+**2. "Dump once" must mean once per kind, not once per building — and this one hid the answer.**
+The first probe printed only a building's *first* material. That table was incomplete **with no
+sign that it was incomplete**, and the culprit sat in the third shader. The same lesson is already
+recorded for `MegaStationPatches`' storage dump; it was re-earned here at a much higher price.
+
+**3. A sentinel must not collide with a legitimate value.** The brightness knobs first used "0 or 1
+means don't touch", so when the owner asked to turn a reflection off and wrote `0`, nothing
+happened. The fields are now `float?` — **absent** means don't touch. Same family as "one constant
+serving as both a limit and a sentinel".
+
+**4. When four consecutive fixes each apply correctly and change nothing, the object is wrong, not
+the dose.** That was the actual signal, and it was read as "press harder" four times. What ended it
+was `ModelRenderCensus` — enumerate every model currently being drawn with its instance count, and
+the offending object names itself (`模型 699 × 398`, with nothing else scaling with the building
+count). **When a picture is impossible, enumerate the objects rather than re-reading the path you
+already believe in** — the same move `MultiProductUIPatches.DumpBox` made.
+
+Two smaller measured findings worth keeping:
+
+- **`_VeinColorMultiplier` + `_VeinColorTex`** on the drill shaders paint *the mined vein's colour*
+  onto the **miner's own mesh**. That is why the glow was ore-coloured (copper orange, iron cyan,
+  coal not at all) — the colour is *taken from* the vein but *drawn on* the building, so turning off
+  the vein-side display explained nothing. Colour is evidence about a value's **source**, not about
+  where it is rendered.
+- **`_ToggleVerta`** is the per-material vertex-animation switch. It is the material-side answer to
+  "can the animation be turned off", which an earlier round had looked for only in `AnimData` (the
+  driving *data*, not the switch).
+
+**And one config-format trap: `Dictionary<string, float>` cannot carry `//` comment keys.** This
+repo annotates JSON with sibling `"//name"` keys everywhere, which works for object fields and
+**fails for a dictionary** — the string value will not convert and the whole config fails to
+deserialize. Put the note outside the map.
+
 ### Extra recipes — `src/ExtraRecipeRegistry.cs`
 
 DSP filters the recipe picker by a **single** `ERecipeType` (`UIRecipePicker.RefreshIcons` compares `recipe.Type`; `UIAssemblerWindow` passes `prefabDesc.assemblerRecipeType`), so a machine only ever accepts one type. To let a Chemical machine do a Refine job, cloning the recipe under the new type is far cheaper than teaching the picker and `AssemblerComponent.SetRecipe` about multiple types.
@@ -1894,7 +1976,7 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
-The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — and whether a pump may draw 岩浆 from a lava ocean), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
+The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 

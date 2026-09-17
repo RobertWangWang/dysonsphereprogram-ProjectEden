@@ -1,6 +1,7 @@
 #pragma warning disable 649 // 字段由 JSON 反序列化赋值
 
 using System;
+using System.Collections.Generic;
 
 namespace ProjectEden.Utils
 {
@@ -90,8 +91,126 @@ namespace ProjectEden.Utils
         /// </summary>
         public int buildIndex;
 
-        /// <summary>模型材质的染色，RGB 0~1。留空则不染</summary>
+        /// <summary>
+        /// 模型材质的染色，RGB <b>0~1</b>。留空则不染。
+        ///
+        /// <b>不能超过 1，而且这一条是踩出来的。</b><c>_Color</c> 在 DSP 的 PBR 着色器里是
+        /// <b>反照率乘子</b>（巨型建筑那一节记的「_Color 乘的是生成图集」说的就是它），
+        /// 大于 1 意味着这个表面反射的能量比它接收的还多——单台就已经顶在泛光阈值上，
+        /// 而把几十台叠在一处时，一小片屏幕里挤满过亮表面，泛光会把它们糊成白花花的一团。
+        /// 小型速采机曾是全仓库唯一一台超标的（1.15），症状正是叠放时「集中反光」。
+        ///
+        /// <c>MachineRegistry.TintMaterials</c> 现在会<b>等比压回 1.0 并点名警告</b>
+        /// （等比而非逐通道夹：逐通道会连色相一起改掉）。
+        /// </summary>
         public float[] tint;
+
+        // ── 亮度：五个乘子，**不写**才表示不动 ──────────────────
+        //
+        // **哨兵值是 null 不是 0，这一条是踩出来的。** 第一版用「0 或 1 表示不动」，
+        // 于是玩家想把反光关掉、照直写了 0，结果那一项纹丝不动——0 是他真正想要的值，
+        // 不能同时又当「没配置」的标记。JSON 里不写这个字段就是 null，这才是
+        // 「没配置」的正确表达。和「一个常量同时当上限和哨兵」是同一族的错。
+        //
+        // **这四个名字是量出来的，不是猜的。** materialReport 在小型速采机身上打出
+        // 它的着色器是 VF Shaders/Forward/PBR Standard Mining Drill Mk2，属性表里
+        // 根本没有 _EmissionColor（本文件上一版写的就是这个名字，打空了），真正
+        // 管事的是下面这四个。写入一律由 Material.HasProperty 守卫，属性不存在时
+        // 明说而不是假装成功——「设了但没看到变化」和「根本没有这个属性」必须分得开。
+        //
+        // **给的是乘子不是绝对值**，和蓄电器 / 发电机那两类克隆同一个理由：源建筑的
+        // 基准值在 resources.assets 里，离线读不到，写绝对值等于猜。
+
+        /// <summary>
+        /// <c>_AlbedoMultiplier</c> 的乘子。
+        ///
+        /// <b>这是「叠放反光」的真元凶。</b>有效反照率是 <c>_Color × _AlbedoMultiplier</c>，
+        /// 而采矿机着色器的 <c>_AlbedoMultiplier</c> 是 <b>1.5</b>——所以把 tint 从 1.15
+        /// 压到 1.0 之后，有效值仍然是 1.5，依旧大于 1，依旧顶在泛光阈值上。
+        /// 只压 <c>_Color</c> 那一步实际只削掉了 13%。
+        ///
+        /// 取值是<b>推出来的</b>：要让有效反照率不超过 1，需要
+        /// <c>albedoScale = 1 / _AlbedoMultiplier</c>，即 1/1.5 ≈ 0.667。
+        /// </summary>
+        public float? albedoScale;
+
+        /// <summary>
+        /// <c>_MetallicMultiplier</c> 的乘子。<b>要「关掉反光」，这才是主开关。</b>
+        ///
+        /// 金属工作流下，镜面反射的颜色取自<b>反照率</b>而不是 <c>_SpecularColor</c>，
+        /// 所以对一台金属质感的建筑，只压 <c>_SpecularColor</c> 压不干净——高光照样
+        /// 从反照率那条路回来。把金属度归零，表面就成了电介质，配合
+        /// <see cref="smoothScale"/> = 0（完全粗糙）几乎不产生任何方向性反射。
+        /// </summary>
+        public float? metallicScale;
+
+        /// <summary>
+        /// <c>_EmissionMultiplier</c> 的乘子。采矿机着色器的基准值是 <b>10</b>，
+        /// 且 <c>_EmissionUsePower = 1</c>，即发光强度跟着 <c>AnimData.power</c> 走
+        /// ——机器在转时才亮。这是<b>平衡旋钮，不是推导值</b>：原版单台 ×10 没问题，
+        /// 几十台挤在一处才成灾。
+        /// </summary>
+        public float? emissionScale;
+
+        /// <summary>
+        /// <c>_SpecularColor</c> 的乘子（只缩放 RGB，保留 alpha）。基准是纯白满强度。
+        /// 玩家说的「集中反光」字面上就是这一项：镜面高光的强度。
+        /// </summary>
+        public float? specularScale;
+
+        /// <summary>
+        /// <c>_SmoothMultiplier</c> 的乘子。光滑度决定高光「集中」到什么程度——
+        /// 粗糙表面的高光又宽又暗，光滑表面的又紧又亮。压它是<b>物理上最对路</b>的
+        /// 那个反眩光旋钮：它不是把亮度调低，而是把同样的能量摊开。
+        /// </summary>
+        public float? smoothScale;
+
+        /// <summary>
+        /// <c>_Multiplier</c> 的乘子——<b>加法混合那一层的强度，也是「叠放会炸」的真正成因。</b>
+        ///
+        /// 大型采矿机身上挂着四种着色器，其中一种是
+        /// <c>VF Shaders/Forward/Unlit Additive Mining Drill MK2 Out Box</c>：
+        /// <b>Unlit Additive</b>，渲染队列 3000。两件事同时成立——
+        ///
+        /// 一、**加法混合的共位副本会累加**。不透明几何体叠在一起只会 z-fighting，
+        /// 每像素只有一个能活下来；而加法层是 <c>Blend One One</c>、不写深度、
+        /// 深度测试取 LEqual（<b>等深度也通过</b>），所以 N 台共位的机器就是 N 倍亮度。
+        /// 这正对上「单台没事、叠起来才炸」。
+        ///
+        /// 二、**Unlit 不吃光照**，所以反照率、金属度、光滑度、镜面色对它<b>一个字都不起作用</b>。
+        /// 本仓库曾连着四轮去压 PBR 那份材质的这些属性，每一轮都确实写进去了、每一轮都没用，
+        /// 就是因为压的东西根本不在这条渲染路径上。
+        ///
+        /// 基准是 5。0 = 这一层完全不画。
+        /// </summary>
+        public float? additiveScale;
+
+        /// <summary>
+        /// 逐属性乘子表：<b>着色器属性名 → 乘子</b>。上面那几个具名字段的通用版。
+        ///
+        /// <b>为什么要有它：具名字段意味着属性名写死在代码里，而属性名只能实测。</b>
+        /// 这台建筑挂着四种着色器，本仓库先后猜错过 <c>_EmissionColor</c>（根本不存在）、
+        /// 只压 <c>_Color</c>（后面还串着 <c>_AlbedoMultiplier</c>）、压 PBR 那一份的
+        /// 金属度/光滑度/镜面色（而真正累加的是 Unlit Additive 那一层，它不吃光照）——
+        /// <b>每错一次就是一轮「改了、生效了、没用」</b>。属性名是数据，就该放在数据里：
+        /// 用 <see cref="materialReport"/> 把着色器的属性表打出来，照着填这张表，
+        /// 不用改一行代码。
+        ///
+        /// 浮点属性按值乘；颜色属性<b>四个通道一起乘</b>（RGB 和 alpha）——像
+        /// <c>_RimColor</c> 这种效果色，强度往往就写在 alpha 里，只乘 RGB 会漏掉一半。
+        /// 一律由 <c>Material.HasProperty</c> 守卫，属性不存在会点名警告。
+        /// </summary>
+        public Dictionary<string, float> materialScales;
+
+        /// <summary>
+        /// 开一局把这台建筑的材质原样打进日志：着色器名、渲染队列、关键字，
+        /// 以及着色器声明的每一个属性和它当前的值。
+        ///
+        /// 存在的理由和 <c>BuildingTexture.MeasuredMetalSmooth</c> 一样——材质在
+        /// <c>resources.assets</c> 里，离线一个字都读不到，只能让它自己报。
+        /// 调完就关掉，它每台建筑会打一大段。
+        /// </summary>
+        public bool materialReport;
 
         // ── 图标：由源建筑的图标改色而来 ─────────────────────
 

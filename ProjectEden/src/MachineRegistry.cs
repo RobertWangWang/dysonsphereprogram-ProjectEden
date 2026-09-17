@@ -453,7 +453,7 @@ namespace ProjectEden
                     ? new PrefabDesc(machine.ModelId, prefab)
                     : new PrefabDesc(machine.ModelId, prefab, colliderPrefab);
 
-            TintMaterials(modelDesc, machine.Entry.tint);
+            TintMaterials(modelDesc, machine.Entry);
 
             modelDesc.modelIndex = machine.ModelId;
 
@@ -897,12 +897,88 @@ namespace ProjectEden
             desc.storageRow = station.bufferRows > 0 ? station.bufferRows : 5;
         }
 
-        /// <summary>材质要先复制再染，否则改的是原版建筑自己的材质。</summary>
-        private static void TintMaterials(PrefabDesc desc, float[] tint)
+        private const string ColorProp = "_Color";
+
+        // 下面四个名字是 materialReport 从 VF Shaders/Forward/PBR Standard Mining Drill Mk2
+        // 身上量出来的。**这里曾经写的是 _EmissionColor，那个属性根本不存在**——它没有
+        // 静默失败只是因为写入有 HasProperty 守卫。别凭印象写属性名。
+        private const string AlbedoMulProp = "_AlbedoMultiplier";
+        private const string MetallicMulProp = "_MetallicMultiplier";
+        private const string EmissionMulProp = "_EmissionMultiplier";
+        private const string SpecularProp = "_SpecularColor";
+        private const string SmoothMulProp = "_SmoothMultiplier";
+
+        /// <summary>
+        /// 加法混合层的强度。**这个才是「叠放会炸」的成因**，而它和上面四个不在同一条
+        /// 渲染路径上：那四个属于 PBR 着色器，而这一层是
+        /// <c>VF Shaders/Forward/Unlit Additive …</c>——Unlit，不吃光照，
+        /// 所以压反照率/金属度/光滑度/镜面色对它完全无效。
+        /// </summary>
+        private const string AdditiveMulProp = "_Multiplier";
+
+        /// <summary>染过色的机器台数，以及其中被夹取过的台数——开机核对那一行用</summary>
+        private static int _tintedCount;
+
+        private static int _tintClampedCount;
+
+        private static int _tintMissingColorProp;
+
+        /// <summary>
+        /// 材质要先复制再染，否则改的是原版建筑自己的材质。
+        ///
+        /// <b>染色通道夹在 1.0 以内，这一条是踩出来的。</b> 小型速采机原本写着
+        /// <c>[1.15, 0.62, 0.38]</c>，是全仓库唯一一台超过 1 的；<c>_Color</c> 是反照率
+        /// 乘子，大于 1 的表面反射的能量比它接收的还多，单台就顶在泛光阈值上，而玩家
+        /// 把几十台速采机叠在同一条矿脉上时（<c>MinerBuildRulePatches</c> 允许重叠建造，
+        /// 而这台机器产量固定、本来就是靠叠数量出力的），一小片屏幕里挤满过亮表面，
+        /// 泛光把它们糊成白花花的一团。玩家报的「集中反光」就是这个。
+        ///
+        /// <b>等比压，不逐通道夹。</b> 逐通道 <c>Clamp01</c> 会把 1.15/0.62/0.38 压成
+        /// 1.00/0.62/0.38——最大通道降了 13% 而另外两个没动，色相跟着偏，橙色会发粉。
+        /// 等比缩放只改明度不改色相。
+        ///
+        /// <b>而且夹取要点名，不能静默。</b> 配置里写着 1.15、实际生效 1.0，不说出来
+        /// 就是下一个人重新调一遍的理由——和「解析器说『我换了个号』就是在报告一个
+        /// 不稳定的 ID」是同一条规矩。
+        /// </summary>
+        private static void TintMaterials(PrefabDesc desc, MachineEntry entry)
         {
+            float[] tint = entry?.tint;
+
             if (tint == null || tint.Length < 3 || desc.lodMaterials == null) return;
 
-            var color = new Color(tint[0], tint[1], tint[2]);
+            float r = tint[0], g = tint[1], b = tint[2];
+            float peak = Mathf.Max(r, Mathf.Max(g, b));
+
+            if (peak > 1f)
+            {
+                float k = 1f / peak;
+                r *= k;
+                g *= k;
+                b *= k;
+                _tintClampedCount++;
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"材质染色：「{entry.displayName}」的 tint 最大通道是 {peak:0.###}，超过 1。" +
+                    "_Color 是反照率乘子——大于 1 的表面反射的能量比它接收的还多，单台就顶在" +
+                    "泛光阈值上，叠放时会被泛光糊成一片白。已按等比压到 " +
+                    $"[{r:0.###}, {g:0.###}, {b:0.###}]（色相不变）。" +
+                    "请把 machines.json 里那一行直接改成这三个值，别留着每局被夹一次。");
+            }
+
+            var color = new Color(r, g, b);
+            var reported = false;
+            // 逐属性统计「几份材质有、几份没有」。
+            //
+            // **上一版这里是两个 List<string>，报出来的结论是错的。** 一台建筑有多份
+            // 材质、可能挂着不同的着色器（实测小型速采机就有：_AlbedoMultiplier 在一份
+            // 里基准 1.5、另一份里基准 1，还有几份两个属性都没有）。逐材质记 missing、
+            // 却按整台机器下结论，于是日志一边说「已压 _AlbedoMultiplier 1.5→1.001」、
+            // 一边说「配了 _AlbedoMultiplier 但没有这个属性，一点没变」——两句都指向
+            // 同一台机器，后一句是假的。**报之前先问清楚统计的单位是什么。**
+            var applied = new Dictionary<string, string>();
+            var hit = new Dictionary<string, int>();
+            var miss = new Dictionary<string, int>();
 
             foreach (Material[] lod in desc.lodMaterials)
             {
@@ -915,9 +991,255 @@ namespace ProjectEden
                     if (material == null) continue;
 
                     material = new Material(material);
-                    material.SetColor("_Color", color);
+
+                    // LOD 之间未必共用着色器，而 Unity 对不存在的属性是静默忽略的：
+                    // 不守卫的话「写了但没看到变化」和「根本没有这个属性」分不开
+                    if (material.HasProperty(ColorProp)) material.SetColor(ColorProp, color);
+                    else _tintMissingColorProp++;
+
+                    ScaleFloat(material, AlbedoMulProp, entry.albedoScale, applied, hit, miss);
+                    ScaleFloat(material, MetallicMulProp, entry.metallicScale, applied, hit, miss);
+                    ScaleFloat(material, EmissionMulProp, entry.emissionScale, applied, hit, miss);
+                    ScaleFloat(material, SmoothMulProp, entry.smoothScale, applied, hit, miss);
+                    ScaleFloat(material, AdditiveMulProp, entry.additiveScale, applied, hit, miss);
+
+                    if (entry.materialScales != null)
+                        foreach (KeyValuePair<string, float> pair in entry.materialScales)
+                            ScaleAny(material, pair.Key, pair.Value, applied, hit, miss);
+                    ScaleColorRgb(material, SpecularProp, entry.specularScale, applied, hit, miss);
+
+                    // **一次只打一份材质是不够的。** 这台建筑挂着不止一个着色器，而属性表
+                    // 是逐着色器的——只打第一份，就正好看不见那些「没有这个属性」的材质
+                    // 到底是什么。按着色器去重：once 应当是「每一种一次」，不是「每局一次」
+                    if (entry.materialReport) reported |= MaterialProbe.DumpOncePerShader(entry.displayName, material);
                 }
             }
+
+            ReportBrightness(entry, applied, hit, miss);
+
+            _tintedCount++;
+        }
+
+        /// <summary>
+        /// 逐属性报告：几份材质压上了、几份没有这个属性。
+        ///
+        /// <b>只有「一份都没压上」才是警告。</b> 部分材质没有某个属性是正常的——
+        /// 一台建筑的不同部件本来就可能挂不同的着色器。
+        /// </summary>
+        private static void ReportBrightness(MachineEntry entry,
+                                             Dictionary<string, string> applied,
+                                             Dictionary<string, int> hit,
+                                             Dictionary<string, int> miss)
+        {
+            foreach (KeyValuePair<string, int> pair in miss)
+            {
+                if (hit.ContainsKey(pair.Key)) continue;
+
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"材质亮度：「{entry.displayName}」配了 {pair.Key}，但它的 {pair.Value} 份材质" +
+                    "没有一份声明这个属性，那一项一点没变。" +
+                    "把这台的 materialReport 打开跑一局，日志会列出每个着色器真正声明的属性名。");
+            }
+
+            if (hit.Count == 0) return;
+
+            var sb = new System.Text.StringBuilder();
+
+            sb.Append($"材质亮度：「{entry.displayName}」");
+
+            var first = true;
+
+            foreach (KeyValuePair<string, int> pair in hit)
+            {
+                if (!first) sb.Append('；');
+
+                first = false;
+
+                int absent = miss.ContainsKey(pair.Key) ? miss[pair.Key] : 0;
+
+                sb.Append($"{pair.Key} 压了 {pair.Value} 份材质（{applied[pair.Key]}）");
+
+                if (absent > 0) sb.Append($"，另有 {absent} 份没有这个属性");
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(sb.ToString());
+        }
+
+        /// <summary>
+        /// <b>不写</b>才表示「不动」，所以哨兵是 <c>null</c>，不是 0。
+        ///
+        /// 上一版写的是「0 或 1 表示不动」，于是玩家想把反光关掉、照直在 JSON 里写了 0，
+        /// 那一项纹丝不动——<b>0 正是他想要的值，不能同时又兼任「没配置」的标记</b>。
+        /// 和「同一个常量既当上限又当哨兵」是同一族的错。
+        /// </summary>
+        private static bool Wanted(float? scale) => scale.HasValue && !Mathf.Approximately(scale.Value, 1f);
+
+        /// <summary>
+        /// 按属性在着色器里声明的<b>类型</b>决定怎么乘：浮点按值，颜色四通道一起乘。
+        ///
+        /// 颜色连 alpha 一起乘是有理由的：<c>_RimColor</c> 这类效果色的强度常常就写在
+        /// alpha 里（实测采矿机玻璃那份是 <c>(1, 1, 1, 0.855)</c>），只乘 RGB 会漏掉一半。
+        ///
+        /// 类型是现查着色器的属性表，不是猜的——<c>GetColor</c> 打在一个浮点属性上
+        /// 返回的是垃圾值，而且不报错。
+        /// </summary>
+        private static void ScaleAny(Material material, string prop, float scale,
+                                     Dictionary<string, string> applied,
+                                     Dictionary<string, int> hit, Dictionary<string, int> miss)
+        {
+            if (!Wanted(scale)) return;
+
+            Shader shader = material.shader;
+
+            if (shader == null || !material.HasProperty(prop))
+            {
+                Bump(miss, prop);
+                return;
+            }
+
+            int count = shader.GetPropertyCount();
+            var index = -1;
+
+            for (var i = 0; i < count; i++)
+            {
+                if (shader.GetPropertyName(i) != prop) continue;
+
+                index = i;
+                break;
+            }
+
+            if (index < 0)
+            {
+                Bump(miss, prop);
+                return;
+            }
+
+            switch (shader.GetPropertyType(index))
+            {
+                case UnityEngine.Rendering.ShaderPropertyType.Color:
+                {
+                    Color before = material.GetColor(prop);
+                    var after = new Color(before.r * scale, before.g * scale,
+                                          before.b * scale, before.a * scale);
+
+                    material.SetColor(prop, after);
+                    Bump(hit, prop);
+                    Note(applied, prop, $"{before.r:0.##}/{before.a:0.##}→{after.r:0.##}/{after.a:0.##}");
+                    break;
+                }
+
+                case UnityEngine.Rendering.ShaderPropertyType.Float:
+                case UnityEngine.Rendering.ShaderPropertyType.Range:
+                {
+                    float before = material.GetFloat(prop);
+                    float after = before * scale;
+
+                    material.SetFloat(prop, after);
+                    Bump(hit, prop);
+                    Note(applied, prop, $"{before:0.###}→{after:0.###}");
+                    break;
+                }
+
+                default:
+                    // 贴图和向量不在这张表的职责范围内——说出来，别假装成功
+                    Bump(miss, prop);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// 同一个属性在不同材质上基准可能不同（实测 <c>_AlbedoMultiplier</c> 有 1.5 也有 1），
+        /// 所以记下来的是「见过哪几种」，不是最后一个。
+        /// </summary>
+        private static void Note(Dictionary<string, string> applied, string prop, string note)
+        {
+            applied[prop] = applied.ContainsKey(prop) && applied[prop] != note
+                ? applied[prop] + " / " + note
+                : note;
+        }
+
+        private static void Bump(Dictionary<string, int> tally, string key)
+        {
+            tally[key] = tally.ContainsKey(key) ? tally[key] + 1 : 1;
+        }
+
+        private static void ScaleFloat(Material material, string prop, float? scale,
+                                       Dictionary<string, string> applied,
+                                       Dictionary<string, int> hit, Dictionary<string, int> miss)
+        {
+            if (!Wanted(scale)) return;
+
+            if (!material.HasProperty(prop))
+            {
+                Bump(miss, prop);
+                return;
+            }
+
+            float before = material.GetFloat(prop);
+            float after = before * scale.Value;
+
+            material.SetFloat(prop, after);
+            Bump(hit, prop);
+
+            Note(applied, prop, $"{before:0.###}→{after:0.###}");
+        }
+
+        /// <summary>只缩放 RGB，保留 alpha——alpha 在这些属性上多半另有含义。</summary>
+        private static void ScaleColorRgb(Material material, string prop, float? scale,
+                                          Dictionary<string, string> applied,
+                                          Dictionary<string, int> hit, Dictionary<string, int> miss)
+        {
+            if (!Wanted(scale)) return;
+
+            if (!material.HasProperty(prop))
+            {
+                Bump(miss, prop);
+                return;
+            }
+
+            float k = scale.Value;
+            Color before = material.GetColor(prop);
+            var after = new Color(before.r * k, before.g * k, before.b * k, before.a);
+
+            material.SetColor(prop, after);
+            Bump(hit, prop);
+
+            Note(applied, prop, $"{before.r:0.##}→{after.r:0.##}");
+        }
+
+        /// <summary>
+        /// 把一台建筑的材质原样打进日志。存在的理由是材质在 <c>resources.assets</c> 里，
+        /// 离线一个字都读不到——和 <c>BuildingTexture.MeasuredMetalSmooth</c> 去读原版
+        /// 金属度贴图的均值是同一个路子：<b>不知道的东西就让它自己报，别猜。</b>
+        /// </summary>
+        // 材质探针已经抽到 Utils/MaterialProbe——矿脉那一侧的显示模型也要用同一件工具。
+        // 「每种着色器打一次」那条去重也在它那里，所以两边共用同一张已打过的表，
+        // 不会为同一个着色器打两遍。
+
+        /// <summary>
+        /// 开机核对：染色这一步跑过几台、夹了几台。
+        ///
+        /// 无条件打印，包括「一台都没夹」那一行——只在出事时才打印的状态行，
+        /// 会让「没超标」和「这段代码压根没跑」长得一模一样。本文件为这条规矩
+        /// 付过不止一次账。
+        /// </summary>
+        private static void ReportTintOnce()
+        {
+            if (_tintedCount == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo("材质染色：没有一台机器配了 tint，外观全部沿用源建筑");
+                return;
+            }
+
+            string clamped = _tintClampedCount == 0
+                ? "没有超标的通道"
+                : $"其中 {_tintClampedCount} 台的 tint 超过 1 被等比压回（上面有点名）";
+
+            string missing = _tintMissingColorProp == 0
+                ? ""
+                : $"；另有 {_tintMissingColorProp} 份材质没有 {ColorProp} 属性，那几份没染上色";
+
+            ProjectEdenPlugin.Log.LogInfo($"材质染色：{_tintedCount} 台已染色，{clamped}{missing}");
         }
 
         private static void AddItem(Machine machine, ItemProto source)
@@ -1069,6 +1391,8 @@ namespace ProjectEden
 
                 TintIcon(machine);
             }
+
+            ReportTintOnce();
         }
 
         /// <summary>图标由源建筑的图标改色而来，不需要美术资源。</summary>

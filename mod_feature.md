@@ -1355,6 +1355,30 @@ Two implementation choices worth recording:
 All four numbers live in the `miner` block of its `machines.json` entry: `oresPerMinute`,
 `workEnergyWatt`, `stationCapacity`, `consumeVeins`.
 
+#### Stacking hundreds of them: coincident copies are drawn once
+
+This machine has a fixed rate, so **stacking is how you scale it** — and with collision-free
+building, several hundred of them pressed onto one vein is a normal state in this mod. Vanilla's
+build-spacing rule never allows it.
+
+The consequence is a blinding white patch. The cause is not any single unit being too bright:
+**opaque geometry stacked in place merely occludes itself and looks like one building, but a
+translucent layer blends once per copy and an additive layer adds once per copy.** The Advanced
+Mining Machine carries one of each (the glass canopy and the output-box glow), so the total climbs
+with the stack.
+
+That is why turning the materials down cannot fix it: however small each copy's contribution is
+made, multiplying it by the stack count brings it back.
+
+`advancedminer.json`'s **`stackedRenderLimit`** (default 1) draws only that many coincident
+same-proto buildings and withholds the rest from the renderer. **No logic changes at all** — mining,
+power draw, clicking, dismantling, colliders and the minimap all behave exactly as before; only the
+number of copies the GPU draws changes, which at several hundred coincident buildings also saves
+several hundred redundant draws. Dismantling the visible one automatically promotes a hidden one, so
+a stack never vanishes at one click.
+
+Raise it, or leave it unset (unset = vanilla, every copy drawn), if you would rather see the pile.
+
 ---
 
 ## XI. The Chemistry Chain: C1, nitrogen, organics and refining

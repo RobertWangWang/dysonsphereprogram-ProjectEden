@@ -74,7 +74,7 @@ patchers/ProjectEden.Preloader.dll  →  BepInEx/patchers/ProjectEden/ProjectEde
 **3. 确认装对了**：`BepInEx/LogOutput.log` 里应该有这两行——
 
 ```
-Project Eden v1.9.3 已加载
+Project Eden v1.9.4 已加载
 Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 ```
 
@@ -146,6 +146,7 @@ Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 - 巨型建筑的运输机数量、运送量、储能和格子容量仍由 mod 自动拉满，手动改了会被写回去（储物格的需求/仓储/供应不在此列，那个归你）
 - 分拣器摆臂速度没有改，改的是集装层数和传送带速度
 - 掉落过滤与信号选取窗口画不出第 14 列以后的物品（物品选取窗口有搜索框，不受影响）
+- **叠在一处的同种建筑默认只画一台**（1.9.4 起）。几百台共位时，半透明层会逐层混合、加法层会逐份累加，画面会白得刺眼，而这不是把材质调暗能解决的——每一份压得再小，乘上台数都会累回来。逻辑一个字不动（采矿、耗电、点击、拆除、碰撞、小地图全照旧），只是显卡少画几份；拆掉看得见的那台会自动顶一台上来。想看见整摞就把 `advancedminer.json` 的 `stackedRenderLimit` 调大或留空
 
 ## 兼容性
 

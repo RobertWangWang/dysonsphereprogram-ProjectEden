@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.9.3";
+        public const string VERSION = "1.9.4";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -261,6 +261,9 @@ namespace ProjectEden
             // 「一条都没配置」——**在它要测量的东西存在之前就测量了**，
             // 真事实、假结论，而且把那条「5 份是否全部命中」的断言一起吞掉了
             LDBTool.PostAddDataAction += Patches.StarVeinPatches.Report;
+            LDBTool.PostAddDataAction += Patches.VeinMiningGlowPatches.Report;
+            LDBTool.PostAddDataAction += Patches.ModelRenderCensus.Report;
+            LDBTool.PostAddDataAction += Patches.StackedRenderPatches.Report;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，
@@ -815,6 +818,8 @@ namespace ProjectEden
             QualityBuildStore.Clear();
             // 站点号在新存档里会重复使用，不清的话那些站点会被当成「已经引导过容量」
             Patches.StationCapacityPatches.ClearBootstrapped();
+            // 同理：实体号也会重复使用，共位登记表留着会把新存档的建筑错认成旧的
+            Patches.StackedRenderPatches.Reset();
         }
     }
 }

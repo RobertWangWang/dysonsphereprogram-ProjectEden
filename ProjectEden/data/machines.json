@@ -654,11 +654,50 @@
       "gridCol": 13,
       "buildSlot": 13,
       "//tint": "大型采矿机本体是黄灰色，染成暖橙偏红——和它的来源一眼分得开，也不和分页里那几座（青/蓝/紫）撞色。",
+      "//tint-clamp": "**原值是 [1.15, 0.62, 0.38]，是全仓库唯一一台超过 1 的，已按等比压到 1.0。** 玩家报的症状是「多台叠在一起，材质集中反光，糊成特别亮的一片」。原因：_Color 在 DSP 的 PBR 着色器里是**反照率乘子**（巨型建筑那一节记的「_Color 乘的是生成图集」说的就是它），大于 1 意味着这个表面反射的能量比它接收的还多——单台就已经顶在泛光阈值上；而这台机器产量固定、本来就是靠叠数量出力的，MinerBuildRulePatches 又允许重叠建造，于是一小片屏幕里挤满过亮表面，泛光把它们糊成一团白。**等比缩放而不是逐通道夹**：逐通道 Clamp01 会压成 [1.00, 0.62, 0.38]，最大通道降了 13% 而另外两个没动，橙色会偏粉；等比只改明度、不改色相。TintMaterials 现在会夹取并点名警告，所以这个坑不会再静默复发。",
       "tint": [
-        1.15,
-        0.62,
-        0.38
+        1.0,
+        0.539,
+        0.33
       ],
+      "//亮度四连": "**这四个属性名是量出来的。** materialReport 打出这台的着色器是 VF Shaders/Forward/PBR Standard Mining Drill Mk2——采矿机专用，不是通用 PBR。它的属性表里根本没有 _EmissionColor（本仓库上一版的 emissionScale 打的就是这个不存在的名字，靠 HasProperty 守卫才没静默失败），真正管事的是下面这四个。",
+
+      "//albedoScale": "有效反照率 = _Color × _AlbedoMultiplier，而这个着色器的 _AlbedoMultiplier 基准是 **1.5**，所以光把 tint 夹到 1.0 并不够：有效值仍是 1.5，依旧大于 1。0.667 = 1/1.5 是**推导值**——让有效反照率恰好落在 1.0 这个物理上限上（表面反射的能量不能超过它接收的）。这一条和那团白光无关，但它本身是个真缺陷，值得留着。（曾经压到 0.45 去追亮度，那是刻意压暗而非纠正，已撤回。）",
+      "albedoScale": 0.667,
+
+      "//metallicScale-撤回": "**曾经把 metallicScale / specularScale / smoothScale 三项全部归零，那是在追错的因，已撤回。** 真正发光的是矿脉上的开采光环（见 advancedminer.json 的 veinMiningCircles），不是这台建筑的材质——判据是截图里光团的颜色跟着**矿种**走：铜矿脉旁边橙黄、铁矿脉旁边白青、而煤矿脉那片完全不亮。建筑染成什么色都解释不了这个。三项归零只会让这台机器变成一块哑光塑料，所以撤回，恢复原版反射。字段留着不写即为原版行为。",
+
+      "//emissionScale": "_EmissionMultiplier 基准 10，且 _EmissionUsePower = 1（发光跟着 AnimData.power 走，机器在转时才亮）。**这是平衡旋钮，不是推导值**：叠放确实会成倍增加发光表面的面积，压一半是合理的保守值，但它不是那团白光的成因。",
+      "//emissionScale-已移交": "已经并进 materialScales 那张表（_EmissionMultiplier: 0），这里不再单独设。具名字段和表同时写同一个属性会连乘两次，读起来也不清楚谁说了算。",
+      "emissionScale": null,
+
+      "//additiveScale": "**这个才是「叠放会炸」的真正成因，前四轮全找错了地方。** 大型采矿机身上挂着四种着色器，materialReport 把它们全打出来之后才看见其中一种是 `VF Shaders/Forward/Unlit Additive Mining Drill MK2 Out Box`——Unlit Additive，渲染队列 3000，_Multiplier 基准 5。两件事同时成立：(1) **加法混合的共位副本会累加**——不透明几何体叠在一起只会 z-fighting、每像素只活一个，而加法层是 Blend One One、不写深度、深度测试 LEqual（等深度也通过），于是 N 台共位就是 N 倍亮度，正对上「单台没事、叠起来才炸」；(2) **Unlit 不吃光照**，所以 _Color / _AlbedoMultiplier / _MetallicMultiplier / _SmoothMultiplier / _SpecularColor 对它一个字都不起作用——这就是为什么前四轮每一轮都确实把值写进去了、每一轮都没用。设 0 = 这一层完全不画。",
+      "additiveScale": 0.0,
+
+      "//materialScales": "逐属性乘子表，属性名照抄 materialReport 打出来的属性表。**针对的是顶部那块玻璃**（着色器 `PBR Standard Glass Mining Drill Mk2`，渲染队列 3001 = 透明）以及机身那份 PBR。玩家给的决定性线索是「**不通电**、单靠叠加，那块玻璃就会越来越亮」——_EmissionUsePower = 1 说明发光跟着电走，所以元凶必然在**不吃电**的属性里。上一轮压了边缘光/高光/待机电路/粒子/流光五项，玩家反馈「暗了一些但还是太亮」——**族找对了，剂量不够**。\n\n这一轮是**上界测试**：把所有还能贡献亮度的属性全部归零，包括之前撤回过的 _MetallicMultiplier 和 _SmoothMultiplier（这两个才是「反光」本身——金属度决定反射多强，光滑度决定高光多集中，而两份材质上它们都还是 1）。**全零不是最终值**，是用来确定「材质这条路的极限在哪」：全零之后还亮，就说明剩下的亮度来自漫反射受阳光照射本身，材质旋钮到头了，只能走「叠放的只画一台」。",
+      "materialScales": {
+        "_MetallicMultiplier": 0.0,
+        "_SmoothMultiplier": 0.0,
+        "_SpecularColor": 0.0,
+        "_RimColor": 0.0,
+        "_EmissionMultiplier": 0.0,
+        "_EmissionSwitch": 0.0,
+        "_CircuitMultipIdle": 0.0,
+        "_CircuitColor": 0.0,
+        "_ParticleColor": 0.0,
+        "_ParticleEmissionMultiplier": 0.0,
+        "_FLowEmissionMultiplier": 0.0,
+        "_TintColor": 0.0,
+        "_AlphaMultiplier": 0.0,
+        "_StaticAlpha": 0.0,
+        "_VeinColorMultiplier": 0.0,
+        "_ToggleVerta": 0.0
+      },
+
+      "//materialScales-最后两项": "**注意：materialScales 是 Dictionary<string, float>，键值对里不能塞 `//` 注释键**——值转不成 float，整份配置会反序列化失败。所以这两条说明放在外面。\n\n**_VeinColorMultiplier：「一片光从矿脉向上飞」就是它。** 名字直译就是「矿脉颜色乘子」，配套还有一张 _VeinColorTex——着色器把**被开采矿脉的颜色**打到钻机自己的网格上。这也解释了最早那个颜色现象（铜矿橙、铁矿青、煤矿不亮）：我一度据此认定光画在矿脉那一侧，其实颜色是从矿脉**取**的、画在**钻机**上，所以把整套矿脉显示关掉当然没用。认出它靠的是模型普查——36 种正在绘制的模型里，除了 699 自己没有任何一个跟着台数涨，那就说明那片光只能长在 699 的网格上。\n\n**_ToggleVerta：顶点动画的总开关**，四份材质上都有。这就是玩家第一轮问的「能不能关闭动画」——当时只找到了 AnimData 那条路（那是驱动数据），没找到材质这一侧的闸。归零之后钻机不播顶点动画，那片上升的光也就没有载体。代价是钻头不转；想留住转动就把它改回 1，只靠 _VeinColorMultiplier 压。",
+
+      "//materialReport": "开一局把这台的每一种着色器的名字、渲染队列、关键字和全部属性值打进日志。已经量完并关掉（着色器是 VF Shaders/Forward/PBR Standard Mining Drill Mk2，属性名见上）。要再查材质就打开它跑一局——**这是查这类问题唯一的办法**，材质在 resources.assets 里离线一个字都读不到。",
+      "materialReport": true,
       "iconHue": 22.0,
       "iconSaturationScale": 1.3,
       "iconMinSaturation": 0.24,

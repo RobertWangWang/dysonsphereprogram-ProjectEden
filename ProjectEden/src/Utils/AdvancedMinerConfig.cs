@@ -117,6 +117,70 @@ namespace ProjectEden.Utils
         /// <summary>岩浆在 ores.json 的 items 段里的 key。<b>按名字解析，不写死物品号</b>，因为 ResolveItemId 碰号时会顺延。</summary>
         public string lavaItemKey;
 
+        /// <summary>
+        /// 一条矿脉上最多画几圈「正在开采」的发光环。<b>不写</b>则完全是原版行为。
+        ///
+        /// <b>为什么需要这个。</b> 原版 <c>VeinData</c> 逐矿脉存着
+        /// <c>minerCircleModelId0..3</c>——一台采矿机一圈，<c>AddMiner</c> 在
+        /// <c>minerId3</c> 之后就返回，所以封顶 4 圈。原版很少撞到这个上限：
+        /// 建造间距规则本来就不让采矿机叠在一起。而本 mod 两头都放开了——
+        /// <c>MinerBuildRulePatches</c> 允许重叠建造，小型速采机又是「产量钉死、
+        /// 靠叠数量出力」的设计——于是一组十几条矿脉上会同时点亮四五十圈共位的
+        /// 发光环，泛光把它们糊成白花花的一大团。玩家报的「叠放时集中反光」是这个。
+        ///
+        /// <b>它只关视觉，不碰逻辑。</b><c>minerCount</c> 和 <c>minerId0..3</c>
+        /// 一个字都不动，采矿照常。清掉的字段在原版眼里就是「这条矿脉没那么多采矿机」
+        /// ——不满 4 台的矿脉本来就是这个状态，所以下一次刷新时原版对着 0 再移除一遍
+        /// 是它自己每天在做的事，不是我们硬造的形状。
+        ///
+        /// 0 = 一圈都不画；1 = 只画一圈（推荐，够看出这条矿脉在被开采）。
+        /// </summary>
+        public int? veinMiningCircles;
+
+        /// <summary>
+        /// 是否还画矿脉上那个「正在开采」的底座（<c>VeinData.minerBaseModelId</c>，
+        /// 一条矿脉一个，与采矿机台数无关）。<b>不写</b>则按原版画。
+        ///
+        /// 和 <see cref="veinMiningCircles"/> 一起设成「0 圈 + 不画底座」，
+        /// 等于把整套开采显示关掉——这是判断「那团光到底是不是矿脉显示」的
+        /// <b>决定性实验</b>：全关之后还亮，就说明成因根本不在这条路上，
+        /// 省得继续在这里调参数。
+        /// </summary>
+        public bool? veinMiningBase;
+
+        /// <summary>
+        /// 开一局把矿脉开采显示那两个模型（底座与圆环）的材质原样打进日志。
+        ///
+        /// 和 <c>machines.json</c> 的 <c>materialReport</c> 同一个用途、同一件工具
+        /// （<c>MaterialProbe</c>），共用「每种着色器只打一次」那张去重表。
+        /// 调完就关掉。
+        /// </summary>
+        public bool veinMiningReport;
+
+        /// <summary>
+        /// 进游戏后每 10 秒普查一次「此刻在画哪些模型、各画了多少实例」，
+        /// 只在实例数创新高时打印。见 <c>ModelRenderCensus</c>。
+        ///
+        /// 排查「画面上这团光到底是谁画的」用——<b>枚举对象，而不是再读一遍
+        /// 你以为的那条路</b>。查完关掉。
+        /// </summary>
+        public bool renderCensus;
+
+        /// <summary>
+        /// 共位重叠的同种建筑最多画几台。<b>留空 = 原版，逐台都画。</b>
+        ///
+        /// 模型普查在玩家那颗星球上报出 <c>模型 699 × 398</c>——398 台小型速采机
+        /// 叠在一处。共位副本在画面上是纯粹的浪费：画 398 份和画 1 份本该一样，
+        /// 而实际上不一样，因为半透明层会逐层混合、加法层会逐份累加。
+        /// 逐属性压每一份的贡献治不了本——压到多小，台数一多都会累回来。
+        ///
+        /// 只影响 GPU 那一侧；采矿、耗电、点击、碰撞、小地图全部照旧。
+        /// </summary>
+        public int? stackedRenderLimit;
+
+        /// <summary>多近算「共位」，单位米。默认 2。</summary>
+        public float stackedRenderRadius;
+
         public OreProduct[] productMap;
     }
 
