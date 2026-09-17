@@ -88,6 +88,11 @@ namespace ProjectEden.Patches
 
         private static int _promoted;
 
+        /// <summary>重返星球后重新藏起来的台数——和首次藏起来分开记，因为它们是两条路</summary>
+        private static int _rehidden;
+
+        private static bool _rehideReported;
+
         private static bool _reported;
 
         private static bool Enabled => Config?.stackedRenderLimit != null && Config.stackedRenderLimit.Value > 0;
@@ -142,6 +147,8 @@ namespace ProjectEden.Patches
             if (entity.modelId == 0) return;
 
             int limit = Config.stackedRenderLimit.Value;
+            var sayRehide = false;
+            var rehide = false;
 
             lock (_gate)
             {
@@ -156,20 +163,60 @@ namespace ProjectEden.Patches
 
                 Prune(__instance, cell);
 
-                if (cell.Drawn.Contains(entityId) || cell.Hidden.Contains(entityId)) return;
+                // 已经登记为「画出来的那台」——这一次照旧画，什么都不用做
+                if (cell.Drawn.Contains(entityId)) return;
 
-                if (cell.Drawn.Count < limit)
+                // **已经登记为「藏起来的」，但模型又回来了。**
+                //
+                // 离开星球再飞回来会走这条路：PlanetFactory.UnloadDisplay 把每个实体的
+                // modelId / mmblockId / colliderId 逐个清零并整批拆掉渲染（IL 0037/0049/005B），
+                // 回来时 PlanetModelingManager.LoadingPlanetFactoryMain @074D 又对每个实体
+                // 重新调一次 CreateEntityDisplayComponents。所以这个后置会被再跑一遍，
+                // 而**上一版在这里和 Drawn 合并成一个提前返回**，于是刚被原版重新创建的
+                // 那个模型没人摘 —— 玩家报的「飞走再飞回来，反光又回来了」就是这个。
+                //
+                // 这是本文件反复记的那一类：**登记表记的是「我决定过什么」，
+                // 不是「现在画着什么」。** 判断该不该摘，得看实体此刻的 modelId，
+                // 不能看我自己的账本。
+                rehide = cell.Hidden.Contains(entityId);
+
+                if (!rehide)
                 {
-                    cell.Drawn.Add(entityId);
-                    return;
-                }
+                    if (cell.Drawn.Count < limit)
+                    {
+                        cell.Drawn.Add(entityId);
+                        return;
+                    }
 
-                cell.Hidden.Add(entityId);
-                _hiddenTotal++;
+                    cell.Hidden.Add(entityId);
+                    _hiddenTotal++;
+                }
+                else
+                {
+                    _rehidden++;
+                }
 
                 GameMain.gpuiManager?.RemoveModel(entity.modelIndex, entity.modelId, true);
                 entity.modelId = 0;
+
+                if (rehide && !_rehideReported)
+                {
+                    _rehideReported = true;
+                    sayRehide = true;
+                }
             }
+
+            // 两条日志各走各的：首次藏起来是「功能生效了」，重返后重新藏起是
+            // 「往返这条路也覆盖到了」。合成一条会让第二种情形没有任何痕迹，
+            // 而那正是这次 bug 之所以只能靠玩家肉眼发现的原因
+            if (sayRehide)
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"共位只画一台：重返星球后重新藏起（实体 {entityId}，本局累计 {_rehidden} 台）。" +
+                    "离开星球时原版会整批拆掉渲染并把每个实体的 modelId 清零" +
+                    "（UnloadDisplay IL 0037），回来时 LoadingPlanetFactoryMain 逐个重建，" +
+                    "所以这一步每次往返都要重跑一遍。");
+
+            if (rehide) return;
 
             if (_reported) return;
 
@@ -211,6 +258,48 @@ namespace ProjectEden.Patches
 
                 Promote(__instance, cell);
             }
+        }
+
+        /// <summary>
+        /// 后置：星球显示被整批拆掉时报一行。
+        ///
+        /// <b>这一行的存在理由是「两种情形在日志里必须分得开」。</b>
+        /// 上一版修好「重返后重新藏起」之后，下一局日志里那行没出现——而这
+        /// <b>分不开</b>「玩家这局没起飞」和「修法根本没生效」，只能靠推测。
+        /// 有了这一行就是确定的：
+        /// <list type="bullet">
+        /// <item>没有这一行 → 这局没离开过星球，那个路径压根没被测到</item>
+        /// <item>有这一行、却没有「重返星球后重新藏起」→ 修法真的没生效</item>
+        /// </list>
+        ///
+        /// <c>UnloadDisplay</c> 没有参数，不存在参数名对不上的风险。
+        /// 它的唯一调用者是 <c>PlanetData.UnloadFactory</c>，而那个的第一个调用者是
+        /// <c>GameData.LeavePlanet</c>——**起飞离开星球就会走到这里**。
+        /// </summary>
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(PlanetFactory), nameof(PlanetFactory.UnloadDisplay))]
+        internal static void AfterUnloadDisplay(PlanetFactory __instance)
+        {
+            if (!Enabled) return;
+
+            int drawn = 0, hidden = 0;
+
+            lock (_gate)
+            {
+                if (!_byPlanet.TryGetValue(__instance?.planetId ?? 0, out Dictionary<CellKey, Cell> table)) return;
+
+                foreach (KeyValuePair<CellKey, Cell> pair in table)
+                {
+                    drawn += pair.Value.Drawn.Count;
+                    hidden += pair.Value.Hidden.Count;
+                }
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"共位只画一台：{__instance?.planetId} 号星球的显示已被原版整批拆除" +
+                $"（登记表里画着 {drawn} 台、藏着 {hidden} 台）。" +
+                "飞回来时原版会逐个重建，那时藏着的那些要重新摘一遍——" +
+                "下面应当出现「重返星球后重新藏起」。没有就是修法没生效。");
         }
 
         /// <summary>从藏着的里面挑一台画出来。</summary>
@@ -269,6 +358,8 @@ namespace ProjectEden.Patches
                 _byPlanet.Clear();
                 _hiddenTotal = 0;
                 _promoted = 0;
+                _rehidden = 0;
+                _rehideReported = false;
                 _reported = false;
             }
         }

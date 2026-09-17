@@ -1331,6 +1331,28 @@ makes the whole stack vanish, which reads as "I just dismantled all of them" —
 the one being fixed. Promotion calls `GPUInstancingManager.AddModel` directly rather than re-calling
 `CreateEntityDisplayComponents`, which would add a *second* minimap block.
 
+**Leaving a planet and returning re-creates every model, so the hide has to run again — and 1.9.4
+shipped without that.** Reported as "I flew away and back and the reflection came back". The path is
+`GameData.LeavePlanet` → `PlanetData.UnloadFactory` → `PlanetFactory.UnloadDisplay`, which zeroes
+`modelId` / `mmblockId` / `colliderId` **per entity** (IL 0037/0049/005B) and tears the renderer down
+wholesale (`CargoTraffic.DestroyRenderingBatches`); returning runs
+`LoadingPlanetFactoryMain` @074D, which calls `CreateEntityDisplayComponents` for every entity again.
+The bug was one line — `if (cell.Drawn.Contains(id) || cell.Hidden.Contains(id)) return;` — which
+early-returned for an entity already marked hidden and therefore left the *freshly created* model in
+place. The two cases are now separate: already-drawn stays drawn, already-hidden is **re-hidden**.
+
+**The rule: a bookkeeping table records what you decided, not what is on screen now.** Whether to
+remove a model has to be answered from the entity's current `modelId`, never from your own ledger —
+the engine can recreate state behind you without telling you.
+
+**And the diagnostic gap it exposed is worth more than the fix.** After the fix, the next session's
+log had *no* re-hide line — which cannot distinguish "the player never took off" from "the fix does
+not work". A status line ("is it wired up") and an event line ("what did it decide") were both
+present and both insufficient, because the missing question was a **third** one: *did that scenario
+occur at all?* A postfix on `UnloadDisplay` now logs the teardown with the table's counts, so the log
+self-diagnoses: no teardown line → the path was never exercised; teardown but no re-hide → the fix is
+broken. **When a fix targets an event you cannot trigger yourself, log the event, not just the fix.**
+
 #### What the nine rounds actually cost, and the four rules they re-taught
 
 **1. Material properties can only be measured, never recalled.** They live in `resources.assets`.
