@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.10.3";
+        public const string VERSION = "1.10.4";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -128,6 +128,7 @@ namespace ProjectEden
             Patches.StationOutputSkipPatches.Report();
             Patches.HubCourierPatches.Report();
             Patches.StationTrafficCoalescer.Report();
+            Patches.LocalDispatchBurstPatches.Report();
             Patches.MegaTickProfiler.Report();
             Patches.QualityCraftPatches.Report();
             Patches.QualityRepairPatches.Report();

@@ -316,6 +316,13 @@ namespace ProjectEden.Patches
         public float collectorMaxPerTick;
 
         /// <summary>
+        /// 行星内物流运输机：一帧最多派几架。0 或 1 = 原版（一帧一架）。
+        /// 见 <see cref="LocalDispatchBurstPatches"/>：原版的派机循环本来就会走遍整个
+        /// 配对环，只是派出一架就跳出去了。硬上限 200（droneDispatchStatus 是 byte[]）。
+        /// </summary>
+        public int localDispatchPerTick;
+
+        /// <summary>
         /// 「货物账本」探针。<b>只观察，不改任何游戏逻辑</b>，用来验证
         /// 「与 cargoPool 平行、按 cargoId 索引的数组」这套骨架跟不跟得住——
         /// 扩容、ID 回收、读档、并行四处都会被检出来。见 CargoLedgerProbe。

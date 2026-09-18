@@ -266,6 +266,32 @@ Both share the same speed-up logic as the advanced mining machine:
 > by entry; on any disagreement it falls back to vanilla for the rest of the session and logs an error. **The worst
 > case is "no faster", never "wrong pairs".**
 
+> **Multiple drones dispatched per tick (10 by default; vanilla sends 1).**
+>
+> A vanilla logistics station launches **at most one planetary drone per tick**, and not because it only looks at one
+> supply/demand pair — its dispatch loop already walks the entire pairing ring, it just **breaks out the moment it
+> finds work**. A second throttle sits outside it: each station only attempts a dispatch on its own assigned tick,
+> and that interval is set by a vanilla adaptive controller that moves it between 1 and 20 ticks based on how busy
+> the station is. That interval bottoms out at once per tick, so the thing actually capping throughput is the
+> one-per-tick rule.
+>
+> This mod rewrites those three "dispatched, so break out" branches into "ask whether there is budget left, and if so
+> keep scanning". **Not one of vanilla's dispatch decisions is reimplemented** — we simply stop leaving its own loop
+> early; the two "not enough energy, give up" exits are left exactly as they are.
+>
+> The two guards are **copied verbatim from vanilla's own two gates outside the loop** (are there idle drones left,
+> is there energy left). That is not caution, it is required: vanilla checks "are there idle drones" **outside** the
+> loop and never re-checks it inside, because it leaves after one dispatch and one check suffices. A dispatch writes
+> into the array indexed by drone slot, so bursting without re-checking would put the second drone past the end of
+> that array.
+>
+> The budget is `localDispatchPerTick` in `stations.json`; **1 restores vanilla behaviour**, and the cap is 200.
+>
+> The cost: every extra drone costs one more pass over the pairing scan. **The worst case is still no worse than
+> vanilla's** — that loop was already bounded by the whole pairing ring; what changes is the typical case, where
+> vanilla stopped at the first hit and this keeps going until the budget runs out. The log reports the actual
+> multiplier and the dispatch-interval distribution every 60 seconds; lower the number if the logic frame suffers.
+
 ### Carry capacity and stacking
 
 - Drones carry **10,000** per trip

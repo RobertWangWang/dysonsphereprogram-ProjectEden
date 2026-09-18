@@ -2066,7 +2066,7 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
 
-The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
+The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector, and `localDispatchPerTick` — how many planetary drones one station may launch per tick, see *Game internals: planetary drone dispatch*), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
@@ -2870,6 +2870,111 @@ So a default station holding 20 pairs takes 20 seconds to cycle once: **slow fet
 Multiple ships per route already work: `StationStore.remoteOrder` reserves both ends (`remoteDemandCount = max - (count + remoteOrder)`), so the next evaluation sees the reduced demand. The real gates are `idleShipCount > 0` and `energy >= 6 MJ + CalcTripEnergyCost` (which adds a flat **100 MJ per warp jump** — this is what the 30 GW charging power buys). **64 ships per station is a type-level cap**: `idleShipIndices` is a `UInt64` bitmask indexed `1L << (index & 63)`.
 
 If cadence ever does need raising, the lever is a reentrancy-guarded postfix on `DetermineDispatch` calling it N−1 more times — the cursor advances on its own, so repeat calls just walk further down the list under full vanilla logic (same idea as `RunExtraCycles`). Two things to verify first: that the cursor advances on *every* early-out branch, and the CPU cost (1250 instructions plus `Monitor` traffic, × stations × N).
+
+**That trick is specific to this method and does NOT port to the planetary side** — `StationComponent.InternalTickLocal` fuses dispatch with station charging, the adaptive-interval sampler and the in-flight drone simulation, so re-calling it charges twice and flies every drone N× faster. See *Game internals: planetary drone dispatch* below; the answer there was to redirect three branches instead.
+
+## Game internals: planetary drone dispatch — and why the interstellar idiom does not port
+
+Read out of `StationComponent.InternalTickLocal` (2600 instructions). **Patched** by
+`LocalDispatchBurstPatches` (1.10.4); the measurements are recorded here because the shape is not
+what the interstellar section above would lead you to predict.
+
+**Two throttles, stacked, and neither is the one people assume.**
+
+```
+00A3  if (timeGene % droneTaskInterval != id % droneTaskInterval) goto 1297;  // per-station stagger
+010B  if (localPairCount <= 0) goto 11C8;
+0117  if (idleDroneCount  <= 0) goto 11C8;     // ← outside the loop. Never re-checked inside.
+0123  if (energy <= 800000)    goto 11C8;
+0134  localPairProcess %= localPairCount;  int start = localPairProcess;   // V_22
+015F  do {                                              // loop head
+          ref pair = localPairs[localPairProcess];
+          ... three dispatch branches ...
+          // dispatched      → br 11A5   (0758, 0ED6, 1173)   ← BREAKS OUT
+          // not enough energy→ blt 11A5 (0410, 0EE3)         ← breaks out
+          // nothing to do here →
+1175      localPairProcess = (localPairProcess + 1) % localPairCount;
+11A0  } while (start != localPairProcess);
+11A5  localPairProcess = (localPairProcess + 1) % localPairCount;
+```
+
+**That loop is a scan for work, not a dispatch loop.** It already walks the entire pairing ring;
+it just leaves the moment it launches one drone. So the cap is **one drone per station per assigned
+tick**, and the fix is to redirect the three "dispatched" breaks to `1175` — vanilla's own
+continue path, which does *identical* work (cursor +1 with wrap); the only difference is the
+loop-back test. **Nothing of vanilla's dispatch decision is reimplemented.**
+
+**The stagger is adaptive and tops out at 1, which is why tuning it is not the answer.**
+`droneDispatchStatus` is `new byte[30]` (`Init` @0517); each assigned tick zeroes one slot and each
+dispatch increments it. Once the cursor wraps (`11C8: if (droneStatusCursor != 0) skip`), IL
+11D3–1292 computes `busy = sum / 30` and moves the interval: `busy < 0.75` → `ceil(interval / f)`
+with `f = busy*0.25 + 0.75` (**grows** it), `busy > 0.9` → `floor(interval * 0.8 + 0.1)`
+(**shrinks** it), 0.75–0.9 is a hysteresis band; then clamped to `[1, totalDrones >= 75 ? 10 : 20]`.
+**So the interval bottoms out at 1** — 60 drones/s per station.
+
+**"…and a busy station drives itself there unaided" was written here and is measured false.** On the
+owner's save the interval sits at **average 16.5, max 20, with 0–1 of 614 stations at 1**. The
+arithmetic says why: `UpdateOutputSlots` runs 3.06M times per 60 s, i.e. ~850 stations × 3600 ticks,
+so at interval ≈17 there are ~180k dispatch attempts per minute — against **~13k actual dispatches**.
+Only ~7% of attempts find anything to do, so `busy ≈ 0.14`, far under the 0.75 threshold, and the
+controller grows the interval until it pins at the cap. (Cap 20, not 10, means most of those
+stations carry fewer than 75 drones.)
+
+**The reason there is so little drone work is this mod's own doing**: `MegaVirtualLogisticsPatches`
+moves goods directly between mega-building slots and other stations without launching anything
+("巨型建筑已改为虚拟物流：储物格之间直接搬运，无人机不再起飞"). So on a mega-building factory the
+drone fleet is handling only the leftovers. **Before tuning either throttle, check how much work
+exists** — both throttles are downstream of that.
+
+**The interstellar idiom does not port, and this is the part worth remembering.** The section above
+says the lever for `DetermineDispatch` is a reentrancy-guarded postfix calling it N−1 more times,
+because that method is dispatch-only and straight-line. **`InternalTickLocal` fuses four jobs**, and
+re-calling it corrupts three of them:
+
+| IL | what it does | what a second call does |
+|---|---|---|
+| 0002–0054 | charges the station (`energy += energyPerTick`) | charges twice in one tick |
+| 00BD–00F8 | advances `droneStatusCursor` | burns the 30-sample window N× faster, mis-computes `busy` |
+| 11C8–1292 | recomputes `droneTaskInterval` | recomputes off that corrupted sample |
+| 1297–end | **advances every in-flight drone** (`t += direction × speed`) | every drone flies N× faster |
+
+Suppressing four regions is strictly more invasive than redirecting three branches. **"Method X was
+safe to re-call" is a fact about X, not about its neighbours** — check what else is fused into the
+body before porting the trick.
+
+**The guard that has to move inside the loop, and why omitting it is a crash rather than a bug.**
+`idleDroneCount <= 0` is tested at 0117, **outside** the loop, and the body never re-checks it —
+one check suffices when you leave after one dispatch. But a dispatch writes
+`workDroneDatas[workDroneCount]`, and that array is `new DroneData[prefabDesc.stationMaxDroneCount]`
+(`Init` @0128–0135), i.e. exactly the bound on `workDroneCount + idleDroneCount`. Burst without
+re-checking and the second drone writes past the end. The guard is therefore **copied verbatim from
+vanilla's own two gates** rather than re-derived — the drill-bit lesson. The two `blt` energy
+give-ups stay untouched: they are the exact per-trip cost, already inside the loop.
+
+**Cost shape, stated accurately because the easy claim is wrong in both directions.** The outer
+loop's iteration count is *already* bounded by `localPairCount` (the `start != localPairProcess`
+test), so bursting **cannot exceed vanilla's worst case**. What changes is the typical case. But it
+is not free either: the demand-side branch carries its own inner ring scan (0A3A–0ECF), and that
+runs once per *outer* iteration — so the added cost is ≈ extra dispatches × what vanilla's first
+iteration cost. Since a *successful* iteration is by definition one that found work early, the cost
+tracks the throughput it buys.
+
+**And the first version's speedup number was an artifact — the probe could not have reported
+anything else.** It printed `1 + extra/dispatches`, where `extra` counts "we permitted a
+continuation". Whenever the per-tick budget is not the binding constraint, `extra ≈ dispatches` and
+that expression reads **≈2.00 regardless of the true multiplier**; it duly reported "1.97×" on three
+consecutive windows. The true denominator is *attempts that dispatched at least once* (vanilla
+dispatches exactly one per such attempt), which those two counters cannot recover. It is now counted
+directly: the first dispatch of a call is the one that sees `_left == _max`. Same family as the
+status-line lesson — **a reading that cannot vary with the thing being measured is not a
+measurement** — and it is the third probe-design mistake recorded in this file.
+
+**The discriminator for the transpiler is branch opcode, not offset.** Five branches target the
+exit; `br`/`brtrue` (3) mean "dispatched", `blt` (2) mean "out of energy". The anchor is the
+6-instruction `ldarg.0 ; ldarg.0 ; ldfld localPairProcess ; ldc.i4.1 ; add ; stfld localPairProcess`,
+which occurs **exactly twice** (the other four writes to that field are `rem` or `ldc.i4.0`) — first
+is the continue path, second is the exit. Simulated offline against the shipped assembly before the
+transpiler was trusted: 2 anchors, 2/1/2/0, all three rewrite sites outside every try/handler range.
 
 ## Game internals: assembler input buffering
 
