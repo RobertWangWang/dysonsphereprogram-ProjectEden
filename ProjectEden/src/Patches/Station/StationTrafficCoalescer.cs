@@ -85,7 +85,7 @@ namespace ProjectEden.Patches
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.RefreshStationTraffic))]
-        private static bool Defer(PlanetTransport __instance)
+        private static bool Defer(PlanetTransport __instance, int keyStationId)
         {
             if (_flushing) return true;
 
@@ -94,8 +94,51 @@ namespace ProjectEden.Patches
             if (factory == null) return true;
 
             MarkDirty(factory);
+            RememberKey(factory.planetId, keyStationId);
 
             return false;
+        }
+
+        /// <summary>
+        /// 每颗星球欠着哪几个 <c>keyStationId</c>。
+        ///
+        /// <b>这一项是补的，上一版漏了，而漏的方式很典型。</b>
+        /// <c>RefreshStationTraffic(int keyStationId = 0)</c> 是<b>可选参数</b>，
+        /// 所以上一版写 <c>RefreshStationTraffic()</c> 能编译、能跑、不报错——
+        /// 但那等于永远传 0，而 <c>RematchLocalPairs</c> @018C 正是
+        /// <c>keyStationId &lt;= 0 → 跳过整个后半段</c>，也就是<b>无人机订单修复从此没再跑过</b>。
+        /// 症状会是在飞的运输机订单和槽位的 localOrder 对不上，而且不报任何错。
+        ///
+        /// 合并之后一次冲刷可能对应好几次原版调用，所以按<b>去重的 key 集合</b>存，
+        /// 冲刷时每个 key 各补跑一次——那正是原版逐次调用的语义。
+        /// </summary>
+        private static readonly ConcurrentDictionary<int, ConcurrentDictionary<int, byte>> PendingKeys =
+            new ConcurrentDictionary<int, ConcurrentDictionary<int, byte>>();
+
+        /// <summary>一次冲刷最多补跑多少个 key。超了就只保留先到的那些，并报一次。</summary>
+        private const int MaxKeysPerFlush = 32;
+
+        private static int _keyOverflowWarned;
+
+        private static void RememberKey(int planetId, int keyStationId)
+        {
+            if (keyStationId <= 0) return;
+
+            ConcurrentDictionary<int, byte> set =
+                PendingKeys.GetOrAdd(planetId, _ => new ConcurrentDictionary<int, byte>());
+
+            if (set.Count >= MaxKeysPerFlush)
+            {
+                if (System.Threading.Interlocked.Exchange(ref _keyOverflowWarned, 1) == 0)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        $"物流配对刷新：一次合并窗口里攒了超过 {MaxKeysPerFlush} 个变更站点，" +
+                        "多出来的不再单独补跑无人机订单修复。配对表本身仍然是全量重建的、不受影响；" +
+                        "受影响的只是那几台站点上**正在飞**的运输机订单，它们会在下一次派机时自行归位。");
+
+                return;
+            }
+
+            set.TryAdd(keyStationId, 0);
         }
 
         /// <summary>
@@ -128,11 +171,26 @@ namespace ProjectEden.Patches
 
             // 放行标志要包在 finally 里：真刷那一次里要是抛了，标志留着 true
             // 就等于把去抖整个关掉，而且不会有任何迹象
+            PendingKeys.TryRemove(planetId, out ConcurrentDictionary<int, byte> keys);
+
+            long began = System.Diagnostics.Stopwatch.GetTimestamp();
+
             _flushing = true;
 
             try
             {
-                __instance.RefreshStationTraffic();
+                if (LocalPairIndex.Enabled)
+                {
+                    LocalPairIndex.Rebuild(__instance, keys);
+                }
+                else
+                {
+                    // 退回原版：逐个 key 调一次，没有 key 就调一次空的（只重建配对表）
+                    if (keys == null || keys.Count == 0) __instance.RefreshStationTraffic();
+                    else
+                        foreach (int k in keys.Keys)
+                            __instance.RefreshStationTraffic(k);
+                }
             }
             finally
             {
@@ -140,12 +198,170 @@ namespace ProjectEden.Patches
             }
 
             _flushed++;
+
+            NoteFlushCost(__instance, System.Diagnostics.Stopwatch.GetTimestamp() - began, keys);
+            MeasurePairs(__instance);
+        }
+
+        /// <summary>
+        /// 已经量过的星球。<b>第一版这里是个全局计数器「整局只量三次」，那是个错误</b>：
+        /// 先冲刷的是几颗小星球，三次名额被它们用光，而真正要看的那颗
+        /// （两千多个站点的主工厂星）一次都没量到。
+        /// <b>「整局只报 N 次」和「每种对象报一次」不是一回事</b>——
+        /// 这条规矩本文件为 MegaStationPatches 的储物格转储记过一次，这里又踩了。
+        /// </summary>
+        private static readonly ConcurrentDictionary<int, byte> Measured = new ConcurrentDictionary<int, byte>();
+
+        private const int MeasureMaxPlanets = 8;
+
+        /// <summary>
+        /// 每颗星球各自累计。<b>第一版是全局的，那让这条读数不可用。</b>
+        /// 它打印时挂的是「触发第 5 次的那颗星球」的星球号，而累加的是所有星球的冲刷——
+        /// 于是「行星 104 最近 5 次平均 8.09 毫秒」里混着别的星球，
+        /// 我据此推出「无人机订单修复约 25 毫秒」，那个数是<b>假的</b>。
+        ///
+        /// <b>本轮第三次栽在同一个全局计数器上</b>（规模实测、自检节奏、这里），
+        /// 三处都在这个文件里。规矩写在 CLAUDE.md：**按对象计数，不要按次数计数。**
+        /// </summary>
+        private sealed class Cost
+        {
+            internal long Ticks;
+            internal long DroneTicks;
+            internal long AuditTicks;
+            internal int AuditRuns;
+            internal int Count;
+            internal int Reports;
+        }
+
+        private static readonly ConcurrentDictionary<int, Cost> Costs = new ConcurrentDictionary<int, Cost>();
+
+        /// <summary>
+        /// 报一次冲刷的真实耗时。<b>这是这条改动唯一的验收标准</b>：
+        /// 改之前实测一次 81 毫秒，索引版应该落在个位数毫秒。
+        ///
+        /// <b>带自检的那几次会明显偏大</b>——它多跑了一遍原版的匹配，那正是被替掉的那一段。
+        /// </summary>
+        private static void NoteFlushCost(PlanetTransport transport, long ticks,
+            ConcurrentDictionary<int, byte> keys)
+        {
+            int planetId = transport.factory?.planetId ?? 0;
+            Cost c = Costs.GetOrAdd(planetId, _ => new Cost());
+
+            c.Ticks += ticks;
+            c.DroneTicks += LocalPairIndex.TakeDroneTicks();
+            c.AuditTicks += LocalPairIndex.TakeAuditTicks(out int runs);
+            c.AuditRuns += runs;
+            c.Count++;
+
+            if (c.Count < 5 || c.Reports >= 6) return;
+
+            c.Reports++;
+
+            double freq = System.Diagnostics.Stopwatch.Frequency;
+            double all = c.Ticks / freq * 1000.0;
+            double drone = c.DroneTicks / freq * 1000.0;
+            double audit = c.AuditTicks / freq * 1000.0;
+            // **除的是总次数，不是非自检次数**：自检只是某几次冲刷里多做的一段，
+            // 而纯重建每一次都做。第一版按非自检次数除，把带自检那个窗口的
+            // 「配对重建」报成了 18.14 毫秒，实际是 6.67——虚高 2.5 倍，正好是 5/2
+            double pure = all - drone - audit;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物流配对刷新·耗时（行星 {planetId}，最近 {c.Count} 次）：" +
+                $"**配对重建 {pure / c.Count:0.##} 毫秒／次**（改之前实测 81 毫秒）｜" +
+                $"无人机订单修复 {drone / c.Count:0.##} 毫秒／次（原版代码，循环上界是 workDroneCount @0CCF，" +
+                "没有在飞的运输机就一次都不进）｜" +
+                $"回放自检 {c.AuditRuns} 次共 {audit:0.#} 毫秒（它要跑一遍**原版**的匹配，" +
+                "也就是被替掉的那一段——所以它贵恰好说明这条改动有用）｜" +
+                $"本次变更站点 {keys?.Count ?? 0} 个，" +
+                $"索引版{(LocalPairIndex.Enabled ? "生效中" : "**已被自检关掉，正在用原版**")}。");
+
+            c.Ticks = 0;
+            c.DroneTicks = 0;
+            c.AuditTicks = 0;
+            c.AuditRuns = 0;
+            c.Count = 0;
+        }
+
+        /// <summary>
+        /// 刚刷完的这一刻，把这张表的真实规模量出来。
+        ///
+        /// <b>这是决定「换索引值不值」的那个数。</b> 现在的匹配是三角形全对连接，
+        /// 代价约 <c>Σ_A(激活格 × (n − A.id) × 对方格数)</c>；换成按 itemId 的索引之后，
+        /// 代价降到<b>「建索引 + 配对数 P」</b>——而 P 是输出本身，谁也省不掉。
+        /// 所以 P 要是本来就有几百万，这条路的收益上限就远没有估的那么高。
+        ///
+        /// <c>localPairCount</c> 是<b>每条配对两边各存一份</b>（RematchLocalPairs @0090 和 @00A2
+        /// 对 this 和 other 各调一次 AddLocalPair），所以逻辑上的对数是这个和的一半。
+        ///
+        /// 整局只量三次：这一段要走一遍 stationPool，不该常驻。
+        /// </summary>
+        private static void MeasurePairs(PlanetTransport transport)
+        {
+            int planetId = transport.factory?.planetId ?? 0;
+
+            if (Measured.Count >= MeasureMaxPlanets && !Measured.ContainsKey(planetId)) return;
+            if (!Measured.TryAdd(planetId, 0)) return;
+
+            StationComponent[] pool = transport.stationPool;
+
+            if (pool == null) return;
+
+            int cursor = transport.stationCursor;
+
+            long pairSlots = 0;
+            long active = 0;
+            long slots = 0;
+            long stations = 0;
+
+            // 每站的激活格数和总格数先收下来，**扫描次数要按真实的后缀格数算**，
+            // 不能拿「每站 30 格」去估——这个比值是用来做决定的，估出来的数不配当依据
+            var act = new int[cursor];
+            var cap = new int[cursor];
+
+            for (var i = 1; i < cursor; i++)
+            {
+                StationComponent s = pool[i];
+
+                if (s == null || s.id != i || s.storage == null) continue;
+
+                stations++;
+                pairSlots += s.localPairCount;
+                slots += s.storage.Length;
+                cap[i] = s.storage.Length;
+
+                for (var k = 0; k < s.storage.Length; k++)
+                    if (s.storage[k].itemId > 0 && s.storage[k].localLogic != ELogisticStorage.None)
+                        act[i]++;
+
+                active += act[i];
+            }
+
+            // suffix[i] = 站号 > i 的所有站点的格数之和
+            long suffix = 0;
+            long scan = 0;
+
+            for (int i = cursor - 1; i >= 1; i--)
+            {
+                scan += act[i] * suffix;
+                suffix += cap[i];
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物流配对表·规模实测（行星 {transport.factory?.planetId}）：站点 {stations} 个、" +
+                $"储物格合计 {slots} 个、其中方向不是 None 且有物品的 {active} 个｜" +
+                $"**配对表条目 {pairSlots} 条（两边各存一份，逻辑上 {pairSlots / 2} 对）**｜" +
+                $"原版全刷的内层迭代约 {scan} 次。" +
+                "**换成按 itemId 的索引之后，代价降到「建索引 ≈ 储物格数」加「配对数」**——" +
+                $"也就是约 {slots + pairSlots} 次，对比 {scan} 次。" +
+                "这两个数的比值就是这条改动的收益上限。");
         }
 
         /// <summary>换存档时清空：星球号会重复使用。</summary>
         internal static void Reset()
         {
             Dirty.Clear();
+            Measured.Clear();
             LastFlush.Clear();
         }
 
@@ -159,7 +375,12 @@ namespace ProjectEden.Patches
                 "而**放下一座建筑就要调一次**（BuildFinally → ApplyPrebuildParametersToEntity），" +
                 "10 秒里 25 次、合计 2 秒。" +
                 "**代价：供需配对最多晚 2 秒重建**——面板上改一格、拆一座站之后，" +
-                "无人机会多用两秒的旧配对。读档那一次不受影响。");
+                "无人机会多用两秒的旧配对。读档那一次不受影响。" +
+                $"另外配对表本身已改为**按 itemId 建索引**重建（{nameof(LocalPairIndex)}）：" +
+                "匹配谓词只有「itemId 相同 + 方向互补」，是一次等值连接，" +
+                "所以三角形全对扫描（实测这颗星球 8900 万次内层迭代）可以降到" +
+                "「建索引 + 配对数」（约 64 万次）。**每 20 次重建做一次回放自检**，" +
+                "把原版的匹配也跑一遍逐条比对，对不上就整局退回原版并报 ERROR。");
         }
 
         /// <summary>合并了多少次、实际刷了多少次——比值就是这条改动省下的倍数。</summary>

@@ -256,6 +256,15 @@ Both share the same speed-up logic as the advanced mining machine:
 > Those rebuilds are therefore coalesced: mark it, and actually recompute at most once every 2 seconds. Measured, the
 > cost of placing one building fell from **102 ms to 0.63 ms**. The price is exactly that delay — after you change a
 > slot or dismantle a station, drones keep flying on the old pairing for up to two seconds.
+>
+> **The table itself also got a new algorithm.** Vanilla pairs stations by comparing every slot of every station
+> against every slot of every other station, and the test is only two things: same item, complementary direction (one
+> supplies, one demands). That is an **equi-join**, so it can be indexed by item — on the planet with two thousand
+> stations one rebuild drops from 89 million comparisons to about 640 thousand, **measured 81 ms → 6.7 ms**.
+>
+> This one **checks itself**: every so often it runs vanilla's algorithm as well and compares the pairing table entry
+> by entry; on any disagreement it falls back to vanilla for the rest of the session and logs an error. **The worst
+> case is "no faster", never "wrong pairs".**
 
 ### Carry capacity and stacking
 

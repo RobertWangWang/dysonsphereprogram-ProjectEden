@@ -3071,6 +3071,58 @@ of CPU per 35 s (**32%**), permanently, with nothing building.
 `MegaStationPatches`' guard "only call it when the layout actually changed" was correct all along;
 **what nobody measured was how often it changes.**
 
+### Replacing that join with a hash index — 81 ms → 6.7 ms
+
+**The matching predicate is one line, so this is an equi-join.** `RematchLocalPairs`' inner test is
+only `itemId` equal (@0072 / @0126) and direction complementary (@0082 / @0136). No distance, no
+priority, no grouping. A tree or a heap buys nothing here — they solve ordering and extremum, and
+neither is asked for. The standard answer to an equi-join is an index on the join key.
+
+**Measured scale, one save, five planets:**
+
+| planet | stations | slots | active slots | logical pairs | vanilla scan | indexed | ratio |
+|---|---|---|---|---|---|---|---|
+| 3701 | 28 | 728 | 45 | 28 | 15,756 | 784 | 20× |
+| 3703 | 112 | 228 | 118 | 110 | 18,429 | 448 | 41× |
+| 103 | 558 | 3,174 | 661 | 5,315 | 1,223,061 | 13,804 | 89× |
+| **104** | **2,101** | **37,190** | **4,017** | **303,093** | **89,279,581** | **643,376** | **139×** |
+
+89.3M inner iterations against the measured 81 ms is 0.9 ns each — so the model is sound. **Do not
+expect 139×**: 606k of the 643k are the `AddLocalPair` calls themselves, which are the output.
+
+**The cut point is that `stationCursor` is used only as those two loop bounds.** Across the whole
+method arg2 appears exactly twice, at @00BA and @0179, both the `blt` of a station loop. The second
+half (drone-order repair, 2800 of the method's bytes) is skipped wholesale at @018C when
+`keyStationId <= 0`, and it indexes `stationPool` by a drone's `endId`, not by the cursor. Therefore
+
+> **`RematchLocalPairs(realPool, 0, keyStationId, droneCarries)` runs the drone repair and nothing
+> else** — the matching loops start at `this.id + 1` and `this.id >= 1`, so `blt 0` never enters.
+
+`LocalPairIndex` uses that: it clears, emits pairs from its own index, then calls vanilla's method
+per station with a cursor of 0 so **vanilla's 2800 bytes run verbatim**. Flat arrays with chained
+buckets (`itemId → (station, slot)`), `[ThreadStatic]` and reused, so a rebuild allocates nothing.
+Stations and slots are walked **descending** while inserting, so head-insertion leaves each chain
+ascending — which is what makes the emitted pair sequence **identical to vanilla's, element for
+element**, not merely the same set.
+
+**Measured result on planet 104: 81 ms → 6.67 ms (≈12×)**, with 606,186 pair entries verified
+element-for-element against vanilla.
+
+**The audit is why this route is allowed at all**, same as `MegaBatchSettle`: every 20 rebuilds
+(and the first 3 per planet) it runs vanilla's matcher too and compares an **order-sensitive**
+checksum. A snapshot would cost 12 MB at this scale; the checksum is O(pairs) and zero memory, and
+because our emission order is deliberately aligned with vanilla's, order-sensitivity is the
+*stronger* test, not the weaker one. A mismatch logs ERROR and disables the index for the session —
+worst case "no faster", never "wrong pairs". Vanilla's table is what stays after an audit.
+
+**`RefreshStationTraffic(int keyStationId = 0)` has an optional parameter, and that cost a silent
+bug.** Writing `RefreshStationTraffic()` compiles, runs and reports nothing — while passing 0 is
+exactly the `keyStationId <= 0` that skips the entire drone-order repair. The coalescer shipped
+that way for a version: the pair table was rebuilt correctly and **the drone repair had not run
+once**. The prefix now captures the real key, and the coalescer keeps a deduplicated set of pending
+keys and replays the repair for each. Measured cost of that repair: **0.1–0.35 ms**, because its
+loop bound is `workDroneCount` (@0CCF) — a station with nothing in flight does zero iterations.
+
 ### `EndFlattenTerrain`'s tail is unconditional
 
 `BeginFlattenTerrain` merely clears `tmp_levelChanges` (10 instructions). `EndFlattenTerrain` ends
@@ -3109,6 +3161,16 @@ What worked, both times this repo has had a performance problem, is the same mov
 timestamps around each candidate segment and read the numbers.** The guidance that keeps being
 re-earned is already in this file — *a mechanism that could explain a symptom is not evidence that
 it did*.
+
+**A global counter is the wrong shape for "report N times", and this file's author got it wrong
+three times in one session, in one file.** The pair-size probe ("measure three times per session")
+had its three slots consumed by small planets and never measured the one that mattered; the audit
+cadence ("audit the first 3 rebuilds") did the same, and additionally raced — three planets tick in
+parallel, `_rebuilds++` is not atomic, and all three audit lines printed "第 3 次"; the timing probe
+accumulated across planets while printing one planet's id, which is how a **fabricated "the drone
+repair costs ~25 ms"** was derived from two windows that were never comparable. The rule is
+**count per object, not per occurrence** — and on the parallel tick path, per object *and* with
+`Interlocked`.
 
 Two probe-design lessons worth keeping:
 
