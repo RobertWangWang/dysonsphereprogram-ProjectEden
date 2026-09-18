@@ -120,21 +120,26 @@ The practical checklist for any content change: `README.md` → `manifest.json` 
 `mod特性.md` → `mod_feature.md` → `CHANGELOG.md`. Numbers first (how many buildings, veins, recipe
 types), then the new row or section.
 
-**`CHANGELOG.md` has a hard ceiling of 100,000 characters (owner instruction).** It is measured on
-**content characters with line endings normalised to `\n`** — the repo checks out CRLF, and counting
-those raw adds one phantom character per line (about 3,000 today), which would also give different
-answers on Windows and Linux. `tools/pack_release.py`'s `check_changelog_size()` enforces it and
-**prints the usage on every pack whether or not it passes**, warning past 90%.
+**`CHANGELOG.md` holds the current version and nothing else (owner instruction).** Exactly one
+`## <version>` section, and it must be the version in `manifest.json`. When you cut a release, the
+previous version's section moves to **`ProjectEden/CHANGELOG-history.md`** (newest first) and
+`CHANGELOG.md` is left with just the new one plus its pointer line. **Nothing is ever deleted** —
+git has every version anyway, and the archive stays in the repo; it simply does not ship, which is
+the point. Do not add `CHANGELOG-history.md` to `pack_release.py`'s file list.
 
-When it is reached, **do not delete history — move it.** Cut the oldest whole version sections into
-`ProjectEden/CHANGELOG-history.md` and leave a pointer line at the end of `CHANGELOG.md`. Nothing is
-lost: git has every version anyway, the archive stays in the repo, and only the shipped package gets
-shorter. Current state at 1.10.5: **97,596 / 100,000 (97.6%)**, so the next release or two will hit
-it — `## 1.9.0` alone is 26,225 characters and everything at or below `## 1.8.3` is 44,000.
+A secondary ceiling of **100,000 characters** stays as a backstop, since one version's entry can
+still run away. It is measured on **content characters with line endings normalised to `\n`** — the
+repo checks out CRLF, and counting those raw adds one phantom character per line, which would also
+give different answers on Windows and Linux.
 
-The reason for the ceiling is the same one that makes the manifest description a shelf label: the
-changelog ships inside the package and is the first thing a reader scrolls. A changelog nobody
-reaches the bottom of documents nothing.
+`tools/pack_release.py`'s `check_changelog(version)` enforces both and **prints the section list and
+the character usage on every pack whether or not they pass** — a check that is silent when it passes
+cannot be told apart from a check that never ran. At 1.10.5: `1,687 字 … 版本段 1 个 ['1.10.5']`,
+and the shipped `CHANGELOG.md` went from 211 KB to 3 KB.
+
+The reason is the same one that makes the manifest description a shelf label: the changelog ships
+inside the package and is the first thing a reader scrolls. A changelog nobody reaches the bottom of
+documents nothing.
 
 ## Local setup (verified)
 

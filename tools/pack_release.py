@@ -54,6 +54,9 @@ REPO = u'https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden'
 # **数的是内容字符数，换行按 1 个算。** 仓库里是 CRLF，直接数原始字符会把每一行
 # 多算一个，3000 行就是 3000 字的虚高——那是平台产物不是内容，按它卡会在
 # Windows 和 Linux 上得出两个答案。
+#
+# 自从「只写本版本」这条规矩之后它基本碰不到了，留着是兜底：
+# 单独一个版本的条目照样可能写到失控。
 CHANGELOG_MAX_CHARS = 100000
 
 out = io.open(1, 'w', encoding='utf-8', closefd=False)
@@ -127,7 +130,7 @@ def main():
 
     check_manifest(manifest)
     check_versions(manifest[u'version_number'])
-    check_changelog_size()
+    check_changelog(manifest[u'version_number'])
 
     name = sys.argv[1] if len(sys.argv) > 1 else u'%s-%s' % (manifest[u'name'], manifest[u'version_number'])
     zip_path = os.path.join(DIST, name + u'.zip')
@@ -287,37 +290,41 @@ def check_versions(version):
                      % (version, u'\n  '.join(bad)))
 
 
-def check_changelog_size():
-    u"""CHANGELOG.md 不得超过 CHANGELOG_MAX_CHARS 个字符。
+def check_changelog(version):
+    u"""CHANGELOG.md 只写本版本，且不超过 CHANGELOG_MAX_CHARS 个字符。
 
-    **每次打包都报一行，不管过没过。** 只在超标时才出声的话，「没超」和
+    **两条规矩都是所有者定的，「只写本版本」是主规矩**，字数上限是它的兜底
+    —— 单独一版也可能写得过长。
+
+    **每次打包都报一行，不管过没过。** 只在出问题时才出声的话，「没问题」和
     「这个检查根本没跑」在输出里长得一样——本仓库为这个形状付过六次代价。
 
-    超了不是删历史，是**把老版本挪进 CHANGELOG-history.md**：git 里本来就全都在，
+    往期日志挪进 CHANGELOG-history.md，不删：git 里本来就全都在，
     归档文件也留在仓库里，只是不跟着包发出去。
     """
     path = os.path.join(ROOT, u'ProjectEden', u'CHANGELOG.md')
     text = io.open(path, encoding='utf-8').read().replace(u'\r\n', u'\n').replace(u'\r', u'\n')
-    n = len(text)
-    pct = 100.0 * n / CHANGELOG_MAX_CHARS
 
-    out.write(u'CHANGELOG.md：%s 字 / 上限 %s 字（%.1f%%）\n'
-              % (format(n, u','), format(CHANGELOG_MAX_CHARS, u','), pct))
+    heads = re.findall(u'(?m)^##\\s+(\\S+)', text)
 
-    if n <= CHANGELOG_MAX_CHARS:
-        if pct >= 90.0:
-            out.write(u'  ⚠ 已经超过九成，下一两个版本就会顶到上限。'
-                      u'该把最老的几个版本挪进 ProjectEden/CHANGELOG-history.md 了。\n')
+    out.write(u'CHANGELOG.md：%s 字 / 上限 %s 字（%.1f%%），版本段 %d 个 %s\n'
+              % (format(len(text), u','), format(CHANGELOG_MAX_CHARS, u','),
+                 100.0 * len(text) / CHANGELOG_MAX_CHARS, len(heads), heads))
 
-        return
+    if len(heads) != 1 or heads[0] != version:
+        raise SystemExit(
+            u'CHANGELOG.md 只能写本版本（%s），实际有 %d 个版本段：%s\n'
+            u'  把往期的整段剪到 ProjectEden/CHANGELOG-history.md，\n'
+            u'  并在 CHANGELOG.md 末尾留一行指过去。一个字都不用删——\n'
+            u'  git 里本来就全都在，归档文件也留在仓库，只是不进发布包。'
+            % (version, len(heads), heads))
 
-    raise SystemExit(
-        u'CHANGELOG.md 超了：%s 字，上限 %s 字，超出 %s 字。\n'
-        u'  把最老的几个版本段整段剪到 ProjectEden/CHANGELOG-history.md，\n'
-        u'  并在 CHANGELOG.md 末尾留一行指向它。历史一个字都不会丢——\n'
-        u'  git 里本来就全都在，归档文件也留在仓库里，只是不进发布包。'
-        % (format(n, u','), format(CHANGELOG_MAX_CHARS, u','),
-           format(n - CHANGELOG_MAX_CHARS, u',')))
+    if len(text) > CHANGELOG_MAX_CHARS:
+        raise SystemExit(
+            u'CHANGELOG.md 超了：%s 字，上限 %s 字，超出 %s 字。\n'
+            u'  这已经是单独一个版本的条目了，只能把它本身写短一些。'
+            % (format(len(text), u','), format(CHANGELOG_MAX_CHARS, u','),
+               format(len(text) - CHANGELOG_MAX_CHARS, u',')))
 
 
 main()
