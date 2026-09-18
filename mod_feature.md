@@ -76,7 +76,7 @@ A new **"Mega Structures" tab** (category 12) appears in the build bar, holding 
 | Biodome | **Bioculture** (this mod only) | 18 MW | section XIX |
 | Lava Cooling Plant | **Lava Processing** (this mod only) | 30 MW | section XXVI |
 | Catalytic Reactor | **Catalysis** (this mod only) | 43.2 MW | section XXVII |
-| Integrated Chemical Plant | **Integrated Chemistry** (eats Chemical / Electrochemical / Redox) | 360 MW | section XXVIII |
+| Integrated Chemical Plant | **Integrated Chemistry** (eats Chemical / Refine / Electrochemical / Redox) | 360 MW | section XXVIII |
 | Redox Combustion Plant | **Redox Combustion** (this mod only) | 180 MW | section XXIX |
 | Isotopic Refinery | **Isotopic Refining** (this mod only) | 180 MW | section XXXI |
 
@@ -255,7 +255,15 @@ Both share the same speed-up logic as the advanced mining machine:
 >
 > Those rebuilds are therefore coalesced: mark it, and actually recompute at most once every 2 seconds. Measured, the
 > cost of placing one building fell from **102 ms to 0.63 ms**. The price is exactly that delay — after you change a
-> slot or dismantle a station, drones keep flying on the old pairing for up to two seconds.
+> slot or place a station, drones keep flying on the old pairing for up to two seconds.
+>
+> **Dismantling is exempt, and that exemption was added in 1.10.6 to fix a crash.** There are two kinds of staleness
+> and only one of them is a delay: changing a slot or building a station is **content** staleness, and two seconds of
+> it is harmless; **removing a station is existence staleness, which is a dangling reference** — the pairing table
+> still names a station that no longer exists, and the logistics thread crashes the moment it touches it. So the
+> rebuild a dismantle triggers now runs **immediately** and is never coalesced. It also closes a second, quieter
+> symptom: station indices are recycled to newly built stations, so inside that window a stale pair could point at an
+> unrelated station and **deliver goods to the wrong slot with nothing logged**.
 >
 > **The table itself also got a new algorithm.** Vanilla pairs stations by comparing every slot of every station
 > against every slot of every other station, and the test is only two things: same item, complementary direction (one
@@ -3552,14 +3560,24 @@ units of catalyst and starve every later one.
 ## XXVIII. The Integrated Chemical Plant: the first machine here that eats several recipe types
 
 The ninth mega building, and the first machine in this mod that can run **more than one
-`ERecipeType`**: chemical (2), electrochemical (9) and redox (10), all three, still at 10000×.
+`ERecipeType`**: chemical (2), **refine (3)**, electrochemical (9) and redox (10), all four, still
+at 10000×.
 
 ### It fills an actual vacuum
 
-This mod's chemistry recipes are spread across three types, and there was exactly one mega
+This mod's chemistry recipes are spread across four types, and there was exactly one mega
 building for any of them — the Calcining Chemical Plant, type 2. **Types 9 and 10 had no mega
-building at all.** Which means the whole C1 chain, the nitrogen chain, all three phases of organic
-chemistry and most of the refining line were stuck on 1× cloned buildings.
+building at all**, and refining had only the 1× vanilla Oil Refinery. Which means the whole C1
+chain, the nitrogen chain, all three phases of organic chemistry and the whole refining line were
+stuck at 1×.
+
+> **Refining was added later, and leaving it out cost more than it looks.**
+> `Naphtha · Atmospheric and Vacuum Distillation` is the **only** source of naphtha and vacuum gas
+> oil, and it is a refine (type 3) recipe — so the **entrance** to the entire organic chemistry line
+> was pinned to the 1× vanilla Oil Refinery, and no amount of speed downstream could help. Adding
+> refining also brings vanilla's Plasma Refining, X-ray Cracking and Reforming Refine along with it:
+> that is the unavoidable consequence of the same switch, because **the compatibility table admits
+> recipe *types*, not individual recipes**.
 
 | | |
 |---|---|

@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.10.5";
+        public const string VERSION = "1.10.6";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -293,6 +293,9 @@ namespace ProjectEden
             // 能量审计排在最后：它要读 LDB 里的最终热值，
             // 而原版热值改写、物品注册都得先完成
             LDBTool.PostAddDataAction += EnergyAudit.Run;
+            // 第二遍：原版配方里哪些能被巨型建筑跑。Run 只看 ores.json 自己的表，
+            // 而万倍速机器照样会跑原版配方——那一直是审计的盲区，综合化学厂加收精炼后补上。
+            LDBTool.PostAddDataAction += EnergyAudit.AuditMegaVanilla;
             LDBTool.PostAddDataAction += ProtoArrayCheck.Verify;
 
             Logger.LogInfo($"{NAME} v{VERSION} 已加载");

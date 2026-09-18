@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: ten 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, a **综合化学厂** that is the first machine here to run **more than one `ERecipeType`** (chemical 2, electrochemical 9 and redox 10, all at 10000×) — the eight real gates on `assemblerRecipeType` become one table lookup, and its build recipe eats 1000 燔石化工厂 so the older plant is its prerequisite rather than its victim, a **氧化还原燃烧厂** that is the first entity here to carry **both an assembler and a generator** — it presses a reductant and an oxidiser into propellant grains on its own `ERecipeType` 17, feeds those grains straight into its own fuel bay without a belt, and burns them for 30 GW, with a three-row panel whose two picker rows choose the pair and whose slider sets the oxidiser ratio, a **活性透镜** — a *living* gravitational lens that takes **no new building**, goes into the stock 射线接收站 through the vanilla `powerCatalystId` mechanism, generates ×5 power and ×3 critical photons (two independent knobs) and **heals in the beam while ageing in the dark**, and six rule-bypass cheat switches that are **on** by default (flipped after 1.5.0 by owner decision; they were off before, and the whole point of keeping them in their own file behind one master switch is that this default is one config override away from being reversed). ~31,500 lines of C# in 106 files — 99 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by twenty-two JSON configs, and fully translated into English.
+**Project Eden** — a Dyson Sphere Program mod on BepInEx + Harmony that scales up the late-game production chain: ten 巨型建筑 (mega buildings — 10000× assemblers that double as planetary logistics stations, one of which produces nothing at night), a maxed-out 大型采矿机 / 抽水站, 30-slot × 10,000,000-capacity logistics stations, and 5000-level cargo stacking (a preloader widens the belt cargo fields so full-tier proliferator survives it). It also adds custom ore veins (cobalt, aluminium, gypsum, lithium, manganese, chromium, vanadium and tungsten, vein types 15–22, placed per-theme as either regular spots or rare slots), a collectable gas giant gas (氮气), cloned buildings (电化学厂 and 氧化还原化工厂, each with its own recipe type; 综合物流枢纽 carrying both drone kinds; 锂电池蓄电器 with its own 能量枢纽; and 风力发电机集群, a 1000× wind turbine), a six-recipe C1 chemistry chain (合成气 → 甲醇 → 甲醛 / 乙烯, plus Fischer–Tropsch to 精炼油), a nitrogen chain (Haber–Bosch to 氨, Ostwald to 硝酸), a three-step tungsten chain ending in 碳化钨, a 硬质合金 whose WC:Co ratio is set **per building** by a slider and settles into yield and craft time, a four-axis property row (硬度/韧性/耐蚀/导电) on every metal, 五-tier 合金弹药 whose damage and yield come from **which two alloys** you feed one recipe, paging for the replicator, recipe picker, build menu and item-picker grids, a 生物温室 whose three recipes (zero-input photosynthesis → four-input algal-bacterial co-culture → lipid extraction) run on its own `ERecipeType` 11 and whose whole output is scaled by the **solar-panel light formula** — full sun gives the full 10000×, no sun gives nothing, an **alien vein** (莫桑石, type 23) that exists only outside the home system and **consumes drill bits to mine**, the bit being one item with one recipe per qualifying material (a predicate over the four-axis table, expanded at registration) forged in 锤锻精工厂 on this mod’s own `ERecipeType` 12, that vein’s downstream — **silicon carbide power electronics** (seeded-sublimation wafer → AlN substrate → power module → a 碳化硅能量枢纽 that serves the *same* lithium accumulators at 5× the throughput, because SiC is a converter and stores nothing), a **seventh research matrix** (生物矩阵) that is **grown in the 生物温室 rather than synthesised in a lab** and is the Universe Matrix’s seventh ingredient, a vanilla 抽水站 that draws **岩浆** off a lava planet’s ocean and a seventh mega building, the 熔岩冷却厂, that crystallises it back into 铬/钒/钴 ore at deliberately tiny yields on this mod’s own `ERecipeType` 13, a **催化反应器** that is the first stateful machine here — it holds a charge of zeolite catalyst, loses activity only on ticks that actually produced, ejects 待生沸石催化剂 into its own station slots when spent and blocks until refilled, with regeneration burning the coke back off at a 10 % loss, a **综合化学厂** that is the first machine here to run **more than one `ERecipeType`** (chemical 2, refine 3, electrochemical 9 and redox 10, all at 10000×) — the eight real gates on `assemblerRecipeType` become one table lookup, and its build recipe eats 1000 燔石化工厂 so the older plant is its prerequisite rather than its victim, a **氧化还原燃烧厂** that is the first entity here to carry **both an assembler and a generator** — it presses a reductant and an oxidiser into propellant grains on its own `ERecipeType` 17, feeds those grains straight into its own fuel bay without a belt, and burns them for 30 GW, with a three-row panel whose two picker rows choose the pair and whose slider sets the oxidiser ratio, a **活性透镜** — a *living* gravitational lens that takes **no new building**, goes into the stock 射线接收站 through the vanilla `powerCatalystId` mechanism, generates ×5 power and ×3 critical photons (two independent knobs) and **heals in the beam while ageing in the dark**, and six rule-bypass cheat switches that are **on** by default (flipped after 1.5.0 by owner decision; they were off before, and the whole point of keeping them in their own file behind one master switch is that this default is one config override away from being reversed). ~31,500 lines of C# in 106 files — 99 under `ProjectEden/src/` plus 3 in `ProjectEden.Preloader/`, the one BepInEx patcher this repo ships — driven by twenty-two JSON configs, and fully translated into English.
 
 `部署.md` is the deployment runbook — install instructions to forward to a tester in part one, the release flow (build → verify → `tools/pack_release.py`) in part two; **read it before cutting a package**, because the packaging target inside `ProjectEden.csproj` produces a layout that cannot carry the preloader. `mod特性.md` (Chinese) and `mod_feature.md` (English) are the player-facing feature guide, and are **one document in two languages — always edited together** (see the second content rule below). `ProjectEden/DSP-Mod-开发指南-Rider.md` is a 756-line Chinese guide to DSP modding — still a good primer on BepInEx/Harmony/LDBTool, but several build instructions are outdated for this install (see below). **Comments, log messages and docs are in Chinese; keep it that way.** Text the *player* reads is a separate surface and ships bilingually — see the second content rule below.
 
@@ -1932,6 +1932,14 @@ answerable without a second launch.
 - **`EnergyAudit` structurally cannot see a vanilla recipe**: it walks `ores.json`'s own recipe list,
   so every vanilla recipe is outside its scope — while this mod's 10000× mega assembler will happily
   run one. **The green line means "no mod recipe mints energy", not "nothing mints energy".**
+  **Closed in 1.10.6 by `EnergyAudit.AuditMegaVanilla`**, a second pass that walks `LDB.recipes`,
+  keeps the ones whose `Type` any mega building can run (each building's own `recipeType` plus its
+  `acceptsRecipeTypes`), skips this mod's own (`ProtoSlots.OwnRecipeIds`, already covered by the
+  first pass) and reports the positives — top 5 only, because a screenful of warnings is the same as
+  none. It **reports and does not block**: vanilla's balance is not this mod's to enforce, and the
+  real lever (which types a mega building may run) is an owner decision. The trigger was admitting
+  refine to 综合化学厂 — **when you widen what a mega building may run, you widen exactly this
+  blind spot**, so the edit had to carry the check.
 - **And this mod's `vanillaHeat` override turned a mild vanilla surplus into a large one, by exactly
   the mechanism it was added to fix.** 氢燃料棒 is `钛块×1 + 氢×10 → ×2`, i.e. 108 MJ out. In vanilla
   that is 90 MJ in (hydrogen at 9.0) — **+18 MJ, a 1.2× surplus, unremarkable**. Re-anchoring
@@ -3213,6 +3221,47 @@ flushed at most once per 120 ticks from that planet's own `PlanetTransport.GameT
 result: per building **102 ms → 0.63 ms**, and this method's CPU share **20% → 1.9%**. The stated
 cost is that supply/demand pairing can be up to 2 s stale — in vanilla it is instant. `Import`'s
 call is unaffected (`last` is 0 after a load, so the next tick flushes immediately).
+
+**And "every call" was wrong — it shipped a crash, and the distinction it missed is the lesson.**
+There are two kinds of staleness and only one of them is a delay:
+
+| | example | deferring it means |
+|---|---|---|
+| **content** | a slot's item changed, a station was built | the pairing is 2 s out of date — harmless, and it is what this optimisation buys |
+| **existence** | a station was removed | the table holds a **dangling reference** — not a delay |
+
+`RemoveStationComponent` @02D1 calls `Reset()`, which nulls `storage` (@00BC) and zeroes `id`
+(@0001) while **leaving the component in `stationPool`** (it only goes on the recycle list); it then
+**synchronously** rebuilds the pair table at @02F5. That synchronous rebuild is exactly why
+`InternalTickLocal` @07CF can get away with null-checking only the *object*:
+
+```
+07C1: V_47 = stationPool[pair.supplyId]
+07CF: if (V_47 == null) goto 1175;   // the object only
+07D6: V_26 = V_47.storage            // null on a recycled station
+07E4: Monitor.Enter(V_26, ...)       // ArgumentNullException on a worker thread
+```
+
+Deferring @02F5 broke that invariant, so for up to 2 s after dismantling a logistics station every
+other station's `localPairs` still named it. Reported by a player as
+`ArgumentNullException … mono_monitor_enter … DMD<InternalTickLocal>`. **1.10.4's burst dispatch was
+not the cause but widened the exposure** an order of magnitude (10 pairs examined per tick instead
+of 1), which is why it appears on the stack — and a second, silent symptom shares the root:
+`stationRecycle` hands the same index to a *new* station, so inside that window a stale pair points
+at an unrelated station and goods are delivered to the wrong slot with nothing logged.
+
+Fixed in 1.10.6 by flushing immediately when the call comes from `RemoveStationComponent`
+(a `[ThreadStatic]` flag set by a prefix on it, read in `Defer`). **Exactly one of the four callers
+needed it** — enumerated: `Import` (the table is empty, not dangling), `SetStationStorage`
+(content), `ApplyPrebuildParametersToEntity` (building — the one this optimisation exists for), and
+`RemoveStationComponent`. The cost is one full rebuild per dismantled station; at the indexed 6.7 ms
+against vanilla's own 81 ms that is still an order of magnitude cheaper than what vanilla does, and
+the build path is untouched.
+
+**The general rule: before deferring a vanilla call, ask what invariant its synchronicity is
+holding up.** A guard that null-checks one level and not the next is a *signal* that something
+upstream guarantees the rest — here, `!= null` on the object with no check on its array only makes
+sense because the table can never name a dead station.
 
 **The steady-state finding is the one nobody had looked for**: in a 34.8 s window with only 15
 buildings placed, the planet was marked dirty **138 times** — mega-building layout changes alone

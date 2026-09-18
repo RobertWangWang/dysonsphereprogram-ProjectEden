@@ -80,6 +80,138 @@ namespace ProjectEden
                 "写不出理由的话它就是个洞");
         }
 
+        /// <summary>报几条：输出必须有界，否则一屏警告等于没有警告。</summary>
+        private const int TopN = 5;
+
+        /// <summary>
+        /// 第二遍：**原版配方里，哪些能被巨型建筑跑**。
+        ///
+        /// <b>为什么必须有这一遍。</b> 上面那一遍只走 <c>ores.json</c> 自己的配方表，
+        /// 所以每一条原版配方都在它的视野之外——而巨型建筑会非常乐意用 10000 倍速跑一条原版配方。
+        /// 「能量审计通过」那行的真实含义一直是<b>「没有 mod 配方凭空造能量」，
+        /// 不是「没有东西凭空造能量」</b>。这件事 CLAUDE.md 记着，但一直没人补上检查。
+        ///
+        /// 补它的直接原因是综合化学厂加收了精炼（3）：那把三条原版精炼配方连同
+        /// <c>石脑油 · 常减压蒸馏</c> 一起送进了万倍速。**改动点要自带检查**，
+        /// 否则下一个人也只能靠手算和注释里的数——而注释里的数是主张，不是测量。
+        ///
+        /// 判据是「哪些类型有巨型建筑能跑」：每座巨型建筑自己的 <c>recipeType</c>，
+        /// 加上它 <c>acceptsRecipeTypes</c> 里的那些。**不是只看综合化学厂**——
+        /// 天工装配厂（4）、冶铸熔炉（1）、燔石化工厂（2）早就在跑原版配方了，
+        /// 只报新加的那一类会给出一个漂亮而片面的答案。
+        ///
+        /// 它<b>只报告，不拦截</b>：原版的平衡不是本 mod 的责任，而且这里真正的杠杆
+        /// （「巨型建筑允许跑哪些配方」）是所有者的设计决定，不是自检该替他做的。
+        /// </summary>
+        internal static void AuditMegaVanilla()
+        {
+            MegaBuildingsConfig mega = MegaBuildingRegistry.Config;
+
+            if (mega?.buildings == null || LDB.recipes?.dataArray == null)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "能量审计·原版侧：巨型建筑表或 LDB.recipes 读不到，本次不检查。");
+
+                return;
+            }
+
+            var runnable = new HashSet<int>();
+
+            foreach (MegaBuildingEntry b in mega.buildings)
+            {
+                if (b == null) continue;
+
+                if (b.recipeType > 0) runnable.Add(b.recipeType);
+
+                if (b.acceptsRecipeTypes == null) continue;
+
+                foreach (int t in b.acceptsRecipeTypes)
+                    if (t > 0) runnable.Add(t);
+            }
+
+            if (runnable.Count == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo("能量审计·原版侧：没有任何巨型建筑声明了配方类型，跳过。");
+
+                return;
+            }
+
+            var own = new HashSet<int>(ProtoSlots.OwnRecipeIds);
+
+            var hits = new List<KeyValuePair<double, string>>();
+            var scanned = 0;
+
+            foreach (RecipeProto r in LDB.recipes.dataArray)
+            {
+                if (r == null) continue;
+
+                // 本 mod 自己的配方由上面那一遍负责，这里只看原版的，免得同一条报两次。
+                if (own.Contains(r.ID)) continue;
+
+                if (!runnable.Contains((int)r.Type)) continue;
+
+                scanned++;
+
+                double delta = Burnable(r.Results, r.ResultCounts) - Burnable(r.Items, r.ItemCounts);
+
+                if (delta <= ThresholdJ) continue;
+
+                hits.Add(new KeyValuePair<double, string>(
+                    delta, $"「{r.name}」+{delta / 1e6:0.#} MJ（类型 {(int)r.Type}）"));
+            }
+
+            string where = string.Join("、", System.Array.ConvertAll(
+                new List<int>(runnable).ToArray(), x => x.ToString()));
+
+            if (hits.Count == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"能量审计·原版侧通过：巨型建筑能跑的配方类型是 {where}，"
+                    + $"其中 {scanned} 条原版配方没有一条产出可燃热值高于投入。");
+
+                return;
+            }
+
+            hits.Sort((a, b) => b.Key.CompareTo(a.Key));
+
+            var top = new List<string>();
+
+            for (var i = 0; i < hits.Count && i < TopN; i++) top.Add(hits[i].Value);
+
+            ProjectEdenPlugin.Log.LogWarning(
+                $"能量审计·原版侧：巨型建筑能跑的 {scanned} 条**原版**配方里，有 {hits.Count} 条"
+                + $"产出可燃热值高于投入，最大的 {top.Count} 条是 {string.Join("、", top.ToArray())}"
+                + $"（巨型建筑覆盖的配方类型：{where}）。"
+                + "巨型建筑把耗电摊薄到万分之一，所以这些配方在万倍速下实际上是发电机。"
+                + "**这不一定是本次改动造成的**——原版配方一直在巨型建筑里跑，只是过去没人检查；"
+                + "真正的杠杆是巨型建筑允许跑哪些类型（megabuildings.json 的 recipeType / acceptsRecipeTypes），"
+                + "以及那些产物给不给热值。这一条只报告，不拦截。");
+        }
+
+        /// <summary>
+        /// 原版配方一侧的可燃热值合计。
+        ///
+        /// 和 <see cref="Side"/> 同样读 <b>LDB 里的最终值</b>，所以 <c>vanillaHeat</c> 的改写
+        /// 会被算进来——氢从 9.0 改成 1.96 之后，凡是产氢的原版配方账面都会变，
+        /// 而那正是这一遍要看的东西。
+        /// </summary>
+        private static double Burnable(int[] ids, int[] counts)
+        {
+            if (ids == null || counts == null) return 0.0;
+
+            var total = 0.0;
+            int n = ids.Length < counts.Length ? ids.Length : counts.Length;
+
+            for (var i = 0; i < n; i++)
+            {
+                ItemProto proto = LDB.items.Select(ids[i]);
+
+                if (proto != null) total += (double)proto.HeatValue * counts[i];
+            }
+
+            return total;
+        }
+
         private static IEnumerable<OreRecipeEntry> AllRecipes(OreConfig cfg)
         {
             if (cfg.recipes != null)

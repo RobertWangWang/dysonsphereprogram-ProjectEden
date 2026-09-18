@@ -96,8 +96,77 @@ namespace ProjectEden.Patches
             MarkDirty(factory);
             RememberKey(factory.planetId, keyStationId);
 
+            // **拆站那一次绝不能延迟**，理由见 _removing 的注释：延迟它会留下悬空引用，
+            // 而不是「晚两秒」。这里立刻冲刷，正好是原版的时机（原版就在
+            // RemoveStationComponent @02F5 同步调这一次）。
+            if (_removing) FlushNow(__instance, GameMain.gameTick);
+
             return false;
         }
+
+        /// <summary>
+        /// 正在 <c>PlanetTransport.RemoveStationComponent</c> 里面。
+        ///
+        /// <b>这是 1.10.6 修掉的一个会让玩家崩游戏的 bug，起因是合并刷新把两种「陈旧」
+        /// 混为一谈了。</b>
+        ///
+        /// <list type="bullet">
+        /// <item><b>内容陈旧</b>（某一格改了物品、新放了一座站）—— 晚两秒无害，
+        ///       这正是这条优化要换的东西。</item>
+        /// <item><b>存在性陈旧</b>（站点没了）—— 是**悬空引用**，不是延迟。</item>
+        /// </list>
+        ///
+        /// 实测链路：<c>RemoveStationComponent</c> @02D1 调 <c>Reset()</c>，而 <c>Reset</c> @00BC
+        /// 把 <c>storage</c> 置 null、@0001 把 <c>id</c> 置 0，**组件对象仍然留在
+        /// <c>stationPool</c> 里**（只是进了回收表）。紧接着 @02F5 它同步调
+        /// <c>RefreshStationTraffic</c> 重建配对表——所以原版永远不会有一条活着的配对
+        /// 点名一个已死的站点。
+        ///
+        /// 而 <c>InternalTickLocal</c> @07CF 的判空只判**对象**、不判 <c>storage</c>：
+        /// <code>
+        /// 07C1: V_47 = stationPool[pair.supplyId]
+        /// 07CF: if (V_47 == null) goto 1175;   // 只判对象
+        /// 07D6: V_26 = V_47.storage            // 回收过的站点，这里是 null
+        /// 07E4: Monitor.Enter(V_26, ...)       // ArgumentNullException
+        /// </code>
+        /// 那个判空在原版是**够用的**，因为它依赖 @02F5 的同步重建。我们把那次重建延迟了
+        /// 最多 120 tick，于是拆掉一座物流站之后的两秒里，其它站点的 <c>localPairs</c>
+        /// 仍然点着它——工作线程一锁就炸。玩家报的正是这个：
+        /// <c>ArgumentNullException ... mono_monitor_enter ... DMD&lt;InternalTickLocal&gt;</c>。
+        ///
+        /// <b>连发派机（1.10.4）不是病因，但它放大了暴露面</b>：原版一帧只摸一对配对，
+        /// 现在最多摸 10 对，撞上陈旧配对的概率高一个量级。所以它出现在堆栈上。
+        ///
+        /// <b>同源还有一个不崩溃的症状</b>，更难发现：<c>stationRecycle</c> 会把同一个下标
+        /// 发给新建的站点，于是那两秒里陈旧配对会指向一个毫不相干的新站点——货送错地方，
+        /// 一个字不报。修掉拆除这一条就一并关掉了，因为重建之后表里不再有那个下标。
+        ///
+        /// <b>为什么只特判这一个调用方。</b> 全程序集只有四处调 <c>RefreshStationTraffic</c>：
+        /// <c>Import</c>（读档，表是空的，不是悬空）、<c>SetStationStorage</c>（内容）、
+        /// <c>ApplyPrebuildParametersToEntity</c>（放建筑，正是这条优化要合并的那一个）、
+        /// 以及 <c>RemoveStationComponent</c>。**只有最后一个是存在性变更。**
+        ///
+        /// <b>代价是明说的</b>：每拆一座物流站付一次全量重建。索引版实测 6.7 毫秒，
+        /// 而原版本来就要付 81 毫秒——所以即使逐座重建，**仍然比原版快一个数量级**，
+        /// 而「放下建筑」那条路（这条优化真正的目标）一点没变。
+        /// </summary>
+        [System.ThreadStatic] private static bool _removing;
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.RemoveStationComponent))]
+        private static void RemoveStation_Prefix() => _removing = true;
+
+        /// <summary>
+        /// 后置里清标志。<b>用后置而不是 try/finally</b>：Harmony 的后置在原方法抛异常时
+        /// 不会跑，所以这里额外在 <see cref="Defer"/> 用完之后也不依赖它——
+        /// <c>_removing</c> 只在「进了 RemoveStationComponent 又还没出来」这段为真，
+        /// 而那段里唯一会读它的就是 <see cref="Defer"/>。万一真漏了一次没清，
+        /// 后果是**下一次刷新不再延迟**（退回原版行为），不是崩溃或静默错误——
+        /// 失败方向是安全的那一侧。
+        /// </summary>
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.RemoveStationComponent))]
+        private static void RemoveStation_Postfix() => _removing = false;
 
         /// <summary>
         /// 每颗星球欠着哪几个 <c>keyStationId</c>。
@@ -164,6 +233,24 @@ namespace ProjectEden.Patches
 
             // 读档会让 gameTick 往回跳，那时直接放行一次，否则 last 永远大于 time、再也刷不了
             if (time >= last && time - last < IntervalTicks) return;
+
+            FlushNow(__instance, time);
+        }
+
+        /// <summary>
+        /// 真正冲刷一次，<b>不看限频</b>。
+        ///
+        /// 从上面那个后置里抽出来的，因为现在有两个调用方：限频的那条（后置），
+        /// 和拆站那条不许延迟的（见 <see cref="_removing"/>）。抽出来而不是复制一份，
+        /// 是为了让「冲刷」只有一个实现——两份各自演化正是这份文件记过的那类账。
+        /// </summary>
+        private static void FlushNow(PlanetTransport __instance, long time)
+        {
+            PlanetFactory factory = __instance?.factory;
+
+            if (factory == null) return;
+
+            int planetId = factory.planetId;
 
             if (!Dirty.TryRemove(planetId, out _)) return;
 
