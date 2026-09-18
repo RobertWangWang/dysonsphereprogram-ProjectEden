@@ -703,8 +703,9 @@
       "iconMinSaturation": 0.24,
       "iconValueScale": 1.05,
       "//miner": "产量钉死的那三个数。**oresPerMinute 不是写进 prefabDesc 的**——采矿速度每 tick 都要乘一遍被科技放大过的 miningSpeed，写死 prefabDesc 只会得到「面板上的数对、实际产量随科技涨」。真正的实现是每 tick 反解 speed 把 miningSpeed 和矿脉数都除掉，见 MiniMinerPatches。",
+      "//oresPerMinute-600000": "600000 矿/分钟 = **10000 矿/秒**。算过能不能撑住再改的：每 tick 累加进 MinerComponent.time 的量是 oresPerMinute/3600 × period，period 实测 600000，所以是 1 亿——对 Int32 的 21 亿还有 21 倍余量。而且反解的口径保证这个乘积**和矿脉数、科技等级都无关**（那正是这台机器的设计），不会因为脚下压了十几条矿脉就顶上去。产出那一段也不封顶：productCount 每次加的是 time/period 算出来的变量，不是 1。",
       "miner": {
-        "oresPerMinute": 10000,
+        "oresPerMinute": 600000,
         "workEnergyWatt": 1000000,
         "stationCapacity": 100000,
         "consumeVeins": false,

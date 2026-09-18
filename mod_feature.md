@@ -1288,7 +1288,7 @@ a **different curve**:
 
 | | Advanced Mining Machine | Fixed-Rate Miner |
 |---|---|---|
-| Output | climbs with the Mineral Utilisation techs | **a flat 10,000 ore/min** |
+| Output | climbs with the Mineral Utilisation techs | **a flat 10,000 ore/s** (600,000/min) |
 | Effect of vein count | more veins under it, more output | **none** |
 | Prerequisite | needs research | **none; 1 Iron Ingot + 1 Copper Ingot, hand-crafted in 1 s** |
 | Power | scales with speed squared, can get extreme | **a flat 1 MW** |
