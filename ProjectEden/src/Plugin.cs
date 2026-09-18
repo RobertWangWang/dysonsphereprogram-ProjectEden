@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.10.4";
+        public const string VERSION = "1.10.5";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -283,6 +283,11 @@ namespace ProjectEden
             LDBTool.PostAddDataAction += Patches.VeinMiningGlowPatches.Report;
             LDBTool.PostAddDataAction += Patches.ModelRenderCensus.Report;
             LDBTool.PostAddDataAction += Patches.StackedRenderPatches.Report;
+
+            // 堆叠上限排在**所有注册器之后**：它要扫 LDB 里的每一个物品，包括别的 mod 的。
+            // 而且它会把原版那张只建一次的 itemStackCount 静态表重建一遍，
+            // 所以必须等最后一个 proto 落地——和 RefreshFluidList 是同一族的时序要求。
+            LDBTool.PostAddDataAction += Patches.ItemStackSizePatches.OnPostAddData;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，

@@ -322,6 +322,32 @@ Both share the same speed-up logic as the advanced mining machine:
 > first if that matters to you. If the preloader ever declines to run (say, after a game update), the mod still
 > works and says so in the log, and proliferator points fall back to a clamped-at-255 downgrade.
 
+### Inventory and storage-chest stack size
+
+**Every item stacks to 10,000 per slot** (vanilla: 100 for solids, 20 for fluids), configured as
+`inventoryStackSize` in `stations.json`; **0 restores vanilla**.
+
+> **These three "stacking" numbers are three entirely different things — do not mix them up:**
+>
+> | What it means | Field | Config | This mod's value |
+> |---|---|---|---|
+> | How much fits in one **inventory / chest** slot | `ItemProto.StackSize` | `inventoryStackSize` | 10,000 |
+> | How many layers a pile on a **belt** carries | `Cargo.stack` | `stationPilerLevel` | 5000 |
+> | How much fits in one **logistics station** slot | `StationStore.max` | `slotCapacity` | 10,000,000 |
+
+> **It cannot be limited to the inventory alone, and that is structural.** The whole game has exactly one source for
+> this number, `ItemProto.StackSize`, so the inventory, storage chests, the delivery package and the mecha's ammo and
+> fuel slots all share **one value**. Splitting the inventory from chests would mean fighting the game's own save
+> loading (see the next note), which costs far more than it is worth.
+
+> **Old saves follow along, in both directions.** Each slot's limit really is stored in the save, but on load the
+> game **rewrites every slot's limit from the item itself**, so raising or lowering this number takes effect
+> immediately and loses nothing. The only visible effect of lowering it is that a slot already holding more than the
+> new limit reads as over-full until you draw some out — not one item is destroyed.
+
+> The cap is ten million. Above that, the statistics panel summing every slot of a storage chest risks overflowing a
+> 32-bit integer.
+
 ### Belt speed
 
 All three belt tiers are raised to **4x** vanilla, configured in `belts.json`:

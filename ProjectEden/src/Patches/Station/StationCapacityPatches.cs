@@ -316,6 +316,14 @@ namespace ProjectEden.Patches
         public float collectorMaxPerTick;
 
         /// <summary>
+        /// 每个物品一格能堆多少（背包 / 储物箱 / 物流背包共用）。0 = 保持原版。
+        /// 见 <see cref="ItemStackSizePatches"/>：它改的是 <c>ItemProto.StackSize</c>，
+        /// 和传送带集装（<see cref="stationPilerLevel"/>）、物流站格容量
+        /// （<see cref="slotCapacity"/>）是三套互不相干的东西。
+        /// </summary>
+        public int inventoryStackSize;
+
+        /// <summary>
         /// 行星内物流运输机：一帧最多派几架。0 或 1 = 原版（一帧一架）。
         /// 见 <see cref="LocalDispatchBurstPatches"/>：原版的派机循环本来就会走遍整个
         /// 配对环，只是派出一架就跳出去了。硬上限 200（droneDispatchStatus 是 byte[]）。
