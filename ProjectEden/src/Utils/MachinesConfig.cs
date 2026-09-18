@@ -505,7 +505,7 @@ namespace ProjectEden.Utils
 
         /// <summary>
         /// 配送运输机的数量。&gt; 0 就给这台建筑挂上 DispenserComponent，
-        /// 同时自带一个<b>不露面的缓冲仓</b>当货源——见 HubCourierPatches。
+        /// 同时自带一个<b>不露面的中转台</b>当货源——见 HubCourierPatches。
         /// 填 0 则完全不挂，行为和普通物流站一样。
         /// </summary>
         public int courierCount;
@@ -516,9 +516,12 @@ namespace ProjectEden.Utils
         /// <summary>
         /// 对机甲的配送模式：0 关闭 / 1 只回收 / 2 收发都做 / 3 只供应。
         ///
-        /// <b>必须配。</b> DispenserComponent.Init 不给 playerMode 赋值，默认是 0（关闭），
-        /// 配送运输机会一动不动。而枢纽点开的是物流站面板、没有配送器面板可调，
-        /// 所以这个值只能从配置来。
+        /// 枢纽点开的是物流站面板、没有配送器面板可调，所以这个值只能从配置来。
+        ///
+        /// <b>这里原本写着「Init 不给 playerMode 赋值，默认是 0（关闭）」，是错的。</b>
+        /// 实测 DispenserComponent.Init @0046 就是 <c>ldc.i4.2 ; stfld playerMode</c>——
+        /// 默认是 2（收发都做）。让配送运输机一动不动的是 courierAutoReplenish
+        /// （Init @006A 写 false），不是这一项。
         /// </summary>
         public int playerDeliveryMode;
 
@@ -528,11 +531,18 @@ namespace ProjectEden.Utils
         /// <summary>
         /// 自动把枢纽里有的货补进伊卡洛斯的「配送需求清单」。
         ///
-        /// <b>不开的话配送运输机不会动。</b> 原版配送器每 tick 遍历的是
-        /// <c>Player.deliveryPackage</c>——只对清单里配过的物品干活，清单是空的就全员待命。
-        /// 这一项打开后，枢纽非空槽位里的货会自动占用清单里的空格，需求量按下面那个值给。
+        /// <b>1.10.1 起默认关闭，是所有者的决定。</b> 槽位方向和配送清单是两套各自独立的设置，
+        /// 让建筑去写玩家的全局清单属于功能重叠——把一格设成<b>本地需求</b>之后，
+        /// 枢纽会先从物流网把货拉进来、再派小飞机送到机甲身上，
+        /// <b>跟这一格自己的配置对着干</b>。关掉之后清单完全归玩家。
         ///
-        /// <b>只填空格，绝不改玩家已经配好的条目。</b> 清单是玩家全局的东西，不是这台建筑的。
+        /// 代价要说清楚：原版配送器每 tick 遍历的是 <c>Player.deliveryPackage</c>——
+        /// 只对清单里配过的物品干活，清单是空的就<b>全员待命</b>。所以关掉之后，
+        /// 玩家不在机甲面板上配清单，枢纽就一动不动；日志里会有一行说明这件事，
+        /// 免得它和「补丁没生效」长得一样。
+        ///
+        /// 打开的话：枢纽非空槽位里的货会自动占用清单里的空格，需求量按下面那个值给，
+        /// <b>只填空格，绝不改玩家已经配好的条目</b>，也只在玩家当前所在的星球上做。
         /// </summary>
         public bool autoDeliveryList;
 
@@ -540,7 +550,7 @@ namespace ProjectEden.Utils
         public int deliveryKeepStacks;
 
         /// <summary>
-        /// 每 10 秒往日志里打一行枢纽状态：槽位 / 缓冲仓 / 配送清单 / 运输机 / 配对 / 当前服务的货。
+        /// 每 10 秒往日志里打一行枢纽状态：槽位 / 中转台 / 配送清单 / 运输机 / 配对 / 当前服务的货。
         ///
         /// 排查配送不动时很有用——这条链有五段，任何一段空了表现都是「运输机停着」，
         /// 光看画面分不出是哪一段。平时关着，别刷屏。
@@ -548,7 +558,7 @@ namespace ProjectEden.Utils
         public bool courierDebugLog;
 
         /// <summary>
-        /// 缓冲仓的格数（行 × 列）。它只是配送运输机和 30 个槽位之间的中转，
+        /// 中转台的格数（行 × 列）。它只是配送运输机和 30 个槽位之间的中转，
         /// 有多少种货就要多少格，给到和槽位数一样即可，多了没用。
         /// </summary>
         public int bufferCols;

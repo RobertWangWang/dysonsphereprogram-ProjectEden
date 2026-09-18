@@ -40,8 +40,17 @@ namespace ProjectEden.Patches
         private static UIButton _iconButton;
         private static UIButton _replenishButton;
         private static bool _frameCaptured;
+        private static bool _frameStretched;
+        private static bool _frameShifted;
         private static float _frameOriginalLeft;
         private static float _frameOriginalWidth;
+
+        /// <summary>外框被推窄之前的<b>实际</b>宽度（实测 240），以及这一次推了多少像素。</summary>
+        private static float _frameOriginalRect;
+
+        private static float _frameShift;
+        private static int _shiftLoggedOnce;
+        private static int _restoredOnce;
         private static bool _dumped;
 
         [HarmonyPostfix]
@@ -50,10 +59,12 @@ namespace ProjectEden.Patches
         {
             DispenserComponent dispenser = Dispenser(__instance);
 
-            // 不是枢纽就把格子藏起来——同一个面板也会被原版物流站用
+            // 不是枢纽就把格子藏起来，<b>并且把能量条还原</b>——同一个面板也会被原版物流站用
             if (dispenser == null)
             {
                 if (_box != null) _box.SetActive(false);
+
+                RestoreEnergyBar(__instance);
 
                 return;
             }
@@ -62,6 +73,13 @@ namespace ProjectEden.Patches
 
             _box.SetActive(true);
 
+            // <b>推窄和还原必须成对，而且不能挂在「格子创建」这个一次性事件上。</b>
+            // EnsureBox 第一句就是 if (_box != null) return true，所以推窄一辈子只做一次；
+            // 而还原每次打开普通物流站面板都会发生。1.10.1 第一版就是这样，实测日志里
+            // 只有一条「让出 92 像素」，在那之后的「已把能量条还原」之后再没有第二条——
+            // 表现是配送运输机格子直接压在满宽的能量条上。
+            if (!_frameShifted) ShiftEnergyBar(__instance);
+
             int max = MaxCourier(__instance, dispenser);
             int have = dispenser.idleCourierCount + dispenser.workCourierCount;
 
@@ -69,6 +87,9 @@ namespace ProjectEden.Patches
 
             // 箭头亮不亮跟着自动补充的开关走，和运输机那格一致
             if (_replenishButton != null) _replenishButton.highlighted = dispenser.courierAutoReplenish;
+
+            // 原版这一帧刚按写死的 240 把电量读数摆过，按推窄之后的实际宽度拉回来
+            FitEnergyText(__instance);
         }
 
         /// <summary>这个面板对应的建筑上有没有配送器（也就是是不是本 mod 的枢纽）。</summary>
@@ -174,7 +195,8 @@ namespace ProjectEden.Patches
 
             _replenishButton?.BindOnClickSafe(OnAutoReplenishClick);
 
-            ShiftEnergyBar(window);
+            // 能量条让位不在这里做——那是每次显示格子都要重做的事，而这个方法只跑一次。
+            // 调用点在 _OnUpdate 里，按 _frameShifted 决定要不要重推
 
             ProjectEdenPlugin.Log.LogInfo("综合物流枢纽的物流站面板已补上配送运输机格子（含自动补充箭头）");
 
@@ -216,44 +238,127 @@ namespace ProjectEden.Patches
 
             DumpHierarchy(window);
 
-            bool stretched = !Mathf.Approximately(frame.anchorMin.x, frame.anchorMax.x);
-
             if (!_frameCaptured)
             {
                 _frameCaptured = true;
-                _frameOriginalLeft = stretched ? frame.offsetMin.x : frame.anchoredPosition.x;
+                _frameStretched = !Mathf.Approximately(frame.anchorMin.x, frame.anchorMax.x);
+                _frameOriginalLeft = _frameStretched ? frame.offsetMin.x : frame.anchoredPosition.x;
                 _frameOriginalWidth = frame.sizeDelta.x;
             }
 
             // 先还原成原始位置再量，否则量到的是上一次推过之后的结果
-            Apply(0f);
+            ApplyFrameShift(frame, 0f);
+            _frameShift = 0f;
 
             float scale = frame.lossyScale.x;
 
             if (Mathf.Approximately(scale, 0f)) return;
 
+            // 还原状态下的真实宽度，读数校正要拿它当分母（实测 240）
+            _frameOriginalRect = frame.rect.width;
+
             float overlap = (WorldRight(box) - WorldLeft(frame)) / scale + Margin;
 
-            // 没挡着就别动它
-            if (overlap <= 0f) return;
+            // 没挡着就推 0。<b>但仍然记成「已经处理过」</b>——否则 _OnUpdate 里那个
+            // if (!_frameShifted) 会让这一整段每帧重量一次
+            if (overlap < 0f) overlap = 0f;
 
-            Apply(overlap);
+            ApplyFrameShift(frame, overlap);
+            _frameShifted = true;
+            _frameShift = overlap;
 
-            ProjectEdenPlugin.Log.LogInfo($"综合物流枢纽面板：能量条左边缘让出 {overlap:0.#} 像素给配送运输机格子");
+            // 这一行整局只打一次：现在每次从普通物流站切回枢纽都会重推一遍，
+            // 不设一次性的话它会跟着切窗口刷屏
+            if (overlap > 0f && System.Threading.Interlocked.Exchange(ref _shiftLoggedOnce, 1) == 0)
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"综合物流枢纽面板：能量条左边缘让出 {overlap:0.#} 像素给配送运输机格子（之后每次切回本面板都会重推一遍）");
+        }
 
-            void Apply(float dx)
+        /// <summary>
+        /// 把能量条外框还原成原始位置。
+        ///
+        /// <b>这是必须的，不是收尾工作。</b> <c>energyBar</c> 是 <see cref="UIStationWindow"/> 的字段，
+        /// 而这个窗口<b>三种物流站 + 大型采矿机共用同一个实例</b>；实测 UIStationWindow 全类
+        /// 41 处 rect 几何写（_OnCreate / OnStationIdChange / _OnUpdate / RefreshTrans / RefreshTabs）
+        /// <b>没有一处碰这个外框</b>——全是 panelDownTrans、各 *Group 和 energyText。
+        /// 所以原版永远不会把它推回去：开过一次枢纽之后，本局内打开任何普通物流站，
+        /// 能量条都少一截，而格子已经藏起来了，看上去像凭空变短。
+        ///
+        /// 这就是 <c>StationExpandPatches.LayoutStorageRows</c> 那次回归
+        /// （「三个物流站的 ui 不兼容了」）的同一形状，规矩也是同一条：
+        /// <b>你写的东西由你负责还原，还原的时机是别人接管这个控件的时候。</b>
+        /// </summary>
+        private static void RestoreEnergyBar(UIStationWindow window)
+        {
+            if (!_frameCaptured || !_frameShifted) return;
+
+            var frame = window.energyBar?.rectTransform?.parent as RectTransform;
+
+            if (frame == null) return;
+
+            ApplyFrameShift(frame, 0f);
+            _frameShifted = false;
+            _frameShift = 0f;
+
+            // <b>一次性，但必须有。</b> 推窄那一步有日志、还原这一步没有，
+            // 那么「还原生效了」和「这一局根本没开过普通物流站」在日志里长得一模一样——
+            // 而这正是本次要修的那个回归的验收条件。
+            if (System.Threading.Interlocked.Exchange(ref _restoredOnce, 1) == 0)
+                ProjectEdenPlugin.Log.LogInfo(
+                    "综合物流枢纽面板：已把能量条还原给普通物流站（这个窗口三种物流站 + 大型采矿机共用一个实例，" +
+                    "原版全类 41 处 rect 几何写没有一处碰这个外框，不还原的话开过枢纽之后它会一直少一截）");
+        }
+
+        /// <summary>
+        /// 把电量读数按<b>被推窄之后的实际宽度</b>重新摆一次。
+        ///
+        /// <b>原版的读数坐标是按一个写死的宽度算的，不读外框的矩形。</b>
+        /// <c>UIStationWindow._OnUpdate</c> @0303 / @0351 每帧写
+        /// <c>energyText.anchoredPosition.x = round(W × 电量比 ∓ 30)</c>，
+        /// 而 W 是 <c>isStellar</c> 分支里的常量 180 / 240 / 300——**实测这台枢纽的外框正好宽
+        /// 240**，两边对上了，所以 W 就是外框原宽。
+        ///
+        /// 于是推窄 92 像素之后外框只剩 148，原版照样把读数放到 207
+        /// （<c>energyText</c> 锚在外框<b>左边缘</b>），满电时读数落在条子外面 59 像素。
+        ///
+        /// 按宽度比例线性拉回即可，<b>不需要知道原版走的是 ∓30 里的哪一支</b>——
+        /// 整个表达式一起缩放，端点和留白都按同一比例走。
+        ///
+        /// 不用还原：这个字段原版每帧无条件重写，我们只是在它写完之后再改一次。
+        /// </summary>
+        private static void FitEnergyText(UIStationWindow window)
+        {
+            if (!_frameShifted || _frameOriginalRect <= 0f) return;
+
+            RectTransform text = window.energyText?.rectTransform;
+
+            if (text == null) return;
+
+            float scale = (_frameOriginalRect - _frameShift) / _frameOriginalRect;
+
+            if (scale <= 0f) return;
+
+            Vector2 pos = text.anchoredPosition;
+
+            text.anchoredPosition = new Vector2(pos.x * scale, pos.y);
+        }
+
+        /// <summary>
+        /// 按<b>绝对值</b>设置外框的左边缘偏移，而不是每次累加：界面重建（读档）之后
+        /// 格子会重新克隆一遍，累加的话能量条会被一路推到屏幕外。
+        /// </summary>
+        private static void ApplyFrameShift(RectTransform frame, float dx)
+        {
+            if (_frameStretched)
             {
-                if (stretched)
-                {
-                    frame.offsetMin = new Vector2(_frameOriginalLeft + dx, frame.offsetMin.y);
+                frame.offsetMin = new Vector2(_frameOriginalLeft + dx, frame.offsetMin.y);
 
-                    return;
-                }
-
-                frame.sizeDelta = new Vector2(_frameOriginalWidth - dx, frame.sizeDelta.y);
-                frame.anchoredPosition = new Vector2(_frameOriginalLeft + dx * (1f - frame.pivot.x),
-                    frame.anchoredPosition.y);
+                return;
             }
+
+            frame.sizeDelta = new Vector2(_frameOriginalWidth - dx, frame.sizeDelta.y);
+            frame.anchoredPosition = new Vector2(_frameOriginalLeft + dx * (1f - frame.pivot.x),
+                frame.anchoredPosition.y);
         }
 
         private static float WorldLeft(RectTransform trs)

@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.10.0";
+        public const string VERSION = "1.10.1";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -126,6 +126,8 @@ namespace ProjectEden
             Patches.MegaAssemblerPatches.Report();
             Patches.PlanetCensus.Report();
             Patches.StationOutputSkipPatches.Report();
+            Patches.HubCourierPatches.Report();
+            Patches.StationTrafficCoalescer.Report();
             Patches.MegaTickProfiler.Report();
             Patches.QualityCraftPatches.Report();
             Patches.QualityRepairPatches.Report();
@@ -838,6 +840,7 @@ namespace ProjectEden
             Patches.StationCapacityPatches.ClearBootstrapped();
             // 同理：实体号也会重复使用，共位登记表留着会把新存档的建筑错认成旧的
             Patches.StackedRenderPatches.Reset();
+            Patches.StationTrafficCoalescer.Reset();
         }
     }
 }

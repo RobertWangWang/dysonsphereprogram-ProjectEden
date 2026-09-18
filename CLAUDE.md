@@ -759,6 +759,46 @@ The postfix also recomputes the bool result — whose "not a failure" exemption 
 
 **Chains like this need a state dump, not a hypothesis.** Five stages (station slots → buffer → delivery list → pairing → courier) all present the same symptom: the couriers sit still. Several rounds were wasted reasoning from startup logs, which say nothing because the player has not configured the building yet, and from one-shot warnings that were true only when they fired. `courierDebugLog` prints all five stages on one line every 10 s; turn it on before forming a theory.
 
+(7) **Changing `filter` turns every in-flight courier around, empty.** `SetDispenserFilter` @0035
+calls `RefreshDispenserTraffic` → `OnRematchPairs`, which holds **three** calls to
+`CourierTurnbackFromPlayer`; that method's last four instructions are `endId = 0`,
+`direction = -1`, `t = maxt` — fly home, carrying nothing. So (6)'s rotation, at one second per
+step, aborts every trip before it arrives. **With one item in the hub this is unreachable**
+(`chosen == current`, so it never rotates), which is why it stayed hidden until a player put a
+second item in a slot; the symptom was 「飞机飞出来又跑回去了」. Rotation now only happens while
+`workCourierCount == 0`. Do not "fix" it by forcing a rotation on a timer — that trades an
+invisible delay for a visible fault.
+
+**The hub's buffer is a per-tick transit tray, not a store, and the reason is a type wall.**
+`DispenserComponent.storage` is a `StorageComponent` while a station's slots are `StationStore[]`,
+and the dispenser **never calls a single `StorageComponent` method** — across all 3050 instructions
+of `InternalTick` it reads `grids[]` fields directly, bookmarked by `pickStorageSearchStart` /
+`insertStorageSearchStart`. So the source cannot be swapped; what can be done is to make the tray
+hold nothing between ticks (load the served item before the dispenser's tick, drain everything back
+after it). Keeping 1000 of each item there instead is what produced 「小飞机搬了货、物流站槽位没动」.
+
+Two facts make that design safe, both measured:
+
+- **Goods travel with the courier.** `CourierData` carries `itemId` / `itemCount` / `inc`, so a
+  pick happens at **dispatch**, not on arrival — which is why the tray must be loaded *before*
+  `InternalTick`, and why a filter change cannot strand goods mid-flight.
+- **`ordered` is on `DeliveryPackage/GRID`, not on `StorageComponent/GRID`.** Those are two
+  different nested types; the storage one has no such field at all, and the only storage-grid
+  access in `InternalTick` is two `ldfld itemId` at @2281/@22B6. So emptying the tray every tick
+  cannot destroy an in-flight reservation.
+
+**`DispenserComponent.Init` sets `playerMode = 2`, not 0.** This file and two code comments claimed
+the opposite ("Init 不给 playerMode 赋值，默认 0，配送运输机会一动不动"). `Init` @0046 is
+`ldc.i4.2 ; stfld playerMode`. What *is* false by default is `courierAutoReplenish` (@006A) — that
+is the field that leaves a hub with zero couriers forever.
+
+**The hub does not write the player's delivery list, and that is an owner decision.** Auto-filling
+it from non-empty slots made the two settings fight: a slot set to **local Demand** would have the
+hub pull the item in from the network and then send couriers to hand it to the mecha. Since a
+dispenser only works on items that are on that list, the cost is stated plainly — with an empty
+list not one courier moves — and a log line says so rather than leaving it to look like a defect.
+`autoDeliveryList` restores the old behaviour.
+
 #### Alien veins and drill bits — `AlienVeinPatches` + `DrillBitRegistry`
 
 One vein type (莫桑石, type 23) consumes a **drill bit** per N ore mined. Only that type, so
@@ -1031,6 +1071,28 @@ of magnitude below 氨, already the worst in `combustibles.json`; and its Carnot
   positions recorded the first time the widgets are seen (safe in either order: vanilla skips
   positioning entirely for collectors and writes only row 0 for stations, so rows 1..n still hold
   their prefab values at that moment).
+
+  **The same rule bit again on the energy bar, and then the fix itself created the mirror bug.**
+  `HubCourierSlotPatches` pushes the energy bar's frame (`energyBar.parent`) right to make room for
+  a courier slot. That frame is a `UIStationWindow` field, i.e. **shared by all three station kinds
+  and the 大型采矿机**, and an enumeration of every rect write in that class — 41 of them across
+  `_OnCreate` / `OnStationIdChange` / `_OnUpdate` / `RefreshTrans` / `RefreshTabs` — finds **not one**
+  that touches it. So vanilla never puts it back: open a hub once and every ordinary station keeps a
+  shortened bar for the rest of the session.
+  **Then the restore broke the apply**: the push was hanging off `EnsureBox`, whose first line is
+  `if (_box != null) return true` — a once-per-session event — while the restore ran every time a
+  non-hub panel was shown. One restore and the push never came back, so the courier slot sat on top
+  of a full-width bar. **Completing the rule: when you add a restore, the write it undoes must stop
+  being a one-shot — the two have to run at the same cadence.**
+
+  **And the readout does not follow the bar, because vanilla positions it from a hardcoded width.**
+  `_OnUpdate` @0303/@0351 writes `energyText.anchoredPosition.x = round(W × ratio ∓ 30)` where `W` is
+  the `isStellar` branch's literal 180 / 240 / 300 — it never reads the frame's rect. Measured: this
+  hub's frame really is **240** wide, so `W` *is* the original width; after a 92 px push the frame is
+  148 and vanilla still puts the readout at 207, i.e. **59 px past the right end**. The correction is
+  a linear rescale by `(240 − push) / 240`, which needs no knowledge of which ∓30 branch vanilla took,
+  and needs no restore because vanilla rewrites that field every frame.
+
   **Showing a row vanilla never shows costs two more fixes, and both are "vanilla only writes what it
   needs".** Giving the 大型采矿机 a second storage row (the drill-bit slot) exposed them in order.
   (1) **Position.** `UIStationWindow.OnStationIdChange` IL 08A4 reads
@@ -2970,6 +3032,93 @@ buckets**, re-printing only when the planet or the counts change; it additionall
 by ownership (mega building / collector / plain) and computes `Σ storage.Length × slots.Length`,
 the exact inner-loop count of `UpdateOutputSlots`. That split is what disproved the
 "894 miners are wasting 30 slots each" theory — they average **1.1**.
+
+## Game internals: building is part of the logic frame, and this mod makes it quadratic
+
+Measured on the same save, during a build spree. The player's own report was the decisive half
+("the logic frame jumps from 6 ms to 20 ms **while building**"), and the panel then split it:
+`伊卡洛斯 29.4 ms` + `行星工厂 26.2 ms`, of which `建设系统 21.2 ms`, while `生产设施` was down at
+**1.6 ms** — i.e. the factory was fine and the *building* was the cost.
+
+**Construction runs inside the logic frame.** The chain is
+`GameLogic::FactoryBeforeGameTick @0016 → PlanetFactory::ConstructionBeforeGameTick @000E →
+ConstructionSystem::BeforeGameTick @0007 → ExecuteFastBuild @002F → FastBuild(batchSize)`.
+So anything done per placed building is added straight to the frame — including this repo's
+`InstantBuildPatches`, which reproduces `FastBuild`'s body.
+
+### `PlanetTransport.RefreshStationTraffic` is O(stations²), and this mod's core design feeds it
+
+66 instructions, two loops to `stationCursor`: the first calls `ClearLocalPairs()` per station,
+the second passes **the whole `stationPool`** into `RematchLocalPairs` — every station re-matches
+against every other. Vanilla never notices. **This mod makes every mega building a logistics
+station**, so the measured planet carries **2078 stations (1175 of them mega buildings)** →
+2078² ≈ 4.3M pair evaluations → **81 ms per call**.
+
+**And it is called once per building placed**, from
+`BuildFinally → BuildingParameters.ApplyPrebuildParametersToEntity @1024`. Measured: 19 buildings
+in 24.5 s cost `BuildFinally` 1937 ms, of which essentially all was this.
+
+`StationTrafficCoalescer` defers **every** call (vanilla's included) into a per-planet dirty flag
+flushed at most once per 120 ticks from that planet's own `PlanetTransport.GameTick`. Measured
+result: per building **102 ms → 0.63 ms**, and this method's CPU share **20% → 1.9%**. The stated
+cost is that supply/demand pairing can be up to 2 s stale — in vanilla it is instant. `Import`'s
+call is unaffected (`last` is 0 after a load, so the next tick flushes immediately).
+
+**The steady-state finding is the one nobody had looked for**: in a 34.8 s window with only 15
+buildings placed, the planet was marked dirty **138 times** — mega-building layout changes alone
+trigger ~4 planet-wide re-matches per second. Under the old behaviour that is 138 × 81 ms ≈ 11 s
+of CPU per 35 s (**32%**), permanently, with nothing building.
+`MegaStationPatches`' guard "only call it when the layout actually changed" was correct all along;
+**what nobody measured was how often it changes.**
+
+### `EndFlattenTerrain`'s tail is unconditional
+
+`BeginFlattenTerrain` merely clears `tmp_levelChanges` (10 instructions). `EndFlattenTerrain` ends
+with four heavy calls that run **whether or not anything changed**: `PlanetData::UpdateDirtyMeshes`
+@0100, `PlanetFactory::RenderLocalPlanetHeightmap` @0115, `PlanetAlgorithm::CalcLandPercent` @0123
+(whole planet) and `GPUInstancingManager::SyncAllGPUBuffer` @0128 — the last walks **every**
+`ObjectRenderer` calling `SyncInstBuffer()`. Vanilla amortises it over a batch of up to 100;
+placing one building at a time pays it in full each time.
+
+**Skipping it when `tmp_levelChanges` is empty is safe, and that is a checked fact**: the only
+writers of that dictionary in the whole assembly are `FlattenTerrain`, `FlattenTerrainOffline`,
+`ComputeFlattenTerrainReform` and `FlattenTerrainReform` — all terrain edits. And
+`SyncAllGPUBuffer` is **not** "a new model needs syncing": it sits in the terrain path because a
+terrain change moves every instance's ground height; vanilla's ordinary drone-built path never
+calls it, and a single model syncs through `AddModel(setBuffer: true)` instead.
+
+### `GPUInstancingManager.RemoveModel` is O(1) — a retracted guess
+
+68 instructions, all of it appending `(modelIndex, modelId, flags)` to `objRendererRefreshPool`
+under a lock. It is **not** "removing one model rebuilds the instance buffer". Recorded because
+that guess cost a round: the third argument `setBuffer` is encoded as `(setBuffer ? 1 : 0) << 1`,
+and vanilla does pass `false` on its bulk paths (`LoadingPlanetFactoryMain` @0230/@04C9,
+`PlanetReformRevert`) and `true` everywhere else — which *looks* like a smoking gun and is not.
+
+### How this was found, and the process cost
+
+**Six wrong guesses in a row, every one killed by measurement, none by thinking:** `RemoveModel`'s
+complexity, the build preview's physics query (dead — the 无碰撞 cheat disables `ColliderPool`
+entirely), the stacked-render bookkeeping (measured at **3.4 ms per 10 s**, 0.03%), the batch-size
+knob (lowered 100 → 15 on a model that turned out to be wrong, then restored), the terrain tail
+(real, but not this symptom), and finally the attribution of the refresh calls themselves — this
+file's author asserted "~30 of 42 come from `MegaStationPatches`" without measuring, built a
+coalescer that only covered that path, and the next log said `标脏 0 次 / 实际刷新 0 次`.
+
+What worked, both times this repo has had a performance problem, is the same move: **put
+timestamps around each candidate segment and read the numbers.** The guidance that keeps being
+re-earned is already in this file — *a mechanism that could explain a symptom is not evidence that
+it did*.
+
+Two probe-design lessons worth keeping:
+
+- **A probe that only reports after a fixed window is silent on short bursts.** The instant-build
+  probe needed a 10 s window and the build spree lasted a few seconds, so the first two sessions
+  produced no line at all. Report on an *event* threshold as well as on a timer.
+- **A periodic sample aliased with a periodic process reads as "frozen".** The hub's status line
+  (every 600 ticks) sampled a filter rotating every 60 ticks; with two candidates, ten rotations
+  land back on the start, so `当前服务` printed the same item forever and looked broken. The line
+  now carries a rotation counter. Same family as "a mean hides a bimodal distribution".
 
 ## Compatibility damage this mod causes, and how it is repaired
 

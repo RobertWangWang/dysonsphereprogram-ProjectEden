@@ -891,7 +891,8 @@ namespace ProjectEden
 
             // 配送器的货源必须是一个 StorageComponent（它的 storage 字段就是这个类型），
             // 而物流站的槽位是 StationStore[]，两者类型不同、读不到对方。所以给这台建筑
-            // 自带一个缓冲仓，再由 HubCourierPatches 每 tick 把它和 30 个槽位对齐。
+            // 自带一个中转台，再由 HubCourierPatches 在配送器 tick 前后把它摆满、清空——
+            // 它在 tick 之间必然是空的，存储空间仍然只有那 30 个槽位。
             desc.isStorage = true;
             desc.storageCol = station.bufferCols > 0 ? station.bufferCols : 6;
             desc.storageRow = station.bufferRows > 0 ? station.bufferRows : 5;

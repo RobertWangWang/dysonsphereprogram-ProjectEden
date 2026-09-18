@@ -38,11 +38,23 @@ namespace ProjectEden.Patches
     {
         private static AdvancedMinerConfig Config => ProjectEdenPlugin.MinerConfig;
 
-        /// <summary>一格里的登记：画出来的那几台，和被藏起来的那些。</summary>
+        /// <summary>
+        /// 一格里的登记：画出来的那几台，和被藏起来的那些。
+        ///
+        /// <b><see cref="Hidden"/> 是 HashSet 而不是 List，这是性能而不是风格。</b>
+        /// 这一摞就是玩家叠在同一点的全部建筑，而 <c>AfterCreateDisplay</c> 每建一台、
+        /// 以及<b>落星球时每一个实体</b>都要问一次「这台在不在藏着的里面」——
+        /// <c>List.Contains</c> 是线性扫描，叠 N 台就是 O(N²)。
+        /// <see cref="Drawn"/> 留 List：它的长度被 <c>stackedRenderLimit</c> 卡着（默认 1），
+        /// 而 <c>Promote</c> 要的是「顶一台上来」，顺序在那里有意义。
+        /// </summary>
         private sealed class Cell
         {
             internal readonly List<int> Drawn = new List<int>();
-            internal readonly List<int> Hidden = new List<int>();
+            internal readonly HashSet<int> Hidden = new HashSet<int>();
+
+            /// <summary>上一次全表清理时 <see cref="Hidden"/> 有多大——摊销清理用，见 <c>Prune</c>。</summary>
+            internal int PrunedAt;
         }
 
         private readonly struct CellKey : IEquatable<CellKey>
@@ -135,6 +147,122 @@ namespace ProjectEden.Patches
         [HarmonyPostfix]
         [HarmonyPatch(typeof(PlanetFactory), nameof(PlanetFactory.CreateEntityDisplayComponents))]
         internal static void AfterCreateDisplay(PlanetFactory __instance, int entityId)
+        {
+            long began = Enabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0L;
+
+            try
+            {
+                AfterCreateDisplayCore(__instance, entityId);
+            }
+            finally
+            {
+                if (began != 0L) Measure(System.Diagnostics.Stopwatch.GetTimestamp() - began);
+            }
+        }
+
+        // ── 自测：这个挂点到底花了多少时间 ────────────────────
+
+        private static long _probeTicks;
+        private static long _probeCalls;
+        private static long _probeMaxTicks;
+        private static long _probeWindowStamp;
+        private static DateTime _probeWindowUtc;
+        private static int _probeReports;
+
+        /// <summary>
+        /// 累计这个挂点的耗时，每 10 秒报一行。
+        ///
+        /// <b>为什么值得常驻：玩家报的「叠建之后很卡」，日志里一个数都没有。</b>
+        /// 「是我们这个后置在 O(N) 地扫登记表」和「是原版画这么多东西本来就慢」
+        /// 表现完全一样，而处置相反。有了这一行，下一局就能直接把我们这一侧
+        /// 证明或者洗清，不用再猜一轮。
+        ///
+        /// <b>频率要用墙钟校准，不能信 <c>Stopwatch.Frequency</c>。</b> 1.10.0 那一轮
+        /// 第一版分段计时直接除以它，报出 240 ms/帧（真实逻辑帧才 16 ms），差了 12 倍。
+        /// 自报的数在核对之前只是主张。
+        ///
+        /// 这里挂的不是 tick 路径——只有建造和落星球才会创建实体，所以每次两个时间戳、
+        /// 十秒一个字符串是可以接受的。
+        ///
+        /// <b>墙钟用 <see cref="DateTime.UtcNow"/>，不用 <c>Time.realtimeSinceStartup</c>。</b>
+        /// 这个类自己的登记表注释就写着「读档走的是加载线程」——而 Unity 的 API
+        /// 在非主线程上调用会直接抛，那就变成落星球必崩。
+        /// </summary>
+        private static void Measure(long ticks)
+        {
+            string line = null;
+
+            lock (_gate)
+            {
+                _probeTicks += ticks;
+                _probeCalls++;
+
+                if (ticks > _probeMaxTicks) _probeMaxTicks = ticks;
+
+                DateTime utcNow = DateTime.UtcNow;
+                long stampNow = System.Diagnostics.Stopwatch.GetTimestamp();
+
+                if (_probeWindowStamp == 0L)
+                {
+                    _probeWindowStamp = stampNow;
+                    _probeWindowUtc = utcNow;
+
+                    return;
+                }
+
+                double wall = (utcNow - _probeWindowUtc).TotalSeconds;
+
+                if (wall < 10.0) return;
+
+                // 每局只报有限几次：它是排查用的，不该长期占日志
+                if (_probeReports < 6)
+                {
+                    _probeReports++;
+
+                    // **实测频率，不信 Stopwatch.Frequency。** 1.10.0 那一轮第一版直接除以
+                    // 自报值，报出 240 ms/帧（真实逻辑帧才 16 ms），差了 12 倍
+                    double measured = (stampNow - _probeWindowStamp) / wall;
+                    double declared = System.Diagnostics.Stopwatch.Frequency;
+                    double freq = measured > 0.0 ? measured : declared;
+
+                    double totalMs = _probeTicks / freq * 1000.0;
+                    double maxMs = _probeMaxTicks / freq * 1000.0;
+                    double share = totalMs / (wall * 1000.0) * 100.0;
+
+                    var biggest = 0;
+
+                    foreach (KeyValuePair<int, Dictionary<CellKey, Cell>> planet in _byPlanet)
+                    foreach (KeyValuePair<CellKey, Cell> pair in planet.Value)
+                    {
+                        int size = pair.Value.Drawn.Count + pair.Value.Hidden.Count;
+
+                        if (size > biggest) biggest = size;
+                    }
+
+                    line =
+                        $"共位只画一台·自测：过去 {wall:0.#} 秒里这个挂点被调用 {_probeCalls} 次，" +
+                        $"合计 {totalMs:0.###} 毫秒（单次最久 {maxMs:0.###} 毫秒，占这段墙钟的 {share:0.##}%），" +
+                        $"最大的一格叠了 {biggest} 台。" +
+                        "**这个总数就是本 mod 在「共位只画一台」上花掉的全部时间**——" +
+                        "它如果只有几毫秒而你仍然觉得卡，那卡的不是这里，" +
+                        "该去看统计面板的性能测试（逻辑帧）或者显卡那一侧。" +
+                        (Math.Abs(measured - declared) > declared * 0.05
+                            ? $" ⚠ Stopwatch 自报频率 {declared:0} 和实测 {measured:0} 差得多，已按实测算。"
+                            : "");
+                }
+
+                _probeTicks = 0;
+                _probeCalls = 0;
+                _probeMaxTicks = 0;
+                _probeWindowStamp = stampNow;
+                _probeWindowUtc = utcNow;
+            }
+
+            // 出锁再打日志：日志实现不在我们手里，别把它关进这把锁
+            if (line != null) ProjectEdenPlugin.Log.LogInfo(line);
+        }
+
+        private static void AfterCreateDisplayCore(PlanetFactory __instance, int entityId)
         {
             if (!Enabled || __instance?.entityPool == null) return;
             if (entityId <= 0 || entityId >= __instance.entityPool.Length) return;
@@ -302,14 +430,28 @@ namespace ProjectEden.Patches
                 "下面应当出现「重返星球后重新藏起」。没有就是修法没生效。");
         }
 
-        /// <summary>从藏着的里面挑一台画出来。</summary>
+        /// <summary>
+        /// 从藏着的里面挑一台画出来。
+        ///
+        /// 挑哪一台无所谓——它们在同一个点上，玩家看到的是同一个位置有没有东西。
+        /// 所以用枚举器取头一个即可，不需要 Hidden 保持顺序（这也是它能改成 HashSet 的前提）。
+        /// </summary>
         private static void Promote(PlanetFactory factory, Cell cell)
         {
             while (cell.Hidden.Count > 0)
             {
-                int next = cell.Hidden[0];
+                var next = 0;
 
-                cell.Hidden.RemoveAt(0);
+                foreach (int e in cell.Hidden)
+                {
+                    next = e;
+
+                    break;
+                }
+
+                cell.Hidden.Remove(next);
+
+                if (cell.PrunedAt > cell.Hidden.Count) cell.PrunedAt = cell.Hidden.Count;
 
                 if (next <= 0 || next >= factory.entityPool.Length) continue;
 
@@ -328,7 +470,18 @@ namespace ProjectEden.Patches
             }
         }
 
-        /// <summary>把登记表里已经不存在的实体清掉。</summary>
+        /// <summary>
+        /// 把登记表里已经不存在的实体清掉。
+        ///
+        /// <b><see cref="Cell.Hidden"/> 那一半是摊销的，不是每次都扫。</b>
+        /// 这个方法原先每次创建显示都把两张表整个走一遍，而 Hidden 的长度就是玩家叠在
+        /// 这一点的建筑数——叠 N 台就是 O(N²)，落星球时更是一次性全付。
+        ///
+        /// 它其实很少有事可做：拆除走 <c>BeforeRemoveEntity</c>，那里已经把编号摘掉了；
+        /// <c>Promote</c> 挑人时也会顺手跳过失效的。所以 Hidden 只在**比上次清理时涨了
+        /// 一大截**才重扫一遍，摊到每次插入是常数。<see cref="Cell.Drawn"/> 照旧每次扫——
+        /// 它的长度被 <c>stackedRenderLimit</c> 卡着（默认 1）。
+        /// </summary>
         private static void Prune(PlanetFactory factory, Cell cell)
         {
             for (int i = cell.Drawn.Count - 1; i >= 0; i--)
@@ -340,15 +493,16 @@ namespace ProjectEden.Patches
                 cell.Drawn.RemoveAt(i);
             }
 
-            for (int i = cell.Hidden.Count - 1; i >= 0; i--)
-            {
-                int e = cell.Hidden[i];
+            if (cell.Hidden.Count < cell.PrunedAt + PruneStride) return;
 
-                if (e > 0 && e < factory.entityPool.Length && factory.entityPool[e].id == e) continue;
+            cell.Hidden.RemoveWhere(e =>
+                e <= 0 || e >= factory.entityPool.Length || factory.entityPool[e].id != e);
 
-                cell.Hidden.RemoveAt(i);
-            }
+            cell.PrunedAt = cell.Hidden.Count;
         }
+
+        /// <summary>Hidden 每涨这么多才全表清理一次。摊销之后每次插入是常数。</summary>
+        private const int PruneStride = 1024;
 
         /// <summary>换存档时必须清空：实体编号会被复用，留着旧表会把新存档的建筑错认成旧的。</summary>
         internal static void Reset()

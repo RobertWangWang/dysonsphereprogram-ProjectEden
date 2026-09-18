@@ -95,8 +95,13 @@ namespace ProjectEden.Patches
 
             // 直接改 storage 绕过了原版设置物品的入口（PlanetTransport.SetStationStorage），
             // 而供需配对只在那条路径上重建，所以布局一变就得自己刷一次，否则运输机永远配不上对。
-            // RefreshStationTraffic 会遍历整颗星球的物流站，只能在真正变化时调用。
-            if (SyncStorageLayout(factory, station, requires, products)) factory.transport.RefreshStationTraffic();
+            //
+            // <b>但不能立刻刷：RefreshStationTraffic 是 O(站点数²)，实测这颗星球上一次 88 毫秒。</b>
+            // 「只在真正变化时调用」这条原本的守卫是对的，却不够——新建的巨型建筑在随后几个
+            // tick 里布局会反复变，实测 24.5 秒里被调了 42 次、合计 3.7 秒，占 15% 的 CPU。
+            // 改成标脏，由 StationTrafficCoalescer 限频冲刷（见那里的说明）。
+            if (SyncStorageLayout(factory, station, requires, products))
+                StationTrafficCoalescer.MarkDirty(factory);
 
             lock (station.storage)
             {

@@ -247,6 +247,16 @@ Both share the same speed-up logic as the advanced mining machine:
 > it now drags between **15 and 150 GW** — and the setting sticks. The mod raises a station only once, on load, and
 > only if it is still sitting at vanilla's value; after that it never interferes.
 
+> **Supply/demand pairing can be up to 2 seconds stale, and that is a stated trade.** Vanilla rebuilds the whole
+> planet's logistics pairing **immediately** every time a building is placed, a slot is changed or a station is
+> dismantled — and that routine is **O(stations²)**: every station is re-matched against every other. On a vanilla
+> save nobody notices. But this mod makes **every mega building a logistics station too**, so a mature planet carries
+> two thousand of them, and one rebuild measures **81 ms** — a fifth of the CPU while building.
+>
+> Those rebuilds are therefore coalesced: mark it, and actually recompute at most once every 2 seconds. Measured, the
+> cost of placing one building fell from **102 ms to 0.63 ms**. The price is exactly that delay — after you change a
+> slot or dismantle a station, drones keep flying on the old pairing for up to two seconds.
+
 ### Carry capacity and stacking
 
 - Drones carry **10,000** per trip
@@ -1169,13 +1179,21 @@ Logistics Bots **deliver to the mecha (Icarus) and recover from it**. In vanilla
 Distributor (a different component, `DispenserComponent`), need an adjacent storage box as their source, and each
 one serves exactly **one** item.
 
-In this hub they **draw on the 30 slots directly, fully automatically**:
+In this hub they **draw on the 30 slots directly**:
 
-- Whatever sits in a non-empty hub slot is added to the mecha's delivery request list (one stack of each by
-  default, configurable)
-- Short on the mecha, it gets delivered; over the limit, it gets recovered, and the recovered goods go straight
-  into the logistics network
+- **Which items get served is decided by your own delivery request list**; the hub never writes to that list
+- For an item that is on the list and present in a hub slot: short on the mecha, it gets delivered; over the
+  limit, it gets recovered, and the recovered goods go straight into the logistics network
 - The panel gains a Logistics Bot slot you can add to or take from by hand; it also tops itself up like the drones
+
+> **The hub not editing your list is deliberate.** Earlier versions added whatever sat in a non-empty slot to the
+> list automatically, and the result was that the slot's own direction and the list fought each other: set a slot
+> to **local Demand** and the hub would pull the item in from the network and then send bots to hand it to you —
+> working directly against that slot's own configuration. The list is now entirely yours.
+>
+> The cost: **with nothing on the list, not one bot will move** (that is vanilla's rule for distributors, not this
+> mod's). A log line says so, in case it looks like a broken feature. To get the old behaviour back, set
+> `autoDeliveryList` to `true` in `machines.json`.
 
 Configured in `machines.json`: `courierCount` (how many), `playerDeliveryMode` (send/receive mode),
 `autoDeliveryList` (auto-fill the request list), `deliveryKeepStacks` (how many stacks to maintain).
@@ -1187,20 +1205,31 @@ logistics station means working around every one of those assumptions:
 
 | What vanilla does | How it is worked around |
 |---|---|
-| A distributor's source must be a `StorageComponent`, while a station's slots are `StationStore[]` — **different types, neither can read the other** | The hub carries a **hidden buffer box** as the distributor's source, aligned with the 30 slots in both directions every 10 ticks |
+| A distributor's source must be a `StorageComponent`, while a station's slots are `StationStore[]` — **different types, neither can read the other** | The hub carries a **hidden transit tray** as the distributor's source, loaded before the distributor's tick and emptied after it |
 | `ConnectToDispenser` only links a storage box on an **adjacent entity** | The link is made manually at build time |
-| When the player puts something into the building, the `storageId` check comes first | It is filtered out for hubs, so drones go into the logistics station rather than falling into the buffer |
+| When the player puts something into the building, the `storageId` check comes first | It is filtered out for hubs, so drones go into the logistics station rather than falling into the tray |
 | Three panels (storage / station / distributor) fight over one click, and the last match wins | Only the station panel is kept; distribution mode comes from the config instead |
-| A distributor only works on items configured in the **delivery request list**, and an empty list means everything idles | The hub's contents are filled into the list automatically (empty rows only, never touching entries the player configured) |
+| A distributor only works on items configured in the **delivery request list**, and an empty list means everything idles | Not worked around — the list belongs to the player, and the hub serves only what the player put on it (`autoDeliveryList` restores the automatic fill) |
 | **One distributor serves exactly one item** (`filter` is both the pairing condition and the item ID used when picking up) | `filter` is rotated to the next item once per second, leaving pairing, pickup and dispatch entirely to vanilla |
 
 > That last one is this building's only imperfection: **it serves one item at a time**. At one rotation per second
 > with 20 bots you cannot tell in practice; making one distributor genuinely serve several would mean taking over
 > every `filter` site inside an 8.9 KB `InternalTick`, which is not worth it.
 
+> **The storage space is those 30 slots; the transit tray stores nothing.** Between ticks it is necessarily empty:
+> the item currently being served is loaded onto it just before dispatch, and whatever is on it at the end of that
+> same tick goes back into the slots — every last unit. So the numbers on the panel are the real stock, and the
+> capacity is the slots' own ten million.
+>
+> It did not use to work this way: the tray kept 1000 of each item and was only aligned every 10 ticks, so **goods
+> the mecha moved in and out by courier could leave the station slots completely unchanged**. Those 1000 units were
+> the cause, and they are gone.
+
 > **For diagnosis**: turn on `courierDebugLog` in `machines.json` and it prints one status line every 10 seconds
-> (slots / buffer / request list / bots / pairing / item currently served). That chain has five stages, and any one
-> of them being empty looks identical from the outside — "the bots are just sitting there".
+> (slots / units stranded on the tray / request list / bots / pairing / item currently served). That chain has five
+> stages, and any one of them being empty looks identical from the outside — "the bots are just sitting there".
+> The tray figure **should normally be 0**; anything else means one thing only: the slots are full and the goods
+> cannot go back.
 
 ### Wind Turbine Cluster
 
