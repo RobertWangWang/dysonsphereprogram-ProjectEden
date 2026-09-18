@@ -1475,7 +1475,9 @@ The clone finds its source by **type + product** rather than a hardcoded recipe 
 - **Save-safe, measured**: see the correction under *Per-building recipes* — the stream carries each array's own length and `Import` resizes to the current recipe, so 2 → 3 ingredients grows an existing assembler's `served` with the new slot at 0.
 - **Slot count is not a concern on the assembler side**: `UpdateNeeds`, `InternalUpdate` and `UIAssemblerWindow.SyncServingStorage` are all `ldlen`-bounded, and the greenhouse already runs a four-input recipe. The unrolled-6 limit is the **lab's** produce mode (`UniverseMatrixPatches`), which is a different component.
 
-Shipped entry: **处理器 gains 电磁矩阵 ×2**. That is a stated balance knob, not a chemistry derivation, and it is labelled as such in the config and both guides — the processor's downstream is wide enough that this pulls the research lab into the mid-game production line on purpose.
+Shipped entry: **氢燃料棒's hydrogen ×10 → ×56**, which is not a balance knob but a hole this mod dug itself — see the `vanillaEdits` paragraph under **Cloned buildings** for the arithmetic.
+
+**A retired entry, kept here because the save-safety asymmetry is the lesson.** 处理器 used to gain 电磁矩阵 ×2 — a stated balance knob (its downstream is wide enough that a matrix dependency pulls the research lab into the mid-game line). The owner removed it in 1.10.3. **Removal is save-safe by the same evidence that made the addition safe**, but not symmetrically: `Import` resizes `served` to the current recipe, so 2 → 3 grows with the new slot at 0 while 3 → 2 **drops whatever was in the third slot**. Adding an ingredient costs a player nothing; removing one quietly eats a few items per machine. Say so when retiring one.
 
 ### Custom ore veins — `src/OreRegistry.cs`
 

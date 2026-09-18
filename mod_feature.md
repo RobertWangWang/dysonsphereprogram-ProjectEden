@@ -423,19 +423,21 @@ type** and a machine only ever accepts one, so chemical facilities could not do 
 
 ### Vanilla recipes that were changed
 
-**Processor**: on top of its original ingredients, it now also eats **Electromagnetic Matrix ×2**.
+**Processor**: **no longer needs an Electromagnetic Matrix** — back to vanilla (Circuit Board ×2 + Microcrystalline
+Component ×2 → Processor ×1).
 
-This is a **balance change, not something derived from chemistry**, so this document says so outright. The processor
-feeds a very wide downstream (quantum chips, plane filters, a long list of buildings), so hanging a matrix dependency
-on it effectively makes the research lab part of the production line much earlier — **that is intended, not a side
-effect**. If you do not want it, empty the `add` list on that `vanillaEdits` entry in `recipes.json` and drop the file
-into your profile as an override; no rebuild needed.
+There used to be a balance change here that made it eat **Electromagnetic Matrix ×2** as well, on the reasoning that
+the processor feeds a very wide downstream and a matrix dependency would pull the research lab into the production
+line much earlier. **That entry has been removed.** To put it back, add one `add` entry to `vanillaEdits` in
+`recipes.json` — the note there spells out the exact shape — and drop the file into your profile as an override; no
+rebuild needed.
 
-> **Existing saves are fine, and that was confirmed by reading the IL rather than assumed.** Adding an ingredient takes
-> the recipe's input slots from 2 to 3, and `AssemblerComponent.Export` **writes each array's own length before its
-> contents**, while `Import` reads them back and then `Array.Resize`s to the current recipe — so a 2-long input array in
-> an old save is grown to 3 with **the old amounts kept and the new slot starting at 0**. An assembler already making
-> processors does not jam; it simply starts wanting matrices.
+> **Removing it is safe for existing saves, on the same evidence that made adding it safe.**
+> `AssemblerComponent.Export` **writes each array's own length before its contents**, and `Import` reads them back and
+> then `Array.Resize`s to the current recipe — so a 3-long input array shrinks back to 2 with the first two kept.
+> **The price is that whatever Electromagnetic Matrix was sitting in that third slot is dropped** (a handful per
+> machine): growing the array starts the new slot at 0, shrinking it simply loses the extra slot. The two directions
+> are not symmetric.
 
 The recipe is identified **by its product, never by a recipe id**: vanilla recipe ids live in `resources.assets` and
 cannot be enumerated offline, so a hardcoded number that turns out wrong would quietly edit a different recipe. If more
@@ -4305,7 +4307,7 @@ are identical, it is just slower.
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
-| `recipes.json` | Extra recipes, plus `vanillaEdits`: **append ingredients to a vanilla recipe in place** (currently one entry: Processor + Electromagnetic Matrix ×2) |
+| `recipes.json` | Extra recipes, plus `vanillaEdits`: **edit a vanilla recipe's ingredient list in place** (currently one entry: the Hydrogen Fuel Rod's hydrogen ×10 → ×56) |
 | `power.json` | Power node coverage radius |
 | `belts.json` | Speed of the three belt tiers |
 | `ores.json` | The custom vein table: per-ore IDs, vein density, recolour parameters, recipe lists; extra items (phase, heat value, icon); and the gases injected into gas giants |
