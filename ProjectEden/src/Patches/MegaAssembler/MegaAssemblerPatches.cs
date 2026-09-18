@@ -124,15 +124,36 @@ namespace ProjectEden.Patches
             if (factory == null) return;
             if (component.speed < MegaBuildingRegistry.MegaSpeedThreshold) return;
 
+            MegaTickProfiler.CountBuilding();
+
+            long tOther = MegaTickProfiler.Now();
+
             ApplySpeed(ref component);
+
+            MegaTickProfiler.AddOther(tOther);
 
             UpdateSlots(factory, ref component);
 
+            tOther = MegaTickProfiler.Now();
+
             // 催化反应器：床里没有活性催化剂就这一 tick 不许生产。
             // Gate 自己会调 Suppress 压住原版那次调用——前置钩子取消不了它后面那次。
-            if (!CatalystBedPatches.Gate(factory, ref component)) return;
+            if (!CatalystBedPatches.Gate(factory, ref component))
+            {
+                MegaTickProfiler.AddOther(tOther);
+
+                return;
+            }
+
+            MegaTickProfiler.AddOther(tOther);
+
+            long tCycles = MegaTickProfiler.Now();
 
             int settled = RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
+
+            MegaTickProfiler.AddCycles(tCycles);
+
+            tOther = MegaTickProfiler.Now();
 
             // 只在**真的产出了**的 tick 扣活性。settled 是实测值；cyclesPerTick = 1 时
             // 没有补跑周期可测，才退回按原版判据推导（见 LooksProductive 的注释）。
@@ -145,6 +166,8 @@ namespace ProjectEden.Patches
             // 这台建筑同时挂着组装机和发电机两个组件（EntityData 里是两个独立字段），
             // 所以「压料」和「烧料」在同一台机器上，中间不经过传送带。
             RedoxBurnerPatches.Burn(factory, ref component);
+
+            MegaTickProfiler.AddOther(tOther);
         }
 
         /// <summary>
@@ -226,19 +249,374 @@ namespace ProjectEden.Patches
             int last = watch ? produced[0] : 0;
             var settled = 0;
 
+            // ── 空转提前退出 ────────────────────────────────────────
+            //
+            // 原来这个循环<b>无条件跑满 cycles - 1 遍</b>。一台缺料 / 产物槽满 /
+            // 没配方的巨型建筑照样把原版 InternalUpdate（693 条指令）完整跑 59 遍，
+            // 约 41000 条指令、产出为零——而一颗建满的星球上任意时刻都有相当一部分
+            // 巨型建筑正处在这三种状态里。
+            //
+            // <b>为什么「上一遍没动」就能推出「后面都不会动」：</b>这个循环内部除了
+            // InternalUpdate 自己，没有任何东西会改变它的输入。原料补给（UpdateSlots）
+            // 在循环<b>之前</b>就跑完了，power 是入参，配方在 tick 内不会变。所以同样的
+            // 输入调第二次必然得到同样的结果。
+            //
+            // <b>判据必须是三项，缺一不可。</b>
+            //   · produced[] 没动 —— 没有产出
+            //   · time 没涨       —— 原版是 `time += (int)(power * speedOverride)`，
+            //                        只有 time >= timeSpend 才结算。**不能只看产出**：
+            //                        time 涨了但还没满的那几遍看起来「什么都没发生」，
+            //                        实际是在攒下一个周期。speed = 1e8 时一次调用必定
+            //                        溢满，所以现在看不出差别——但判据不该依赖那个数值，
+            //                        否则以后谁调低 assemblerSpeed 就会静默少产。
+            //   · extraTime 没涨  —— 增产额外产出是<b>独立的第二个计时器</b>
+            //                        （InternalUpdate 里 time 和 extraTime 是两个互不
+            //                        相干的 if），只看 time 会漏掉纯增产的那一遍。
+            //
+            // settled 的语义一个字没变：不结算的周期本来就计 0，而退出的前提正是
+            // 「这一遍没结算」，所以催化剂床那边拿到的数完全一致。
+            long prevSum = ProducedSum(produced);
+            int prevTime = component.time;
+            int prevExtra = component.extraTime;
+
+            var ran = 0;
+            var skipped = 0;
+
+            // ── 批量结算：调一遍原版，量出稳态的那一个周期，再乘上去 ──────
+            //
+            // 见 MegaBatchSettle 的类注释。这里只负责编排：**先跑一次真的**，
+            // 确认它落在稳态，再把剩下的预算一次性乘掉；任何一步不满足就原样落回
+            // 下面那个逐次循环，功能完全不变、只是慢。
+            //
+            // 顺序很重要：`量` 必须发生在 `乘` 之前，而且量的是<b>这一台、这一刻</b>
+            // 的真实差值，不是配方表的名义值——配方表只用来判断「这次差值是不是稳态」。
+            if (cycles > 1 && MegaBatchSettle.CanBatch(ref component))
+            {
+                int[] servedBefore = BatchScratch.Snapshot(ref _servedSnap, component.served);
+                int[] producedBefore = BatchScratch.Snapshot(ref _producedSnap, component.produced);
+
+                if (servedBefore != null && producedBefore != null)
+                {
+                    int cycleBefore = component.cycleCount;
+                    int extraBefore = component.extraCycleCount;
+
+                    component.InternalUpdate(power, productRegister, consumeRegister);
+
+                    ran++;
+
+                    if (MegaBatchSettle.IsSteadyUnit(ref component, servedBefore, producedBefore,
+                                                     cycleBefore, extraBefore))
+                    {
+                        settled++;
+                        last = watch ? produced[0] : last;
+
+                        int n = MegaBatchSettle.BatchSize(ref component, cycles - 1 - ran);
+
+                        // 自检：抽查时先在副本上回放 n+1 遍，对不上就整局退回逐次。
+                        if (n > 0 && MegaBatchAudit.Due()
+                                  && !MegaBatchAudit.Verify(ref component, n, power,
+                                                            productRegister, consumeRegister))
+                            n = 0;
+
+                        if (n > 0)
+                        {
+                            MegaBatchSettle.Apply(ref component, n, productRegister, consumeRegister);
+
+                            settled += n;
+                            ran += n;
+
+                            if (watch) last = produced[0];
+                        }
+
+                        Tally(ran, cycles - 1 - ran);
+
+                        return settled;
+                    }
+
+                    // 没落在稳态（换配方、产物槽满、原料刚好见底……）：不乘，
+                    // 交给下面的逐次循环把剩下的预算跑完。**判据是严格相等，
+                    // 所以这里不是"可能有问题"，而是"这一次确实不是那个单位"。**
+                    MegaBatchSettle.CountBailShape();
+
+                    if (watch && produced[0] != last)
+                    {
+                        settled++;
+                        last = produced[0];
+                    }
+
+                    prevSum = ProducedSum(produced);
+                    prevTime = component.time;
+                    prevExtra = component.extraTime;
+                }
+            }
+            else if (cycles > 1 && MegaBatchSettle.Enabled)
+            {
+                MegaBatchSettle.CountBailProliferator();
+            }
+
             // 原本那次调用紧随其后，所以这里只补差额
-            for (var i = 1; i < cycles; i++)
+            for (var i = 1 + ran; i < cycles; i++)
             {
                 component.InternalUpdate(power, productRegister, consumeRegister);
 
-                if (!watch || produced[0] == last) continue;
+                ran++;
 
-                settled++;
-                last = produced[0];
+                long sum = ProducedSum(produced);
+                int nowTime = component.time;
+                int nowExtra = component.extraTime;
+
+                if (watch && produced[0] != last)
+                {
+                    settled++;
+                    last = produced[0];
+                }
+
+                if (sum == prevSum && nowTime == prevTime && nowExtra == prevExtra)
+                {
+                    skipped = cycles - 1 - i;
+
+                    break;
+                }
+
+                prevSum = sum;
+                prevTime = nowTime;
+                prevExtra = nowExtra;
             }
+
+            Tally(ran, skipped);
+
+            MegaBatchSettle.CountStepped(ran);
 
             return settled;
         }
+
+        /// <summary>
+        /// <c>produced[]</c> 的总和，当作「这一遍有没有产出」的变化探测器。
+        ///
+        /// 求和而不是快照整个数组，是因为<b>tick 路径上不许分配</b>，而快照需要一个
+        /// 与产物数等长的缓冲区（这条路还是并行的，缓冲区得是 [ThreadStatic]）。
+        /// 求和之所以够用：循环内部只有 <c>InternalUpdate</c> 会碰 <c>produced</c>，
+        /// 而它只做 <c>produced[i] += productCounts[i]</c>——<b>只增不减</b>，
+        /// 取货是循环之外 <c>UpdateStationStorage</c> 的事。只增不减的量，
+        /// 总和不变就等于每一项都不变。
+        /// </summary>
+        private static long ProducedSum(int[] produced)
+        {
+            if (produced == null) return 0L;
+
+            var sum = 0L;
+
+            for (var i = 0; i < produced.Length; i++) sum += produced[i];
+
+            return sum;
+        }
+
+        // ── 空转提前退出的计数与日志 ──────────────────────────────
+        //
+        // <b>状态行和事件行是两个问题，一个答不了另一个</b>（本仓库记过七次）：
+        //   · Report()          回答「这个优化接上了没有」——每局必打，包括没省到的时候
+        //   · 首次触发那一行     回答「它第一次真的退出是什么时候」
+        //   · 每 60 秒那一行     回答「它到底省了多少」，这是做这件事的全部意义所在
+        //
+        // 三个数都在<b>并行的 tick 路径</b>上累加（_assembler_parallel），所以只用
+        // Interlocked，不碰 Unity 的任何 API——Time.realtimeSinceStartup 在工作线程上
+        // 不可用，节流只能放在主线程那一头。
+
+        private static long _cyclesRan;
+        private static long _cyclesSkipped;
+        private static int _reportedSkipOnce;
+
+        /// <summary>
+        /// 记一笔：这台建筑这一 tick 真跑了几遍、又省下了几遍。
+        ///
+        /// <b>抢占放在字符串插值之前</b>，插值本身就不会落到 tick 上——和
+        /// <c>ReportThrottleOnce</c>、<c>AdvancedMinerPatches.ClaimLog</c> 同一套规矩。
+        /// </summary>
+        private static void Tally(int ran, int skipped)
+        {
+            if (ran > 0) System.Threading.Interlocked.Add(ref _cyclesRan, ran);
+
+            if (skipped <= 0) return;
+
+            System.Threading.Interlocked.Add(ref _cyclesSkipped, skipped);
+
+            if (System.Threading.Interlocked.Exchange(ref _reportedSkipOnce, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑·空转提前退出：第一次生效，这一台省下 {skipped} 个周期。"
+                + "判据是「产出、time、extraTime 三项都没动」——那说明这一遍完全没发生"
+                + "任何事，而循环内部没有东西会改变输入，所以后面每一遍也不会。"
+                + "整局只报这一行，省了多少看下面每 60 秒那条。");
+        }
+
+        private static float _nextSkipReport;
+        private static long _lastRan;
+        private static long _lastSkipped;
+        private static int _reporterEntered;
+
+        /// <summary>
+        /// 每 60 秒报一次空转提前退出省下的比例。
+        ///
+        /// 挂在 <c>UIGame._OnUpdate</c> 上是因为它<b>在主线程</b>：计数在并行的
+        /// 装配 tick 上累加，而 <c>Time.realtimeSinceStartup</c> 只能在主线程读。
+        /// 节流用 <c>realtimeSinceStartup</c> 而不是 <c>GameMain.gameTick</c>——
+        /// 后者在换存档时会倒退，于是 <c>next = tick + 间隔</c> 永远不再到期、
+        /// 报告静默死掉，而那看起来和「一切正常」一模一样（本仓库第 4 号坑）。
+        ///
+        /// 报的是<b>这 60 秒内的增量</b>，不是全局累计：累计值会被开局那几分钟的
+        /// 空工厂稀释，而你要看的是「现在这一刻省了多少」。
+        /// </summary>
+        [HarmonyPostfix]
+        [HarmonyPatch(typeof(UIGame), "_OnUpdate")]
+        private static void UIGame_OnUpdate_SkipReport()
+        {
+            // 入口无条件报一行，在任何闸之前：只要这个后置被调到过，日志里就一定有话。
+            // 没有这一行就只剩一种可能——补丁根本没挂上。
+            if (System.Threading.Interlocked.Exchange(ref _reporterEntered, 1) == 0)
+                ProjectEdenPlugin.Log.LogInfo(
+                    "巨型建筑·空转提前退出：统计挂点已跑到（UIGame._OnUpdate 的后置确实接上了），"
+                    + "之后每 60 秒报一次增量。");
+
+            float now = UnityEngine.Time.realtimeSinceStartup;
+
+            if (now < _nextSkipReport)
+                return;
+
+            // 第一次进来只对表，不报——否则报的是「开局到现在」那一段，
+            // 里面多半是还没建成的空工厂，稀释掉真正想看的数。
+            if (_nextSkipReport <= 0f)
+            {
+                _nextSkipReport = now + 60f;
+                _lastRan = System.Threading.Interlocked.Read(ref _cyclesRan);
+                _lastSkipped = System.Threading.Interlocked.Read(ref _cyclesSkipped);
+
+                return;
+            }
+
+            _nextSkipReport = now + 60f;
+
+            long ranNow = System.Threading.Interlocked.Read(ref _cyclesRan);
+            long skipNow = System.Threading.Interlocked.Read(ref _cyclesSkipped);
+
+            long ran = ranNow - _lastRan;
+            long skipped = skipNow - _lastSkipped;
+
+            _lastRan = ranNow;
+            _lastSkipped = skipNow;
+
+            // 一个周期都没跑 = 这颗存档里没有巨型建筑，或者全在待机。
+            // **照样报一行**：静默会让「没有巨型建筑」和「统计坏了」长得一样。
+            if (ran <= 0 && skipped <= 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "巨型建筑·空转提前退出：过去 60 秒一个补跑周期都没有——"
+                    + "要么这颗存档里没有巨型建筑，要么它们全部断电停摆。");
+
+                return;
+            }
+
+            long total = ran + skipped;
+            double saved = total > 0 ? 100.0 * skipped / total : 0.0;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑·空转提前退出：过去 60 秒实跑 {ran} 个补跑周期、省下 {skipped} 个，"
+                + $"即本该跑的 {total} 个里省掉了 {saved:0.#}%。"
+                + "省下的每一个周期都是一整遍 AssemblerComponent.InternalUpdate（原版 693 条指令），"
+                + "落在性能面板的 Facilities 一项上。");
+
+            ReportBatch();
+        }
+
+        /// <summary>
+        /// 开机状态行：这个优化<b>接上了没有</b>。
+        ///
+        /// 读的是 <c>Harmony.GetAllPatchedMethods()</c>——<b>已生效的状态</b>，
+        /// 而不是「我调了 PatchAll 而且没抛异常」。这两者不是一回事，本仓库为此
+        /// 付过一次（QualityCraftPatches 那条）。所以它必须排在 PatchAll <b>之后</b>。
+        /// </summary>
+        internal static void Report()
+        {
+            int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+
+            var hooked = false;
+
+            foreach (MethodBase mb in Harmony.GetAllPatchedMethods())
+                if (mb?.DeclaringType == typeof(UIGame) && mb.Name == "_OnUpdate")
+                {
+                    hooked = true;
+
+                    break;
+                }
+
+            if (cycles <= 1)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑·空转提前退出：cyclesPerTick = {cycles}，没有补跑周期可省，本优化自然不生效。"
+                    + "（这是配置的结果，不是故障。）");
+
+                return;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑·空转提前退出：已启用。cyclesPerTick = {cycles}，所以一台"
+                + $"缺料／产物槽满／没配方的巨型建筑原本每 tick 要白跑 {cycles - 1} 遍"
+                + "原版 InternalUpdate；现在第一遍发现「产出、time、extraTime 都没动」就停。"
+                + $"统计挂点 UIGame._OnUpdate={hooked}，每 60 秒报一次省下的比例。");
+
+            if (!hooked)
+                ProjectEdenPlugin.Log.LogWarning(
+                    "巨型建筑·空转提前退出：优化本身照常生效（它在 tick 路径里），"
+                    + "但 UIGame._OnUpdate 的统计后置没挂上，所以看不到省了多少。");
+        }
+
+        private static long _lastBatched, _lastStepped, _lastBailP, _lastBailS;
+
+        /// <summary>
+        /// 批量结算的覆盖率，跟在空转统计那一行后面报。
+        ///
+        /// <b>覆盖率是这件事值不值的全部依据</b>：带增产剂的建筑一律退回逐次，
+        /// 而那一类占多少事先没人知道。这一行把「批量吃掉的周期 / 逐次跑掉的周期」
+        /// 摆出来，顺带把两种退回的原因分开——增产（结构性，只能这样）和
+        /// 形状不符（换配方、产物槽满这些，本来就该退回）。
+        /// </summary>
+        private static void ReportBatch()
+        {
+            long b = MegaBatchSettle.Batched - _lastBatched;
+            long s = MegaBatchSettle.Stepped - _lastStepped;
+            long bp = MegaBatchSettle.BailProliferator - _lastBailP;
+            long bs = MegaBatchSettle.BailShape - _lastBailS;
+
+            _lastBatched = MegaBatchSettle.Batched;
+            _lastStepped = MegaBatchSettle.Stepped;
+            _lastBailP = MegaBatchSettle.BailProliferator;
+            _lastBailS = MegaBatchSettle.BailShape;
+
+            if (!MegaBatchSettle.Enabled)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "巨型建筑·批量结算：本轮未生效（开关关着，或者自检抓到不一致后已整局退回逐次）。");
+
+                return;
+            }
+
+            long tot = b + s;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑·批量结算：过去 60 秒批量吃掉 {b} 个周期、逐次跑掉 {s} 个"
+                + (tot > 0 ? $"，覆盖 {100.0 * b / tot:0.#}%" : "")
+                + $"；退回逐次的原因——带增产剂 {bp} 次、单次调用没落在稳态 {bs} 次。"
+                + $"自检已回放 {MegaBatchAudit.Checks} 次，其中偏保守 {MegaBatchAudit.Conservative} 次"
+                + "（偏保守只是慢一点，不影响正确性；真出问题会报 ERROR 并整局关掉批量）。");
+        }
+
+        /// <summary>
+        /// 批量结算量差值用的快照缓冲，见 <see cref="BatchScratch"/>。
+        /// <b>[ThreadStatic] 且不带初始化器</b>——初始化器只在第一个线程上跑，
+        /// 而这条路是按星球分线程的并行 tick。
+        /// </summary>
+        [System.ThreadStatic] private static int[] _servedSnap;
+
+        [System.ThreadStatic] private static int[] _producedSnap;
 
         private static int _reportedThrottle;
 
@@ -323,14 +701,22 @@ namespace ProjectEden.Patches
 
         private static void UpdateSlots(PlanetFactory factory, ref AssemblerComponent component)
         {
+            long tSlots = MegaTickProfiler.Now();
+
             SlotData[] slots = SlotDataStore.GetSlots(factory.planetId, component.entityId);
 
             UpdateOutputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool,
                               GameMain.history.stationPilerLevel);
             UpdateInputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool);
 
+            MegaTickProfiler.AddSlots(tSlots);
+
+            long tStorage = MegaTickProfiler.Now();
+
             // 传送带之外，再走一遍行星内物流：储物格与制造台之间搬运，运输机自动送料取货
             MegaStationPatches.UpdateStationStorage(factory, ref component);
+
+            MegaTickProfiler.AddStorage(tStorage);
         }
 
         /// <summary>把产物和多余的原料推上输出带。</summary>

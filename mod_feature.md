@@ -4215,11 +4215,54 @@ vaults are still inside, and says why — switching would strand them.
 > mecha reactor; at 333× that is unlimited range. Capacity and "may it fuel the mecha" are two separate
 > axes, and the second one is switched off here.
 
+## XXXV. The logic frame on a big factory: three optimisations that cost no output
+
+A planet packed with mega buildings stalls the logic frame, and that is a CPU matter with nothing
+to do with your graphics card. 1.10.0 took one planet — **1078 mega buildings, 894 miners,
+1975 logistics stations** — from **25.2 ms down to 6.7 ms**, raising the maximum logic frame rate
+from **40 to 142 ups**. Three optimisations, and **not one of them changes throughput**.
+
+**The decisive fact first: the game parallelises by planet.** Every factory subsystem's work-item
+count is the number of planets, and one work item is one entire planet. **So a single planet's
+logic frame will not get one millisecond faster from more CPU cores** — the only levers are "fewer
+objects on that planet" and "spread the factory across more planets".
+
+> **To look for yourself**: Statistics panel → Performance. That page costs nothing while closed.
+> "Planet Factory" is a container; what matters is the ten rows indented under it.
+
+**① Mega buildings stop spinning on nothing.** A building that is short of inputs, has a full
+output buffer, or has no recipe used to run the vanilla settlement a full 59 times per tick and
+produce nothing. It now stops the moment one pass changes nothing at all. Measured: **48.8% of
+that work was idle**.
+
+**② Stations with no output belt skip the output scan.** With stations widened to 30 slots, each
+one scanned 360 combinations per tick looking for which slot feeds which belt — and in a
+virtual-logistics factory most stations have no belt attached at all. Measured: **97.6% of
+stations**.
+
+**③ Mega buildings settle in batches.** Where a tick used to call the vanilla settlement 60 times,
+it now calls it once, measures exactly what that one cycle consumed and produced, and multiplies
+that by however many more the buffers allow. Measured coverage **98.9%**; the "Production
+Facilities" row fell from 12.3 ms to 1.6 ms.
+
+> **No output was lost.** None of the three changes *how much* can be produced, only how much CPU
+> it takes to work it out. Batching also carries a permanent self-check: every so often it copies
+> one building's state and runs the real vanilla settlement on the copy — any disagreement
+> **falls back to one-at-a-time automatically** and logs an error. So the worst case is "no faster",
+> never "wrong numbers".
+>
+> **Proliferated buildings are excluded from batching** and take the old path: their speed changes
+> the moment the spray points run out, and batching assumes the unit stays constant. There were
+> zero such buildings on the test planet.
+
+To turn it off, set `batchSettle` to `false` in `megabuildings.json`; throughput and correctness
+are identical, it is just slower.
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The eleven mega buildings, the tab, speed, built-in logistics station, replicator page count |
+| `megabuildings.json` | The eleven mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors |

@@ -2832,6 +2832,145 @@ needs[i] = served[i] < requireCounts[i] * num2 ? requires[i] : 0;
 
 So the real lever for belt-fed throughput is **looping the pick** (same idea as `RunExtraCycles`), not the batch count. Fixing `CalcNeedsBatch`-style overflow would be pure insurance against a future speed change.
 
+## Game internals: the logic frame, and the three things that actually cost
+
+Measured on a real save — one planet with **1078 mega buildings, 894 miners, 1975 stations,
+2 inserters, 411 belts** — which went from **25.2 ms / 40 ups to 6.7 ms / 142 ups** in one
+session. Everything below is measured; the wrong guesses are recorded because they cost rounds.
+
+**First, the measurement tool: the game has a per-subsystem CPU breakdown and it is free until
+opened.** `UIStatisticsWindow.performancePanelUI` (统计面板 → 性能测试), and
+`UIPerformancePanel._OnOpen`'s first act is `PerformanceMonitor.SetCpuProfilerActive(true)` — so
+the profiler is **off** until that tab is opened. 48 `ECpuWorkEntry` buckets; the ones that matter
+are `Facilities` (生产设施), `CargoTrafficMisc` (传送带附属设施), `LogisticsTransport`,
+`Inserters`, `CargoPaths`. **Read that before theorising**: on this save inserters and belts came
+to **1%**, against the general expectation that they dominate. *A general rule is not a
+measurement, and this mod's whole point is to delete belts and inserters.*
+
+**`行星工厂` is a container, not a cost** — it is the sum of the ten rows indented under it.
+
+### One planet is one work item, so adding cores does nothing
+
+Every factory subsystem's scatter task is reset with the **same** work count:
+
+```
+GameLogic.ContextCollect_FactoryComponents_MultiMain
+    gameThreadContext.<miner|assembler|inserter|cargoPath|labProduce|…>
+        .ResetFrame(timei, GameLogic::factoryCount, threadCount)
+                           ^^^^^^^^^^^^^^^^^^^^^^^ work items = number of PLANETS
+```
+
+and `_inserter_parallel` decodes a work item as
+`factories[(batchCurrent + batchOffset) % factoryCount]`, then runs that planet's **entire**
+`inserterCursor` loop on the one thread. `ScatterTaskContext.Redispatch` steals whole planets.
+
+**So a single overbuilt planet is single-threaded and cannot be parallelised further.** The two
+real levers are *fewer objects on that planet* and *spread the factory across planets*. (And
+within-planet splitting is not available even in principle: inserters on one planet write into
+shared `CargoPath` buffers, `entityNeeds` and assembler `served[]`, and vanilla is thread-safe
+**only** because of this one-planet-one-thread guarantee. Splitting it corrupts items silently.)
+
+Also: the planet you stand on costs more — `_inserter_parallel` picks
+`InternalUpdate` (with anim, 815 instr) when `factory == localLoadedFactory` and
+`InternalUpdateNoAnim` (721) otherwise. Flying away and comparing is a free A/B.
+
+### `AssemblerComponent.InternalUpdate`: the steady-state unit and the output gate
+
+One call does **two** things: settle the previous cycle (IL 0101 onward, gated on
+`time >= timeSpend`) and consume inputs for the next (IL 038E onward, gated on `!replicating`).
+So in steady state one call's net effect is exactly
+
+```
+served[i]   -= requireCounts[i]
+produced[j] += productCounts[j]
+cycleCount  += 1
+```
+
+and **`time` needs no adjustment**: each call is `time -= timeSpend` then
+`time += power * speedOverride`, and at `speedOverride = 1e8` that overshoots any `timeSpend` by
+one to two orders of magnitude, so the call always ends with `time` saturated at "next cycle ready".
+Same for `replicating` / `speedOverride`.
+
+**The output gate is a table keyed on `recipeType`** (IL 013E–02F5; the single-product branch is
+just the unrolled form of the multi-product one):
+
+| `recipeType` | refuses when | max settled cycles/tick |
+|---|---|---|
+| 1 `Smelt` | `produced[j] + productCounts[j] > 100` | ~100/count |
+| 4 `Assemble` | `produced[j] > productCounts[j] * 9` | 10 |
+| everything else (2/3/5/default) | `produced[j] > productCounts[j] * 19` | 20 |
+
+**This is NOT the lab's formula** (`10 × ceil(speedOverride/10000)`) — that one belongs to
+`LabComponent`, and using it here would be wrong in both directions.
+
+### The three optimisations, and which one carries risk
+
+| | how | risk |
+|---|---|---|
+| `RunExtraCycles` early exit | observe three snapshots, stop when nothing moved | **none** — cannot change output |
+| `StationOutputSkipPatches` | copy vanilla's own first two tests | **none** — equivalence proved from IL |
+| `MegaBatchSettle` | measure one cycle, multiply; **reproduces one gate** | **real**, covered by replay audit |
+
+**The early exit's break condition needs all three of `produced[]`, `time`, `extraTime`.** Watching
+產出 alone misreads "time advanced but has not filled" as idle; extra products ride an *independent
+second timer*, so watching `time` alone misses a pure-proliferator cycle. Measured idle share: **48.8%**.
+Note it **changes what `cyclesPerTick` is**: before, lowering it saved on idle buildings too; after,
+idle buildings cost one probe each, so lowering it only removes *productive* cycles. It became a
+pure exchange rate — measured at **31% of output for 3.5 ms**.
+
+**`StationComponent.UpdateOutputSlots` is skippable when no slot is an output port, and that is
+provable rather than argued.** Both of its loops open with `dir != IODir.Output → continue` then
+`beltId == 0 → continue`, and *every* write in the method — `StationStore.count`/`inc`,
+`SlotData.counter`/`beltId`, `SignData.iconType`/`iconId0`, `warperCount` — is downstream of those
+two tests. The one write that a skip does forgo is `outSlotOffset` (IL 03F2, the round-robin
+cursor), and nothing reads it while there are no output ports. Measured skip rate **97.6%**;
+`CargoTrafficMisc` 7.075 → 0.549 ms. **Note that bucket contains no belts**:
+`FactoryCargoTrafficMiscGameTick_Parallel`'s body calls exactly piler, monitor, spraycoater and
+station_output.
+
+**Batching is "measure then multiply", not a reimplementation** — the same move `RunExtraCycles`'
+`settled` counter already makes. Its two measured bounds (inputs, budget) are safe; the third
+(the output gate) is *reproduced*, which is the drill-bit failure shape, **so the replay audit is
+not decoration — it is the reason the route is allowed**. `MegaBatchAudit` deep-copies the
+component (it is a **struct**: plain assignment shares the arrays, so `served`/`incServed`/
+`produced`/`needs` must each be cloned or the audit corrupts the building it is checking), runs
+`n+1` real cycles on the copy against **scratch registers** (using the real ones would double the
+production statistics), and disables batching for the session on any shortfall. Measured coverage
+**98.9%**, `Facilities` 12.276 → 1.577 ms.
+
+**Proliferated buildings are deliberately excluded from batching.** `split_inc_level` drains
+`incServed` each cycle and `extraSpeed` drops to 0 when it runs out (IL 04CF–0549) — a genuine
+regime change mid-batch, and "measure one unit then multiply" assumes the unit is constant.
+Excluding it makes the batch structurally regime-free; the discriminator is **state**
+(`incUsed` / `incServed` / `extraSpeed` / `extraTime`), never recipe or building type, because
+whether a machine is sprayed changes at runtime.
+
+### Two mistakes from this episode, both already rules here
+
+- **A mean hides a bimodal distribution.** "Average 20 settled cycles against a cap of 60, so
+  halving the cap is nearly free" predicted no output loss; the measurement said **−31%**. The
+  population is two groups — permanently starved, and pinned at the cap — and the mean shows
+  neither. `megabuildings.json`'s `cyclesPerTick` comment records this so the argument is not
+  re-made.
+- **`Stopwatch.Frequency` is self-reported, and a self-reported number is a claim.** The first
+  `MegaTickProfiler` divided by it and reported **240 ms/frame** against a 16 ms logic frame — 12×
+  out, and *not* explicable by parallelism (1080 of 1194 mega buildings were on one planet). It now
+  calibrates against wall clock across the reporting window, warns when the two disagree by >5%,
+  and prints "how many threads' worth" so a genuine parallelism reading is visible instead of
+  hidden. Same family as `kMaxCargoFlowSpeedPerSecond`.
+- **And a probe that reaches the same order as what it measures stops measuring it.** After
+  batching, `phaseTiming`'s twelve `Stopwatch.GetTimestamp()` reads per building per tick
+  (~860k/s under Mono, where it is an icall) became comparable to the work left in `MegaTick`.
+  It ships **off** for that reason, not because it is finished.
+
+### Diagnostics kept
+
+`PlanetCensus` prints the local planet's object counts **grouped by the performance panel's own
+buckets**, re-printing only when the planet or the counts change; it additionally splits stations
+by ownership (mega building / collector / plain) and computes `Σ storage.Length × slots.Length`,
+the exact inner-loop count of `UpdateOutputSlots`. That split is what disproved the
+"894 miners are wasting 30 slots each" theory — they average **1.1**.
+
 ## Compatibility damage this mod causes, and how it is repaired
 
 **`CargoIncWidener` changes 33 method signatures, and every other mod compiled against

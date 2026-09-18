@@ -101,6 +101,31 @@ namespace ProjectEden.Utils
         /// </summary>
         public bool powerScalesCycles;
 
+        /// <summary>
+        /// 把 <c>MegaAssemblerPatches.MegaTick</c> 每 tick 的耗时按阶段拆开，每 60 秒报一行。
+        ///
+        /// <b>它存在的理由是一个分不开的问题</b>：性能面板的「生产设施」一项里，
+        /// 原版的配方结算和<b>本 mod 自己插进去的那些每建筑每 tick 的活</b>
+        /// （储物格同步要扫 30 格、传送带槽位 12 个、催化剂床、燃烧厂）是混在一起的——
+        /// 因为 MegaTick 就挂在装配 tick 里。两种情况该动的地方完全不同，而没有这行日志
+        /// 就只能猜。
+        ///
+        /// 代价是每台每 tick 多读四次 <c>Stopwatch.GetTimestamp()</c>（Windows 上就是
+        /// QueryPerformanceCounter，几十纳秒一次），量级在 1% 以内。**定了方向之后关掉即可。**
+        /// </summary>
+        public bool phaseTiming;
+
+        /// <summary>
+        /// 批量结算：把一个 tick 里的 N 个配方周期，从「调 N 遍原版」变成
+        /// 「调一遍原版 + 一次乘法」。见 <c>MegaBatchSettle</c> 的类注释。
+        ///
+        /// <b>它带着一道复现的闸</b>（输出闸那张按 recipeType 的 100 / ×9 / ×19 表），
+        /// 所以配了回放自检（<c>MegaBatchAudit</c>）：定期在副本上跑一遍原版，
+        /// 对不上就<b>整局自动关掉批量、退回逐次</b>并报 ERROR。
+        /// 关掉这个开关等价于永远走逐次——产能和正确性完全一样，只是慢。
+        /// </summary>
+        public bool batchSettle;
+
         public int stackSize;
         public int hpMax;
 

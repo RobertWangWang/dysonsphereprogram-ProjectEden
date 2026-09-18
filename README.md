@@ -74,7 +74,7 @@ patchers/ProjectEden.Preloader.dll  →  BepInEx/patchers/ProjectEden/ProjectEde
 **3. 确认装对了**：`BepInEx/LogOutput.log` 里应该有这两行——
 
 ```
-Project Eden v1.9.6 已加载
+Project Eden v1.10.0 已加载
 Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 ```
 
@@ -135,6 +135,21 @@ Cargo.inc / Cargo.stack 已加宽为 Int16（结构体 36 字节）：…
 每条配方的化学依据都逐条写在特性文档里（[中文](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod%E7%89%B9%E6%80%A7.md) ／ [English](https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden/blob/main/mod_feature.md)）。
 
 ---
+
+## 大工厂的逻辑帧
+
+堆满巨型建筑的星球会卡逻辑帧，而这是 CPU 的事、和显卡无关。1.10.0 把一颗
+**1078 台巨型建筑 + 894 台采矿机 + 1975 个物流站**的星球从 **25.2 ms 降到 6.7 ms**，
+最高逻辑帧率 **40 → 142 ups**。三条优化，**没有一条改变产能**：巨型建筑不再空转结算、
+没接输出带的物流站跳过出货扫描、巨型建筑批量结算（覆盖 98.9%，「生产设施」12.3 → 1.6 ms）。
+
+批量结算带一个常设自检：定期把一台建筑的状态复制一份、在副本上跑真正的原版结算，
+对不上就自动退回逐次并报错——**最坏情况是「没变快」，不是「数不对」**。
+`megabuildings.json` 的 `batchSettle` 可以关掉它。
+
+顺带一条实测出来的事实：**游戏的并行调度按星球分，一个工作项就是一整颗星球**，
+所以单颗星球的逻辑帧加 CPU 核心不会变快——能动的只有「这颗星球上的东西更少」
+和「把工厂摊到更多星球」。想自己看：统计面板 → 性能测试。
 
 ## 已知取舍
 
