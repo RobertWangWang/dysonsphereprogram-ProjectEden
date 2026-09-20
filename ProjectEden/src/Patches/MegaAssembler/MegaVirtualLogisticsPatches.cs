@@ -139,6 +139,7 @@ namespace ProjectEden.Patches
         private static long _spreadSum;     // Σ（每种货这一趟用到的站数）
         private static long _spreadSamples; // 样本数＝（货种 × 搬运趟数）
         private static long _spreadMax;     // 这一窗口里最散的一次
+        private static long _lastReportTick = -1; // 这一窗口已经由哪个 tick 报过了
 
         private static void NoteSupplier(int itemId)
         {
@@ -222,7 +223,18 @@ namespace ProjectEden.Patches
             FlushSpread();
             Outbound(__instance, factory);
 
-            if (time % 3600 == 0) ReportSpread();
+            // **一个窗口只报一次，不是每颗星球报一次。**
+            //
+            // 计数器是全局静态的，而这个方法每颗星球都会跑一遍——第一颗星球报完就把
+            // 计数 Exchange 清零了，同一 tick 里后面几颗分到的是残渣。实测日志里因此
+            // 出现十几行、样本数 3718 / 15 / 14389 / 1 忽大忽小，其中「1.00 个站（样本 1）」
+            // 看起来像轮转失效，其实只是那一颗分到了一个样本。
+            //
+            // 同一 tick 里所有星球拿到的 time 相同，所以用它当令牌：第一个把它换进去的
+            // 负责报告，其余看到相等就跳过。**这是「记一次要记对粒度」那条的又一次**——
+            // 数据是全局的，报告就必须是全局的。
+            if (time % 3600 == 0 && Interlocked.Exchange(ref _lastReportTick, time) != time)
+                ReportSpread();
         }
 
         // ── 入库：别的站的 Supply → 巨型建筑的 Demand ─────────
