@@ -51,6 +51,9 @@ namespace ProjectEden.Patches.Diagnostics
         private static double _lastTotal = -1;
         private static long _lastAveFrame = -1;
 
+        /// <summary>上一次替原版跑汇总的那一帧，用来保证每帧只跑一次（aveFrame 是逐次 +1 的）。</summary>
+        private static int _lastFrameSummarized = -1;
+
         /// <summary>
         /// 只报这些分项。**不是全部 48 个**——一屏几十行等于没报，而这十几个正是
         /// <c>行星工厂</c> 那棵树上真正会动的叶子，和普查那张对象数量表一一对应。
@@ -91,9 +94,31 @@ namespace ProjectEden.Patches.Diagnostics
                 PerformanceMonitor.SetCpuProfilerActive(true);
 
                 ProjectEdenPlugin.Log.LogInfo(
-                    "CPU 分项耗时：分析器已打开（等同于常驻翻开「统计面板 → 性能测试」那一页），"
+                    "CPU 分项耗时：分析器已打开，并且**每帧替原版跑一次汇总**"
+                    + "（SummarizeCpuStats 平时只有 DeepProfilerLateScript.LateUpdate 会调，"
+                    + "而那个脚本不活动——只置 CpuProfilerOn 的话，读到的是最后一次汇总的残值）。"
                     + $"之后每 {Config.perfProbeSeconds:0} 秒报一次。"
                     + "**它自己也要钱**，量完请把 perfprobe.json 的 enabled 改回 false。");
+            }
+
+            // **汇总这一步得我们自己驱动，采样不用。**
+            // DeepProfiler.Init() 由 GlobalObject.Initialize 调，采样本身
+            //（DeepProfiler.FrameStart/FrameEnd + 三个相机的 OnPreCull → BeginMajorSample）
+            // 每帧都在跑，和任何界面无关。被卡住的只有 SummarizeCpuStats——它全程序集只有
+            // 一处调用，在 DeepProfilerLateScript.LateUpdate，而那个脚本挂在
+            // UIRoot.instance.deepProfiler 上、平时不活动。
+            //
+            // 实测后果：aveFrame 停在 30（窗口 60 帧），也就是说读出来的是**读档期间那 30 帧
+            // 的残值**，而它看起来是一组非常稳定、非常可信的毫秒数。
+            //
+            // 每帧只调一次：aveFrame 是每次进来就 +1 的，调两次就等于把同一帧的数据
+            // 当成两帧塞进滑动平均。
+            int fc = Time.frameCount;
+
+            if (fc != _lastFrameSummarized)
+            {
+                _lastFrameSummarized = fc;
+                PerformanceMonitor.SummarizeCpuStats();
             }
 
             float now = Time.realtimeSinceStartup;
@@ -135,10 +160,11 @@ namespace ProjectEden.Patches.Diagnostics
             if (frames == 0)
             {
                 ProjectEdenPlugin.Log.LogWarning(
-                    $"CPU 分项耗时：**这张表没有在更新**（aveFrame 停在 {aveFrame}）。"
-                    + "PerformanceMonitor.SummarizeCpuStats 全程序集只有一处调用——"
-                    + "DeepProfilerLateScript.LateUpdate @005F，挂在 UIRoot.instance.deepProfiler 上。"
-                    + "那个脚本没跑，下面的数就全是残值。本次不报表。");
+                    $"CPU 分项耗时：**这张表仍然没有在更新**（aveFrame 停在 {aveFrame}）。"
+                    + "本探针已经每帧替原版调了 SummarizeCpuStats，它还是不动，"
+                    + "那就是方法开头那四道闸里有一道没过：CpuProfilerOn（我们置过）、"
+                    + "GameMain.logic 非空、DeepProfiler.inited、threadController.threadManager 非空。"
+                    + "本次不报表——残值和「负载非常稳定」长得一模一样。");
 
                 _lastAveFrame = aveFrame;
 
