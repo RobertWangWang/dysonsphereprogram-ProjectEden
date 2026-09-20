@@ -128,7 +128,7 @@ namespace ProjectEden
             Patches.PlanetCensus.Report();
             // 同上：它的状态行要报「挂点接上了没有」，那只能在 PatchAll 之后从
             // Harmony 自己的补丁表里读——「我调了 PatchAll 且没抛异常」不是同一件事
-            Patches.Diagnostics.CpuCostProbe.Report();
+            Patches.Diagnostics.CpuCostProbe.ReportStatus();
             Patches.StationOutputSkipPatches.Report();
             Patches.HubCourierPatches.Report();
             Patches.StationTrafficCoalescer.Report();
