@@ -189,6 +189,7 @@ namespace ProjectEden
             // 哪几座建筑看天吃饭。只读 megabuildings.json，但放在这里是为了让状态行
             // 和上面那批注册结果打在一起，一眼能对上
             Patches.MegaLightPatches.Collect();
+            Patches.MegaThrottle.Collect();
 
             foreach (MegaBuildingEntry entry in Config.buildings)
             {

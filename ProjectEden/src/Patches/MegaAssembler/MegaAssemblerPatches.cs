@@ -232,6 +232,24 @@ namespace ProjectEden.Patches
 
             // 看天吃饭的建筑（生物温室）：周期数按日照强度缩放，满日照满产、零日照停工。
             // 缩到 0 就连原版那一次也要压住——它插在我们后面，拦不掉，只能让它结算不了
+            // ── 逐台节流：周期上限 + 分频 ────────────────────────────
+            //
+            // 先于光照处理，因为它改的是这一台的**基准**周期数，而光照是在基准上按日照缩放的。
+            // 两者可以叠加：一座既分频又看天吃饭的建筑，先由分频决定这一 tick 轮不轮得到，
+            // 轮到了再由日照决定跑几个周期。
+            cycles = MegaThrottle.CyclesFor(factory, component.entityId, cycles);
+
+            if (MegaThrottle.Skip(factory, component.entityId, GameMain.gameTick, power))
+            {
+                // 前置钩子**取消不了它前面那次调用**——原版的 InternalUpdate 紧接着还会跑一遍，
+                // 而 speedOverride ≫ timeSpend，那一遍自己就能结算一个完整周期。
+                // 所以压制的办法是把计时器预置成「加完也够不着」，两条都要压。
+                // 这条是 MegaLightPatches 的教训，不是这里重新发现的。
+                MegaLightPatches.Suppress(ref component);
+
+                return 0;
+            }
+
             if (MegaLightPatches.IsLightDependent(factory, component.entityId))
             {
                 cycles = MegaLightPatches.ScaleCycles(factory, ref component, cycles);

@@ -411,6 +411,145 @@
       "tintR": 0.62,
       "tintG": 0.78,
       "tintB": 0.88
+    },
+
+    {
+      "//": "**反物质产线，第一座：压缩与蒸发合成一座。** 原方案是「奇点压缩机 → 微型黑洞 → 霍金辐射采集器」两座建筑加一个中间物品，合并掉了——理由是物理不是取舍：180 GJ ÷ c² = 2.0 mg，τ ≈ 8.4×10⁻¹⁷(M/kg)³ s 给出寿命 6.7×10⁻³⁴ 秒，比一个 tick（1/60 秒）短约 32 个数量级。那个黑洞不可能存在到「能被放进储物格」的地步。合并顺带消掉三件实现成本：虚拟物流瞬移（巨型建筑本身就是物流站，黑洞只要是物品就一定会被 MegaVirtualLogisticsPatches 瞬移）、StackSize=1 的豁免口子（ItemStackSizePatches 会把每一个物品压平到 10000，循环里没有排除表）、以及多产物 UI（2 个产物正好是原版 UIAssemblerWindow 展开的上限）。",
+      "//power": "3.0 GW = 2.4（压缩）+ 0.6（采集）。workEnergyPerTick = 功率 ÷ 60。**耗电和速度是解耦的**——SetPCState 按 workEnergyPerTick 算、不看 speed，所以「慢而且极耗电」不需要任何新机制。",
+      "//speed": "**注意：cyclesPerTick 现在还是全局配置，这座和另外九座跑一样的速度。** 要让它真正慢下来得两步：先把 cyclesPerTick 挪进逐建筑字段，再上跳 tick（MegaLightPatches 的 time = -speedOverride - 1 那一招，两个计时器都要压）。而且 cyclesPerTick=1 并不是慢速——speed=1e8 之下配方时间完全不起作用，一 tick 结算一个周期就是 60 次/秒。详见 反物质设计.md 第六节。",
+      "itemId": 6683,
+      "//throttle": "**这一组四座共用 tickDivider = 70，那不是巧合，是配平。** 一次炉子循环出 8 霍金辐射 + 4 高能γ光子，正好喂满磁分离塔一轮（吃 8）和对产生室一轮（吃 4），而这两座各出 2 反质子 / 2 正电子，又正好喂满彭宁阱一轮——整条链是 1:1:1:1，所以四座该跑同样的**周期/秒**。60 ÷ 70 ≈ 0.857 次/秒。\n\n**注意「倍率」在这里已经不是配平的单位了。** speed = 1e8 之下配方自己的秒数不控制吞吐（一个 tick 就能把 timeSpend 填满），所以同样的 0.857 次/秒，对 35 秒的炉子是 30 倍、对 8 秒的对产生室是 6.9 倍。**要配平一条链，对齐的是分频数，不是倍率。**\n\n换算：某配方 t 秒、想要 n 倍速 → tickDivider ≈ 60t/n。",
+      "cyclesPerTick": 1,
+      "tickDivider": 70,
+      "modelId": 690,
+      "recipeId": 6693,
+      "displayName": "视界蒸发炉",
+      "description": "把一整柜的电压进一个针尖大的地方，让时空自己合拢，再接住它还回来的东西。腔内那个东西的寿命短到没有任何仪器测得出，只能从蒸发谱反推——而它蒸发出来的不是光，是一整个温度谱上的全部粒子，正反成对。这座炉子唯一的产物，就是那一包还没来得及湮灭的东西。",
+      "iconName": "horizon-evaporator",
+      "recipeType": 19,
+      "machineTypeName": "视界蒸发设备",
+      "gridRow": 1,
+      "gridCol": 14,
+      "slot": 13,
+      "idleEnergyPerTick": 8000000,
+      "workEnergyPerTick": 50000000,
+      "recipeItemIds": [
+        6671,
+        6672,
+        6005
+      ],
+      "recipeItemCounts": [
+        200,
+        50,
+        1000
+      ],
+      "recipeTimeSpend": 900,
+      "modelScale": 0.70,
+      "modelHeightScale": 1.10,
+      "tintR": 0.713,
+      "tintG": 0.506,
+      "tintB": 0.920
+    },
+
+    {
+      "//": "**第二座：按电荷把蒸发谱劈开。** 正反粒子成对出现，而质子和反质子电荷相反，磁场一加就往相反方向偏转。所以这座**必然**同时产出正常物质那一半——6 个氢是物理要求的，不是白送的平衡数字，配方那边写了 energyNote。",
+      "itemId": 6684,
+      "cyclesPerTick": 1,
+      "tickDivider": 70,
+      "modelId": 689,
+      "recipeId": 6694,
+      "displayName": "磁分离塔",
+      "description": "一根从底贯到顶的场管，里头的磁场强到能把一束混着正反的粒子掰成两股。左边那股接进氢的管线，右边那股接进一只从不碰壁的容器——整座塔的结构，本质上只是为了让那两股在离开之前永远不再相遇。",
+      "iconName": "magnetic-separator",
+      "recipeType": 20,
+      "machineTypeName": "磁分离设备",
+      "gridRow": 2,
+      "gridCol": 1,
+      "slot": 15,
+      "idleEnergyPerTick": 1300000,
+      "workEnergyPerTick": 8000000,
+      "recipeItemIds": [
+        6670,
+        6003
+      ],
+      "recipeItemCounts": [
+        300,
+        600
+      ],
+      "recipeTimeSpend": 600,
+      "modelScale": 0.58,
+      "modelHeightScale": 1.45,
+      "tintR": 0.506,
+      "tintG": 0.886,
+      "tintB": 0.920
+    },
+
+    {
+      "//": "**第三座：对产生。** γ光子在重核的库仑场里凭空生成电子-正电子对。**靶用碳化钨是有依据的**：对产生截面正比于 Z²，钨的 Z=74，高 Z 材料就是干这个用的。电子被靶材吸收、只引出正电子，是简化，写在物品描述里。",
+      "itemId": 6685,
+      "cyclesPerTick": 1,
+      "tickDivider": 70,
+      "modelId": 688,
+      "recipeId": 6695,
+      "displayName": "对产生室",
+      "description": "一间贴满钨的厚壁屋子，光束从一头打进去，从另一头引出来的却是物质。能量足够高的光子会在原子核的场里把自己变成一对电子——负的那个留在墙里发热，正的那个被电极领走。屋子越厚，领走的越多。",
+      "iconName": "pair-production-chamber",
+      "recipeType": 21,
+      "machineTypeName": "对产生设备",
+      "gridRow": 2,
+      "gridCol": 2,
+      "slot": 16,
+      "idleEnergyPerTick": 1000000,
+      "workEnergyPerTick": 6000000,
+      "recipeItemIds": [
+        6589,
+        6004
+      ],
+      "recipeItemCounts": [
+        400,
+        600
+      ],
+      "recipeTimeSpend": 480,
+      "modelScale": 0.80,
+      "modelHeightScale": 0.70,
+      "tintR": 0.817,
+      "tintG": 0.920,
+      "tintB": 0.506
+    },
+
+    {
+      "//": "**第四座：在彭宁阱里把两种反粒子合成反氢。** 合成之后它是中性的，磁场按不住，只能靠真空本身隔开——所以这座要持续吃吸气剂。**那是整条设计里唯一一条「非物料、而是环境条件」的约束**：吸气剂不进产物，只维持真空，吸附饱和就得换，而再生每轮损耗 1/3。断了不是产量下降，是整条线停摆。",
+      "itemId": 6686,
+      "cyclesPerTick": 1,
+      "tickDivider": 70,
+      "modelId": 687,
+      "recipeId": 6696,
+      "displayName": "彭宁阱复合室",
+      "description": "把两种反粒子放进同一个阱里，慢下来，让它们自己找到对方。成品是一团中性的反氢——不再带电，于是磁场按不住它，唯一还能把它和世界隔开的只剩真空本身。而那点真空不是泵维持的，是墙上那几块海绵维持的；海绵吃饱的那一刻，这间屋子就不再是安全的。",
+      "iconName": "penning-trap",
+      "recipeType": 22,
+      "machineTypeName": "反物质复合设备",
+      "gridRow": 2,
+      "gridCol": 3,
+      "slot": 17,
+      "idleEnergyPerTick": 800000,
+      "workEnergyPerTick": 5000000,
+      "recipeItemIds": [
+        6671,
+        6638,
+        6005
+      ],
+      "recipeItemCounts": [
+        100,
+        200,
+        800
+      ],
+      "recipeTimeSpend": 600,
+      "modelScale": 0.76,
+      "modelHeightScale": 0.85,
+      "tintR": 0.920,
+      "tintG": 0.506,
+      "tintB": 0.713
     }
   ],
   "//replicatorPages": "合成器（Ctrl+替换/制造界面）横向翻页的总页数，每页 14 列。原版每个分页是 8 行 × 14 列、第 1 页几乎满了；开了之后底部会出现一根横向滚动条，可以左右拉动看后面几页。1 = 维持原版、不加滚动条。注意第 9 行及以后原版根本不画（RefreshRecipeIcons 里 row >= 8 直接跳过），所以扩容只能往列上走。",

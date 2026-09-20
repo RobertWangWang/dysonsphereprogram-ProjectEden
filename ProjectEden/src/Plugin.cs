@@ -164,6 +164,11 @@ namespace ProjectEden
             LDBTool.PreAddDataAction += MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MachineRegistry.OnPostAddData;
 
+            // 延后物品引用（ores.json 的配方引用 machines.json 的物品）**必须排在这一行之后**：
+            // 要找的物品就是上一行注册的。见 LateItemRef——改的是 Items[] 的值不是长度，
+            // 而 LDBTool 在整个 PostAddDataAction 之后才重建 recipeExecuteData，所以是免费的。
+            LDBTool.PostAddDataAction += Utils.LateItemRef.ResolveAll;
+
             // 巨型建筑的能量枢纽段：**必须排在 MachineRegistry 之后**。
             // 它要的空/满蓄电器物品号是那边注册的，而巨型建筑本身注册在机器之前——
             // 早一步写进去的是 0，后果是「枢纽建好了、皮带接上了、一个柜子也不收」，
@@ -311,6 +316,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= OreRegistry.OnPostAddData;
             LDBTool.PreAddDataAction -= MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= MachineRegistry.OnPostAddData;
+            LDBTool.PostAddDataAction -= Utils.LateItemRef.ResolveAll;
             LDBTool.PostAddDataAction -= Patches.MiniMinerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= BeltSpeedPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= MetalPropertyPatches.OnPostAddData;

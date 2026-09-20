@@ -748,6 +748,228 @@ namespace ProjectEden.Model
                          0.16f * U, S.Grating);
         }
 
+        // ══ 反物质产线：四座 ═══════════════════════════════════════
+        //
+        // 这四座的剪影是**成组挑的**，不是各挑各的。前十二座里已经占掉了
+        // 细高精馏塔、矮胖燃烧筒、对撞环、圆顶罐、温室、池子，所以这一组走四个还空着的方向：
+        //
+        //   视界蒸发炉      悬空的球        ← 整组唯一的球，而且底下留缝
+        //   磁分离塔        顶端分岔的细塔   ← 整组唯一在顶上裂成两条的
+        //   对产生室        矮宽厚壁盒      ← 整组最扁的
+        //   彭宁阱复合室    躺平的环        ← 观微对撞机是立环，这座是躺环
+        //
+        // 每一座的 modelScale / modelHeightScale 都在 megabuildings.json 里单配，
+        // 因为 Place() 会把形体缩进参照包围盒——不单配的话，高的那座会被压扁两次
+        // （高度封顶把缩放拉低、footprint 跟着缩），十二座长得一模一样就是这么来的。
+
+        /// <summary>
+        /// 视界蒸发炉：三根柱子把一只球架空，球里是塌缩点，外面两道正交的约束环。
+        ///
+        /// <b>悬空是这座唯一需要读懂的东西</b>，所以底座和球之间留了明显一段柱子，
+        /// 而不是让球坐在座上——坐上去就读成又一只圆顶罐了。
+        /// </summary>
+        private static void HorizonEvaporator(MeshKit k)
+        {
+            // 底座：宽而矮，压住整个footprint
+            k.AddBox(new Vector3(0f, 0.11f * U, 0f), new Vector3(2.3f * U, 0.22f * U, 2.3f * U),
+                     S.Concrete, S.Grating);
+
+            const float ballY = 1.42f * U;
+            const float ballR = 0.62f * U;
+
+            // 三根支柱。三根而不是四根：三点定位是「架起来」，四点容易读成「笼子」
+            for (var i = 0; i < 3; i++)
+            {
+                float a = i * Mathf.PI * 2f / 3f + 0.4f;
+                var at = new Vector3(Mathf.Cos(a) * 0.78f * U, 0.22f * U, Mathf.Sin(a) * 0.78f * U);
+
+                k.AddCone(at, 0.11f * U, 0.06f * U, ballY - 0.22f * U, 8, S.PlateRivet);
+
+                // 柱脚的警示环，顺带给尺度感
+                k.AddTorus(new Vector3(at.x, at.y + 0.06f * U, at.z),
+                           0.13f * U, 0.028f * U, 12, 5, S.Hazard);
+            }
+
+            // 球体本身。用上下两个圆台拼，比真球省面，而且在 LOD 下看不出差别
+            k.AddCone(new Vector3(0f, ballY - ballR, 0f), 0.16f * U, ballR, ballR, 20, S.PlateLight);
+            k.AddCone(new Vector3(0f, ballY, 0f), ballR, 0.16f * U, ballR, 20, S.PlateLight);
+
+            // 赤道那一圈亮带：腔内透出来的光。图标上也有，两边要对得上
+            k.AddTorus(new Vector3(0f, ballY, 0f), ballR + 0.012f * U, 0.05f * U, 24, 6, S.Glow);
+
+            // 两道正交的约束环。一道读成土星，两道才读成「约束」
+            k.AddTorus(new Vector3(0f, ballY, 0f), ballR + 0.20f * U, 0.055f * U, 28, 7, S.PlateDark);
+
+            for (var i = 0; i < 16; i++)
+            {
+                // 竖环用一圈小块拼出来——AddTorus 只能躺平，立环得自己摆
+                float a = i * Mathf.PI * 2f / 16f;
+                float rr = ballR + 0.20f * U;
+
+                k.AddBox(new Vector3(Mathf.Cos(a) * rr, ballY + Mathf.Sin(a) * rr, 0f),
+                         new Vector3(0.11f * U, 0.11f * U, 0.10f * U), S.PlateDark);
+            }
+
+            // 供电母线：3 GW 要有个说法。粗竖管从底座接到球下方
+            k.AddCylinder(new Vector3(1.02f * U, 0.22f * U, 0f), 0.15f * U, ballY - 0.4f * U,
+                          10, S.Pipe, S.PlateDark);
+            k.AddTorus(new Vector3(1.02f * U, ballY - 0.24f * U, 0f),
+                       0.17f * U, 0.04f * U, 14, 5, S.Accent);
+
+            k.AddRailing(new Vector3(0f, 0f, 0f), 1.12f * U, 1.12f * U, 0.22f * U, 0.16f * U, S.Hazard);
+        }
+
+        /// <summary>
+        /// 磁分离塔：一根细高的场管，沿途四道线圈，顶端裂成两条。
+        /// <b>分岔是它的识别键</b>——整组唯一一个在顶上分两路的剪影。
+        /// </summary>
+        private static void MagneticSeparator(MeshKit k)
+        {
+            k.AddBox(new Vector3(0f, 0.12f * U, 0f), new Vector3(1.5f * U, 0.24f * U, 1.5f * U),
+                     S.Concrete, S.Grating);
+
+            const float towerR = 0.30f * U;
+            const float towerH = 2.55f * U;
+            var baseAt = new Vector3(0f, 0.24f * U, 0f);
+
+            k.AddCylinder(baseAt, towerR, towerH, 16, S.PlateLight, S.PlateDark);
+
+            // 四道线圈，越往上越密——场强梯度，图标上也是这么画的
+            float[] coilY = { 0.45f, 1.15f, 1.72f, 2.16f };
+
+            foreach (float t in coilY)
+                k.AddTorus(new Vector3(0f, baseAt.y + t * U, 0f),
+                           towerR + 0.05f * U, 0.075f * U, 20, 6, S.Accent);
+
+            // 爬梯：细塔需要它给尺度
+            k.AddGreebleRow(new Vector3(0f, baseAt.y + 0.3f * U, towerR),
+                            new Vector3(0f, baseAt.y + towerH - 0.2f * U, towerR),
+                            10, new Vector3(0.20f * U, 0.035f * U, 0.05f * U), S.Hazard);
+
+            // 顶端分岔：两根斜管往相反方向伸出去，各自顶一个小罐
+            float top = baseAt.y + towerH;
+
+            for (var s = -1; s <= 1; s += 2)
+            {
+                var at = new Vector3(s * 0.16f * U, top - 0.1f * U, 0f);
+
+                // 斜管用一串小盒拼，AddCone 拉不出斜的
+                for (var i = 0; i < 5; i++)
+                {
+                    float f = i / 4f;
+
+                    k.AddBox(new Vector3(at.x + s * f * 0.44f * U, at.y + f * 0.30f * U, 0f),
+                             new Vector3(0.16f * U, 0.13f * U, 0.13f * U), S.Pipe);
+                }
+
+                var tip = new Vector3(at.x + s * 0.50f * U, at.y + 0.34f * U, 0f);
+
+                k.AddCylinder(tip, 0.15f * U, 0.22f * U, 10, S.PlateRivet, S.Glow);
+            }
+        }
+
+        /// <summary>
+        /// 对产生室：矮、宽、厚壁。正面开一个凹口露出钨靶，屋顶一排散热片。
+        /// <b>整组最扁的一座</b>，和旁边的磁分离塔正好相反。
+        /// </summary>
+        private static void PairProductionChamber(MeshKit k)
+        {
+            k.AddBox(new Vector3(0f, 0.10f * U, 0f), new Vector3(2.5f * U, 0.20f * U, 2.5f * U),
+                     S.Concrete, S.Grating);
+
+            // 主体：一个扁盒。厚壁靠「外壳 + 内嵌一层更暗的」两层表达
+            k.AddBox(new Vector3(0f, 0.62f * U, 0f), new Vector3(2.1f * U, 0.84f * U, 1.7f * U),
+                     S.PlateRivet, S.PlateDark);
+
+            // 正面凹口：往里退一截的小盒，表面用暗板，读起来就是「挖进去了」
+            k.AddBox(new Vector3(0f, 0.58f * U, 0.72f * U),
+                     new Vector3(0.94f * U, 0.56f * U, 0.30f * U), S.PlateDark);
+
+            // 钨靶：凹口正中的一排竖板
+            for (var i = -2; i <= 2; i++)
+                k.AddBox(new Vector3(i * 0.15f * U, 0.58f * U, 0.80f * U),
+                         new Vector3(0.07f * U, 0.42f * U, 0.10f * U), S.PlateDark);
+
+            // 入射口：左侧一根粗管，指向凹口。光束从这里打进去
+            k.AddCylinder(new Vector3(-1.28f * U, 0.58f * U, 0.72f * U), 0.17f * U, 0.34f * U,
+                          10, S.Pipe, S.Glow);
+
+            for (var i = 0; i < 4; i++)
+                k.AddBox(new Vector3(-1.05f * U + i * 0.20f * U, 0.58f * U, 0.72f * U),
+                         new Vector3(0.18f * U, 0.16f * U, 0.16f * U), S.Pipe);
+
+            // 屋顶散热片：矮建筑需要竖直细节，否则整座全是横线
+            for (var i = -3; i <= 3; i++)
+                k.AddBox(new Vector3(i * 0.26f * U, 1.16f * U, 0f),
+                         new Vector3(0.10f * U, 0.24f * U, 1.4f * U), S.Vent);
+
+            // 两侧的屏蔽块：厚壁的实体化。不画的话「厚」只是句话
+            for (var s = -1; s <= 1; s += 2)
+                k.AddBox(new Vector3(s * 1.12f * U, 0.50f * U, 0f),
+                         new Vector3(0.22f * U, 0.72f * U, 1.5f * U), S.PlateDark);
+
+            k.AddRailing(new Vector3(0f, 0f, 0f), 1.22f * U, 1.22f * U, 0.20f * U, 0.15f * U, S.Hazard);
+        }
+
+        /// <summary>
+        /// 彭宁阱复合室：一只躺平的大环，上下两片极板夹着环心，环上四块吸气剂。
+        ///
+        /// <b>和观微对撞机的区别要读得出来</b>：那一座是立着的加速环（东西在环上跑），
+        /// 这一座是躺平的阱（东西停在环心）。所以这里必须有「环心有东西」这件事——
+        /// 上下两片极板就是干这个的，它们把视线引到中间。
+        /// </summary>
+        private static void PenningTrap(MeshKit k)
+        {
+            k.AddBox(new Vector3(0f, 0.11f * U, 0f), new Vector3(2.2f * U, 0.22f * U, 2.2f * U),
+                     S.Concrete, S.Grating);
+
+            const float ringY = 0.74f * U;
+            const float major = 0.86f * U;
+
+            // 主环：躺平，粗
+            k.AddTorus(new Vector3(0f, ringY, 0f), major, 0.17f * U, 28, 8, S.PlateLight);
+
+            // 环上的分段壳体：让环不是一根光管
+            for (var i = 0; i < 8; i++)
+            {
+                float a = i * Mathf.PI * 2f / 8f;
+
+                k.AddBox(new Vector3(Mathf.Cos(a) * major, ringY, Mathf.Sin(a) * major),
+                         new Vector3(0.26f * U, 0.26f * U, 0.26f * U), S.PlateRivet);
+            }
+
+            // 四块吸气剂：贴在环的四个方位，用百叶表面（多孔的那个意思）
+            for (var i = 0; i < 4; i++)
+            {
+                float a = i * Mathf.PI / 2f + Mathf.PI / 4f;
+
+                k.AddBox(new Vector3(Mathf.Cos(a) * (major + 0.22f * U), ringY,
+                                     Mathf.Sin(a) * (major + 0.22f * U)),
+                         new Vector3(0.30f * U, 0.34f * U, 0.30f * U), S.Vent, S.Accent);
+            }
+
+            // 上下两片极板：把视线引到环心。锥台，口朝内
+            k.AddCone(new Vector3(0f, ringY + 0.46f * U, 0f), 0.42f * U, 0.16f * U,
+                      0.20f * U, 16, S.PlateDark, S.PlateLight);
+            k.AddCone(new Vector3(0f, ringY - 0.40f * U, 0f), 0.16f * U, 0.42f * U,
+                      0.20f * U, 16, S.PlateDark, S.PlateLight);
+
+            // 环心那一点：亮。整座建筑的视觉焦点
+            k.AddCylinder(new Vector3(0f, ringY - 0.12f * U, 0f), 0.10f * U, 0.24f * U,
+                          8, S.Glow);
+
+            // 三根支柱把环撑在底座上
+            for (var i = 0; i < 3; i++)
+            {
+                float a = i * Mathf.PI * 2f / 3f;
+
+                k.AddCone(new Vector3(Mathf.Cos(a) * major, 0.22f * U, Mathf.Sin(a) * major),
+                          0.13f * U, 0.09f * U, ringY - 0.30f * U, 8, S.PlateDark);
+            }
+
+            k.AddRailing(new Vector3(0f, 0f, 0f), 1.06f * U, 1.06f * U, 0.22f * U, 0.16f * U, S.Hazard);
+        }
+
         internal static bool Apply(ref PrefabDesc desc, int itemId, string debugName)
         {
             var kit = new MeshKit();
@@ -766,6 +988,10 @@ namespace ProjectEden.Model
                 case 6509: RedoxBurner(kit); break;
                 case 6659: RefineryPlant(kit); break;
                 case 6676: SingularityVault(kit); break;
+                case 6683: HorizonEvaporator(kit); break;
+                case 6684: MagneticSeparator(kit); break;
+                case 6685: PairProductionChamber(kit); break;
+                case 6686: PenningTrap(kit); break;
                 default: return false;
             }
 

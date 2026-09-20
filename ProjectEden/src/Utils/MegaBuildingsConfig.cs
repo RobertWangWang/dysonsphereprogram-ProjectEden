@@ -242,6 +242,29 @@ namespace ProjectEden.Utils
         public long workEnergyPerTick;
 
         /// <summary>
+        /// 这一座每 tick 结算几个配方周期。**0 = 跟顶层那个全局值**。
+        ///
+        /// <b>它不是「倍速」旋钮，填 1 也不是 1 倍速。</b> <c>speed</c> 是 1e8，
+        /// 比任何配方的 <c>timeSpend</c> 大一两个数量级，所以一个 tick 就能把计时器填满——
+        /// 填 1 就是 60 次/秒，对一条 35 秒的配方而言是 <b>2100 倍</b>。
+        /// 真要慢下来看 <see cref="tickDivider"/>。
+        /// </summary>
+        public int cyclesPerTick;
+
+        /// <summary>
+        /// 几个 tick 才让这一座结算一次。**0 或 1 = 每 tick 都结算**。
+        ///
+        /// 这才是真正能把巨型建筑拉慢的那个旋钮：<c>cyclesPerTick</c> 的下界是 1，
+        /// 而 1 已经是 60 次/秒；要更慢只能让它**有些 tick 干脆不产**。
+        /// 实现复用 <see cref="MegaLightPatches.Suppress"/>（生物温室晚上停产那一套），
+        /// 带 <c>entityId</c> 错帧，缺电时自动拉长——见 <see cref="MegaThrottle"/>。
+        ///
+        /// 换算：某配方 <c>t</c> 秒，想要 <c>n</c> 倍速 → <c>tickDivider ≈ 60t / n</c>。
+        /// 例：35 秒配方要 20 倍速 → 60×35/20 = <b>105</b>。
+        /// </summary>
+        public int tickDivider;
+
+        /// <summary>
         /// 发电段。配了这一段，这座巨型建筑就<b>同时</b>是一台发电机。
         ///
         /// <b>这不是在绕过组件模型，是组件模型本来就允许。</b>

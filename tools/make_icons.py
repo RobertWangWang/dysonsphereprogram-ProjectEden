@@ -3213,6 +3213,393 @@ def core_stabiliser():
     return d
 
 
+# ══ 反物质产线 ═══════════════════════════════════════════════════
+#
+# 六个中间物 + 四座建筑。整组的读图逻辑是**一条看得见的顺序**：
+#
+#   霍金辐射（一团什么都有的热谱）
+#     → 磁场掰开 → 反质子（负号、被按住）／氢（走掉，不画）
+#   高能γ光子（一束硬到能造物质的光）
+#     → 打进钨靶 → 正电子（正号、被引走）
+#   反质子 + 正电子 → 反物质（原版物品，不画）
+#
+# 所以**电荷符号**是这一组的识别键：反质子画「−」、正电子画「＋」，
+# 两张用同一个壳、同一个约束环，只有中心的符号和色相相反。
+# 吸气剂那一对走另一条路——孔隙的有无，和沸石催化剂／待生那一对同构。
+
+
+def _containment(d, cx, cy, r, pal, ring="#8e94a3"):
+    """约束球：一只透明腔 + 两道正交的场环。反粒子那几张共用这个壳。
+
+    反物质在这个宇宙里唯一的共同点就是「碰不得」，所以它们的图标必须先读出
+    「被关着」，再读出「关的是什么」。壳画一样、芯不一样，两张并排时差别才明显。
+    """
+    top, left, right, edge = pal
+
+    # 腔体：偏暗的球，留出中心给内容物
+    d.append(dw.Circle(cx, cy, r, fill=right, stroke=edge, stroke_width=1.5,
+                       fill_opacity=0.55))
+    # 左上高光，让球是球不是饼
+    d.append(dw.Circle(cx - r * 0.34, cy - r * 0.36, r * 0.30, fill=top,
+                       fill_opacity=0.40, stroke="none"))
+
+    # 两道场环：一横一斜，正交。只有一道会读成土星，两道才读成「约束」
+    ring_dark = _shade(ring, 0.5)
+
+    d.append(dw.Ellipse(cx, cy, r * 1.22, r * 1.22 * ISO, fill="none",
+                        stroke=ring, stroke_width=2.6))
+    d.append(dw.Ellipse(cx, cy, r * 1.22 * ISO, r * 1.22, fill="none",
+                        stroke=ring_dark, stroke_width=2.2))
+
+
+def _sign(d, cx, cy, size, color, minus=False):
+    """电荷符号。加号两笔、减号一笔，线帽是圆的——80px 下方头会糊成方块。"""
+    d.append(dw.Line(cx - size, cy, cx + size, cy, stroke=color,
+                     stroke_width=size * 0.62, stroke_linecap="round"))
+
+    if not minus:
+        d.append(dw.Line(cx, cy - size, cx, cy + size, stroke=color,
+                         stroke_width=size * 0.62, stroke_linecap="round"))
+
+
+def hawking_radiation():
+    """霍金辐射：**一团什么都有的东西**，不是一束光。
+
+    物理上 2 mg 黑洞的 T_H ≈ 6×10²⁸ K，远在一切粒子质量之上，所以蒸发谱是
+    全谱粒子、正反成对。图上就按这个画：中心一个塌缩点，四周**大小和颜色都不齐**
+    的粒子往外飞，冷暖混着——刻意不画成单色，单色会读成「一种辐射」。
+    """
+    d = canvas()
+
+    core = "#e7d9ff"
+    shell = _pal("#6f4fb0")
+
+    # 外层辉光：由内到外三圈，越外越淡
+    for r, op in ((30, 0.10), (22, 0.16), (14, 0.26)):
+        d.append(dw.Circle(0, 0, r, fill=core, fill_opacity=op, stroke="none"))
+
+    # 视界：中心那个黑点。留一圈亮边，否则在深色 UI 上直接消失
+    d.append(dw.Circle(0, 0, 7.0, fill="#120a1e", stroke="#c9a9ff", stroke_width=1.6))
+
+    # 蒸发出来的粒子：八个方向，冷暖交替、大小不一
+    warm, cold = "#ffd479", "#8fd9ff"
+
+    for i in range(8):
+        a = math.radians(i * 45 + 12)
+        dist = 17.5 + (3.6 if i % 3 == 0 else 0)
+        rr = 3.4 if i % 2 == 0 else 2.3
+        col = warm if i % 2 == 0 else cold
+
+        d.append(dw.Circle(math.cos(a) * dist, math.sin(a) * dist, rr,
+                           fill=col, stroke=shell[3], stroke_width=0.9))
+
+        # 尾迹：一小段朝外的线，说明它在往外跑
+        d.append(dw.Line(math.cos(a) * (dist + rr + 1.0), math.sin(a) * (dist + rr + 1.0),
+                         math.cos(a) * (dist + rr + 6.0), math.sin(a) * (dist + rr + 6.0),
+                         stroke=col, stroke_width=1.5, stroke_opacity=0.7,
+                         stroke_linecap="round"))
+
+    return d
+
+
+def gamma_photon():
+    """高能γ光子：**一束硬光**，和霍金辐射那一团正好相反。
+
+    必须和原版临界光子一眼分得开（它俩在配方里是两种东西，混了就等于让玩家
+    绕开整条链走原版的质能转换器）。所以这张**不画球、不画团**：
+    只有一道笔直穿过画面的锐利光束，加两道尾随的波前。方向感是它的识别键。
+    """
+    d = canvas()
+
+    beam = "#dfffa8"
+    hot = "#ffffff"
+    edge = _shade("#5f7d22", 1.0)
+
+    # 主光束：从左下到右上，中间最亮
+    d.append(dw.Line(-30, 24, 30, -24, stroke=edge, stroke_width=9.0,
+                     stroke_linecap="round"))
+    d.append(dw.Line(-30, 24, 30, -24, stroke=beam, stroke_width=5.4,
+                     stroke_linecap="round"))
+    d.append(dw.Line(-22, 17, 22, -17, stroke=hot, stroke_width=2.0,
+                     stroke_linecap="round", stroke_opacity=0.92))
+
+    # 两道波前：垂直于光束的短横，越往前越疏——说明它在跑，而且能量极高
+    for t, ln, op in ((-0.62, 9.5, 0.85), (-0.16, 7.5, 0.6), (0.34, 5.5, 0.4)):
+        cx, cy = t * 30, -t * 24
+        nx, ny = -24 / 38.4, -30 / 38.4    # 光束方向的法线
+
+        d.append(dw.Line(cx - nx * ln, cy - ny * ln, cx + nx * ln, cy + ny * ln,
+                         stroke=beam, stroke_width=2.4, stroke_opacity=op,
+                         stroke_linecap="round"))
+
+    # 起点的一点爆闪，说明它是「被造出来」的不是「一直在那儿」
+    d.append(dw.Circle(-30, 24, 4.6, fill=hot, fill_opacity=0.8, stroke="none"))
+
+    return d
+
+
+def antiproton():
+    """反质子：约束球 + 负号。和正电子是一对，壳相同、芯相反。"""
+    d = canvas()
+
+    pal = _pal("#4a6fd0")
+
+    _containment(d, 0, 0, 20.0, pal)
+
+    # 芯：一团偏冷的重粒子。反质子比正电子重一千多倍，所以这颗画得饱满
+    d.append(dw.Circle(0, 0, 10.2, fill="#7fa8ff", stroke=pal[3], stroke_width=1.5))
+    d.append(dw.Circle(-3.2, -3.4, 3.0, fill="#dbe8ff", fill_opacity=0.75, stroke="none"))
+
+    _sign(d, 0, 0, 5.2, "#12213f", minus=True)
+
+    return d
+
+
+def positron():
+    """正电子：约束球 + 加号。芯比反质子小得多——它是最轻的反物质。"""
+    d = canvas()
+
+    pal = _pal("#d05aa0")
+
+    _containment(d, 0, 0, 20.0, pal)
+
+    # 芯：小而亮。和反质子那颗的大小差别是刻意的，两张并排时一眼看出轻重
+    d.append(dw.Circle(0, 0, 6.6, fill="#ffc2e6", stroke=pal[3], stroke_width=1.4))
+    d.append(dw.Circle(-2.0, -2.2, 2.0, fill="#fff2fa", fill_opacity=0.8, stroke="none"))
+
+    _sign(d, 0, 0, 3.6, "#43103a")
+
+    return d
+
+
+def _getter(saturated):
+    """吸气剂：一块金属海绵。孔是空的还是塞满的，就是这一对的全部差别。
+
+    和沸石催化剂／待生沸石催化剂同构——同一个形制，孔隙相反、明暗相反。
+    多孔态偏冷亮（还能吸），饱和态偏暖暗（吃饱了、而且塌了一点）。
+    """
+    d = canvas()
+
+    base = "#c9a25a" if saturated else "#7fb6c9"
+    pal = _pal(base)
+    top, left, right, edge = pal
+
+    # 一块切角的方料，等距。切角是为了和「锭」区分开——锭是规整的六面体
+    d.append(dw.Path(fill=top, stroke=edge, stroke_width=1.5)
+             .M(0, -24).L(26, -10).L(0, 4).L(-26, -10).Z())
+    d.append(dw.Path(fill=left, stroke=edge, stroke_width=1.5)
+             .M(-26, -10).L(0, 4).L(0, 26).L(-26, 8).Z())
+    d.append(dw.Path(fill=right, stroke=edge, stroke_width=1.5)
+             .M(26, -10).L(0, 4).L(0, 26).L(26, 8).Z())
+
+    # 孔。顶面和两个侧面都要有，否则读成「表面有斑点」而不是「整块是多孔的」
+    holes_top = ((-9, -13), (2, -16), (11, -10), (-3, -8), (7, -4), (-13, -7))
+    holes_l = ((-19, 2), (-11, 7), (-19, 12), (-9, 16))
+    holes_r = ((18, 2), (10, 7), (18, 12), (8, 16))
+
+    if saturated:
+        # 饱和：孔里塞着东西。画成比基色亮一档的实心点，边缘压暗一圈
+        fill_c, stroke_c = _shade(base, 1.45), edge
+
+        for x, y in holes_top + holes_l + holes_r:
+            d.append(dw.Circle(x, y, 2.5, fill=fill_c, stroke=stroke_c, stroke_width=0.9))
+    else:
+        # 多孔：孔是洞。用比该面更暗的色填，读起来才是凹进去
+        for x, y in holes_top:
+            d.append(dw.Circle(x, y, 2.6, fill=_shade(base, 0.42), stroke="none"))
+        for x, y in holes_l:
+            d.append(dw.Circle(x, y, 2.3, fill=_shade(base, 0.34), stroke="none"))
+        for x, y in holes_r:
+            d.append(dw.Circle(x, y, 2.3, fill=_shade(base, 0.26), stroke="none"))
+
+    return d
+
+
+def porous_getter():
+    return _getter(False)
+
+
+def saturated_getter():
+    return _getter(True)
+
+
+def horizon_evaporator():
+    """视界蒸发炉：**一只笼子罩着一个塌缩点**，和 MegaBuildingMeshes 一一对应。
+
+    这一张要回答的是「凭什么一眼看出它不是又一座化工厂」。前面十几张里已经有
+    细高塔（综合化学厂）、矮胖筒（氧化还原燃烧厂）、对撞环（观微对撞机）、
+    圆顶罐（一堆），所以这一张**用球**——整组建筑里唯一的球形主体，
+    而且球是**悬空的**：底座和球之间留一道可见的缝，三根支柱把它架起来。
+    悬空是这张图唯一需要玩家读懂的东西。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6683)
+    steel = _pal("#8e94a3")
+
+    # 底座：宽而扁，压住画面下半
+    _prism(d, 0, 34, 42, 9, dark)
+    _prism(d, 0, 27, 36, 7, p, gloss=0.16)
+
+    # 三根支柱：把球架起来。左右两根可见，中间那根被球挡住，不画
+    for sx in (-19.0, 19.0):
+        d.append(dw.Path(fill=steel[1], stroke=steel[3], stroke_width=1.2)
+                 .M(sx - 3.0, 27).L(sx - 1.4, 2).L(sx + 1.4, 2).L(sx + 3.0, 27).Z())
+
+    # 约束笼：球外面两道正交的环。先画后环，球盖上去，再画前环 —— 才有穿插感
+    d.append(dw.Ellipse(0, -6, 24.0, 24.0 * ISO, fill="none",
+                        stroke=steel[2], stroke_width=3.0))
+
+    # 主体：球。整组建筑里唯一的球
+    d.append(dw.Circle(0, -6, 19.0, fill=p[2], stroke=dark[3], stroke_width=1.6))
+    d.append(dw.Circle(-6.4, -12.4, 6.6, fill=p[0], fill_opacity=0.55, stroke="none"))
+
+    # 腔内的塌缩点：一个黑心 + 一圈亮边。和霍金辐射那张的视界用同一套画法
+    d.append(dw.Circle(0, -6, 6.4, fill="#150c22", stroke="#c9a9ff", stroke_width=1.5))
+    d.append(dw.Circle(0, -6, 10.6, fill="#c9a9ff", fill_opacity=0.16, stroke="none"))
+
+    # 前环：压在球上，穿插就出来了
+    d.append(dw.Ellipse(0, -6, 24.0 * ISO, 24.0, fill="none",
+                        stroke=steel[0], stroke_width=3.0))
+
+    # 接电的粗母线：3 GW 要有个说法。画在底座右侧，向上接进笼子
+    d.append(dw.Rectangle(23.0, 4, 7.0, 24, fill=steel[1], stroke=steel[3], stroke_width=1.2))
+    d.append(dw.Rectangle(23.0, 4, 7.0, 5.5, fill="#ffd479", stroke=steel[3], stroke_width=1.0))
+
+    return d
+
+
+def magnetic_separator():
+    """磁分离塔：**一根细高的场管，顶上分出两股**。
+
+    识别键是「分岔」——整组建筑里唯一一张在顶端裂成两条的剪影。
+    左右两股用冷暖两色，正好对上配方的两个产物（氢／反质子）。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6684)
+    steel = _pal("#8e94a3")
+
+    _prism(d, 0, 34, 34, 9, dark)
+    _prism(d, 0, 27, 28, 7, p, gloss=0.16)
+
+    # 塔身：细、高，占满画面高度。这是它和其它几座最直接的差别
+    _cyl(d, 0, -26, 10.5, 53, p, cap_gloss=0.32)
+
+    # 磁场线圈：沿塔身四道箍，越往上越密 —— 场强梯度
+    for y, r in ((14, 11.6), (2, 11.4), (-8, 11.2), (-16, 11.0)):
+        d.append(dw.Ellipse(0, y, r, r * ISO, fill="none",
+                            stroke=steel[0], stroke_width=2.4))
+
+    # 顶端分岔：两条管子往左右上方伸出去，颜色相反
+    d.append(dw.Path(fill="none", stroke=dark[3], stroke_width=6.4, stroke_linecap="round")
+             .M(-2.5, -26).L(-19, -36))
+    d.append(dw.Path(fill="none", stroke="#8fd9ff", stroke_width=3.8, stroke_linecap="round")
+             .M(-2.5, -26).L(-19, -36))
+
+    d.append(dw.Path(fill="none", stroke=dark[3], stroke_width=6.4, stroke_linecap="round")
+             .M(2.5, -26).L(19, -36))
+    d.append(dw.Path(fill="none", stroke="#ffa0d0", stroke_width=3.8, stroke_linecap="round")
+             .M(2.5, -26).L(19, -36))
+
+    # 两个出口各一个小罐，说明「接出来了」而不是「喷出去了」
+    d.append(dw.Circle(-21.5, -37.5, 4.4, fill="#8fd9ff", stroke=dark[3], stroke_width=1.2))
+    d.append(dw.Circle(21.5, -37.5, 4.4, fill="#ffa0d0", stroke=dark[3], stroke_width=1.2))
+
+    return d
+
+
+def pair_production_chamber():
+    """对产生室：**一间矮胖的厚壁屋子**，一束光打进去、两颗粒子出来。
+
+    剪影刻意压扁（modelHeightScale 0.70），和旁边细高的磁分离塔形成对比。
+    厚壁是它的识别键：画出明显的壁厚，读起来才是「屏蔽」而不是「仓库」。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6685)
+    steel = _pal("#8e94a3")
+    tungsten = _pal("#6d6f78")
+
+    _prism(d, 0, 33, 44, 9, dark)
+
+    # 主体：矮、宽。顶面画大一点，压扁的感觉才出来
+    _prism(d, 0, 20, 40, 14, p, gloss=0.2)
+
+    # 厚壁：在主体正面开一个凹口，露出里面的钨靶。壁厚是这张图的主语
+    d.append(dw.Path(fill=tungsten[2], stroke=dark[3], stroke_width=1.4)
+             .M(-13, 12).L(13, 12).L(13, 28).L(-13, 28).Z())
+    d.append(dw.Path(fill=tungsten[1], stroke="none")
+             .M(-13, 12).L(-9, 15).L(-9, 25).L(-13, 28).Z())
+
+    # 钨靶：凹口正中的一片深色板，带竖向纹理
+    for x in (-6.0, -2.0, 2.0, 6.0):
+        d.append(dw.Rectangle(x - 1.2, 15, 2.4, 10, fill=tungsten[3], stroke="none"))
+
+    # 入射光束：从左上打进凹口，用和 gamma_photon 同一种绿
+    d.append(dw.Line(-34, -14, -9, 19, stroke="#5f7d22", stroke_width=7.0,
+                     stroke_linecap="round"))
+    d.append(dw.Line(-34, -14, -9, 19, stroke="#dfffa8", stroke_width=4.0,
+                     stroke_linecap="round"))
+
+    # 出射的一对：一正一负，从靶的右侧分开飞出。和反质子／正电子的配色对上
+    d.append(dw.Circle(20, 8, 4.2, fill="#ffc2e6", stroke=dark[3], stroke_width=1.2))
+    d.append(dw.Circle(26, 20, 3.4, fill="#7fa8ff", stroke=dark[3], stroke_width=1.2))
+    d.append(dw.Line(13, 17, 19, 10, stroke="#ffc2e6", stroke_width=1.8,
+                     stroke_opacity=0.8, stroke_linecap="round"))
+    d.append(dw.Line(13, 19, 24, 19, stroke="#7fa8ff", stroke_width=1.8,
+                     stroke_opacity=0.8, stroke_linecap="round"))
+
+    # 屋顶的散热片：矮建筑需要一点竖直细节，否则整张图全是横线
+    for x in (-15.0, -7.5, 0.0, 7.5, 15.0):
+        d.append(dw.Rectangle(x - 1.8, 4, 3.6, 8, fill=steel[1],
+                              stroke=steel[3], stroke_width=0.9))
+
+    return d
+
+
+def penning_trap():
+    """彭宁阱复合室：**一只躺平的环，中心悬着一点反氢**。
+
+    和观微对撞机那张同样有环，但那一张是**立着的大环**（加速器），
+    这一张是**躺平的小环 + 中心有东西**（阱）。区别读得出来：
+    加速器的环是空的、东西在环上跑；阱的环是空的、东西在环心停着。
+    墙上四块吸气剂是这座建筑独有的元素——它是唯一一座要吃「环境条件」的。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6686)
+    steel = _pal("#8e94a3")
+
+    _prism(d, 0, 34, 40, 9, dark)
+    _prism(d, 0, 27, 34, 7, p, gloss=0.16)
+
+    # 躺平的主环：等距椭圆，画粗一点
+    _ring(d, 0, 2, 25.0, 5.2, p)
+
+    # 上下两片极板：彭宁阱靠电四极场把粒子压在中心，画成两片水平盘
+    for y, pal_ in ((-11.0, steel), (13.0, steel)):
+        d.append(dw.Ellipse(0, y, 13.0, 13.0 * ISO, fill=pal_[1],
+                            stroke=pal_[3], stroke_width=1.3))
+
+    # 环心的反氢：一点亮芯 + 一圈晕。中性了，所以不画电荷符号
+    d.append(dw.Circle(0, 1, 9.0, fill="#ffb0dd", fill_opacity=0.22, stroke="none"))
+    d.append(dw.Circle(0, 1, 4.6, fill="#ffd7ee", stroke="#7d2a5e", stroke_width=1.4))
+
+    # 四块吸气剂：贴在环的四个方位。用多孔吸气剂那张的冷蓝，两处颜色要对得上
+    for a in (35, 145, 215, 325):
+        r = math.radians(a)
+        gx, gy = math.cos(r) * 25.0, math.sin(r) * 25.0 * ISO
+
+        d.append(dw.Rectangle(gx - 4.0, gy - 3.4, 8.0, 6.8, fill="#7fb6c9",
+                              stroke=dark[3], stroke_width=1.1))
+        # 两个孔，和吸气剂物品图标呼应
+        d.append(dw.Circle(gx - 1.6, gy, 1.1, fill=_shade("#7fb6c9", 0.4), stroke="none"))
+        d.append(dw.Circle(gx + 1.6, gy, 1.1, fill=_shade("#7fb6c9", 0.4), stroke="none"))
+
+    return d
+
+
 if __name__ == "__main__":
     render(aluminum_ingot(), "aluminum-ingot")
     render(carbon_dioxide(), "carbon-dioxide")
@@ -3357,3 +3744,18 @@ if __name__ == "__main__":
     # 原油的四个馏分：形体按稠度排成一列，理由见 naphtha()
     render(naphtha(), "naphtha")
     render(vgo(), "vgo")
+
+    # 反物质产线：六个中间物 + 四座建筑。
+    # 识别键：反质子／正电子共用约束球壳、只有电荷符号和色相相反；
+    # 霍金辐射是一团（全谱）、高能γ光子是一束（单向），两者刻意画成相反的形态。
+    render(hawking_radiation(), "hawking-radiation")
+    render(gamma_photon(), "gamma-photon")
+    render(antiproton(), "antiproton")
+    render(positron(), "positron")
+    render(porous_getter(), "porous-getter")
+    render(saturated_getter(), "saturated-getter")
+
+    render(horizon_evaporator(), "horizon-evaporator")
+    render(magnetic_separator(), "magnetic-separator")
+    render(pair_production_chamber(), "pair-production-chamber")
+    render(penning_trap(), "penning-trap")

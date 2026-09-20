@@ -734,8 +734,17 @@ namespace ProjectEden
                 if (entry == null || !entry.enabled) continue;
 
                 // 原料侧允许为空（零原料配方，比如光合育林）；产物侧不允许
+                _deferredSide.Clear();
+
                 if (!BuildSide(entry.items, owner, entry.name, "原料", out int[] items, out int[] itemCounts, true)) continue;
+
+                var lateItems = new List<KeyValuePair<int, string>>(_deferredSide);
+
+                _deferredSide.Clear();
+
                 if (!BuildSide(entry.results, owner, entry.name, "产物", out int[] results, out int[] resultCounts)) continue;
+
+                var lateResults = new List<KeyValuePair<int, string>>(_deferredSide);
 
                 var reg = new Recipe { Entry = entry };
 
@@ -768,6 +777,14 @@ namespace ProjectEden
                 };
 
                 recipe.name = entry.name;
+
+                // 延后引用要等 RecipeProto 建出来才登记得了——登记的是这个对象本身，
+                // PostAddDataAction 直接改它的数组。
+                foreach (KeyValuePair<int, string> d in lateItems)
+                    Utils.LateItemRef.Record(recipe, true, d.Key, d.Value, $"配方「{entry.name}」的原料");
+
+                foreach (KeyValuePair<int, string> d in lateResults)
+                    Utils.LateItemRef.Record(recipe, false, d.Key, d.Value, $"配方「{entry.name}」的产物");
 
                 LDBTool.PreAddProto(recipe);
 
@@ -853,16 +870,41 @@ namespace ProjectEden
 
             for (var i = 0; i < side.Length; i++)
             {
+                counts[i] = side[i].count > 0 ? side[i].count : 1;
+
+                // `machine:名字` —— machines.json 注册的物品，这一刻还不存在（那个注册器
+                // 排在本注册器之后，而且不能调换：它的建造配方要用我们来解析原料）。
+                // 先放一个真实的原版固体占位，登记下来，PostAddDataAction 再回来填真号。
+                // 见 LateItemRef：那一步改的是**值不是长度**，而 LDBTool 在那之后才
+                // 重建 recipeExecuteData，所以是免费的。
+                if (Utils.LateItemRef.IsLate(side[i].@ref, out string lateName))
+                {
+                    ids[i] = Utils.LateItemRef.Reserve();
+
+                    _deferredSide.Add(new KeyValuePair<int, string>(i, lateName));
+
+                    continue;
+                }
+
                 int id = ResolveRef(side[i], owner, recipeName, label);
 
                 if (id <= 0) return false;
 
                 ids[i] = id;
-                counts[i] = side[i].count > 0 ? side[i].count : 1;
             }
 
             return true;
         }
+
+        /// <summary>
+        /// <see cref="BuildSide"/> 这一趟攒下的延后引用：`(格位下标, 要找的物品名)`。
+        ///
+        /// 用一个共享的暂存表而不是 out 参数，是因为登记的时候还需要 <c>RecipeProto</c>
+        /// 对象本身，而它要等两侧都建完才 new 得出来。调用方每建一侧之前清一次、
+        /// 建完立刻取走。注册全程单线程（LDBTool 的回调），不需要 ThreadStatic。
+        /// </summary>
+        private static readonly List<KeyValuePair<int, string>> _deferredSide =
+            new List<KeyValuePair<int, string>>();
 
         /// <summary>
         /// 一格原料/产物 → 物品 ID。<c>ref</c> 取值：<c>ore</c> 本矿种的矿石、
