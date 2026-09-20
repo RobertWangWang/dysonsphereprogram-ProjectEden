@@ -206,6 +206,11 @@ namespace ProjectEden.Patches.Diagnostics
             sb.Append("要么这颗星球上的对象更少，要么把工厂摊到更多星球。");
 
             ProjectEdenPlugin.Log.LogInfo(sb.ToString());
+
+            // 紧跟着报「物流运输」那一栏的劈半，好让两张表说的是同一段时间。
+            // 逐任务表只能告诉你哪个任务贵，而本 mod 有六个后置就挂在最贵的那个任务里面——
+            // 那一刀原版的分析器结构上切不下去
+            TransportSplitProbe.ReportWindow();
         }
 
         /// <summary>
