@@ -1901,6 +1901,26 @@ Two things it did need: `madeFromString`'s 0 branch returns a bare `"-"` (`Recip
 
 **That makes the mega tab's slot and grid space shared across two config files, and nothing in either one says so.** 风力发电机集群 sits at build slot 7 / grid column 7 from `machines.json`; the seventh mega building was first written to the same pair in `megabuildings.json` and had to be moved to 8. The reservation ledger would have shifted one of them silently, and the visible result of a real collision is `UIBuildMenu.StaticLoad` overwriting `protos[category, slot]` — **one building simply missing from the build bar, with no error**. Check both files before picking a slot; `megabuildings.json`'s `//slot` on that entry says so at the point of use.
 
+**And "check both files" is too weak, because the same fact is stored under a different KEY in each
+file.** This shape has now cost three separate mistakes in one session, all of them the same move —
+grep one spelling, read the result as the whole occupancy table, ship a collision:
+
+| the fact | spellings that write it | what was missed |
+|---|---|---|
+| model id | `modelId` (megabuildings, machines) · **`veinModelId`** (ores) | four new buildings displaced 5 veins + 9 machines, a 14-deep cascade |
+| build slot | `slot` (megabuildings) · `megaTab` + `buildSlot`, `buildIndex` (machines) | slot 13 collided with 小型速采机; the log's 建造栏核对 lists **only** `megabuildings.json` |
+| replicator cell | `gridIndex` (ores, machines) · **`gridRow` + `gridCol`** (megabuildings, recipes) | cell 3201 collided with 原油X射线裂解 |
+
+**None of the three errors, and no diagnostic that exists, announces itself as a collision.**
+`ProtoSlots` shifts the loser and logs 「改用 X」 — which reads as a successful fallback and is
+really an unstable id (the rule two sections up: **pin it the first time you see that line**).
+The build-bar checker only knows one file. So the test cannot be "find the authoritative list",
+because there isn't one; it has to be **enumerate every spelling that can write this number**.
+`tools/check_slots.py` does that for all three, and the table above is the list to extend when a
+fourth spelling appears. Note it deliberately keeps **item and recipe grids separate** — they are
+two independent grids (`ProtoSlots.GridKind`) and may legally share a cell, so merging them
+reports false positives, which is its own way of making a real collision invisible.
+
 **Mecha fuel has a power multiplier as well as an energy total.** `Mecha.GenerateEnergy` computes `ratio = ItemProto.ReactorInc + 1` (then folds in the proliferator table) and multiplies `reactorPowerGen` by it, so `ReactorInc = 1.5` means **+150% power**. It scales *rate*, not *total* — `HeatValue` is still what determines how long one unit lasts, so a high `ReactorInc` drains each unit faster.
 
 **The vanilla spread that used to be quoted here was wrong in four of five entries, and it had been
