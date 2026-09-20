@@ -174,15 +174,26 @@ mega building's products, and the sky would be just as busy.
 | Titanium Ore | Titanium Ingot |
 | Fire Ice | Graphene |
 | Fractal Silicon | Crystal Silicon |
-| Optical Grating Crystal | Carbon Nanotube |
+| Spiniform Stalagmite Crystal | Carbon Nanotube |
+| Kimberlite Ore | Diamond |
 | **Iron Ore** | **Iron Ore** (left alone) |
 | Stone | Stone (it splits into Stone Brick or Glass, so no mapping) |
 | **Coal** | **Coal** (it is both a fuel and the feedstock for graphite, matrices and the whole chemistry chain) |
 
-> For the three rare ores the config records **only the vein type, never an item ID**: the ore is looked up from
+> For the four rare ores the config records **only the vein type, never an item ID**: the ore is looked up from
 > `VeinProto.MiningItem` at runtime, and the product is derived from the one vanilla recipe that takes just that ore.
 > Rare-ore item IDs are easy to get wrong; this way they cannot be. A failed derivation logs a WARNING rather than
 > silently doing nothing.
+
+**Kimberlite is the cleanest row in that table**: in vanilla its only downstream is the
+"Diamond (advanced)" recipe, so there is no second consumer that wants the ore form — contrast the
+three deliberately left alone (iron feeds a great deal as ore, stone splits into Stone Brick or
+Glass, coal is simultaneously a fuel and the feedstock for the whole chemistry chain). Smelting it
+at the source cuts nothing off. Diamond's **other** route, from graphite, is untouched: this
+changes what the miner digs up, not a single recipe.
+
+**Only the Advanced Mining Machine remaps.** Plain miners and the Small Rapid Miner still yield the
+raw ore, so Kimberlite Ore itself remains obtainable.
 
 ### Numbers
 

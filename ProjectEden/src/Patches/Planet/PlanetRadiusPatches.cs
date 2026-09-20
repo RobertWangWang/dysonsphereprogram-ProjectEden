@@ -167,6 +167,44 @@ namespace ProjectEden.Patches
             Enabled && Precision > 0 && precision == Precision;
 
         /// <summary>
+        /// 按天体 id 标记「这颗是被我们放大的行星」。
+        ///
+        /// <para><b>不能按半径值认人</b>：<c>GalaxyData.astrosData</c> 里<b>恒星和行星是混在一起的</b>
+        /// （<c>UniverseGen.CreateGalaxy</c> @02FE 写恒星、<c>PlanetGen.CreatePlanet</c> @0AAF 写行星），
+        /// 而恒星的 <c>uRadius</c> 是 <c>StarData.radius × 1200</c>，取值几百到上千——
+        /// <b>有可能正好等于我们的半径</b>。一张按 id 的标记表是 O(1) 的、不分配，而且精确。</para>
+        /// </summary>
+        private static bool[] _resizedAstro = new bool[0];
+
+        private static readonly object _astroLock = new object();
+
+        internal static bool IsResizedAstro(int astroId)
+        {
+            bool[] a = _resizedAstro;
+
+            return astroId >= 0 && astroId < a.Length && a[astroId];
+        }
+
+        private static void MarkResizedAstro(int astroId)
+        {
+            if (astroId < 0) return;
+
+            lock (_astroLock)
+            {
+                if (astroId >= _resizedAstro.Length)
+                {
+                    var bigger = new bool[astroId + 64];
+
+                    Array.Copy(_resizedAstro, bigger, _resizedAstro.Length);
+
+                    _resizedAstro = bigger;
+                }
+
+                _resizedAstro[astroId] = true;
+            }
+        }
+
+        /// <summary>
         /// 把倍率吸附到最近的合法半径。<b>合法 = 40 的倍数</b>，因为
         /// <c>precision/segment</c>（每块地形网格的顶点边长）必须整除：不整除的话
         /// 分块铺不满球面，表现是接缝或者更糟。
@@ -278,6 +316,29 @@ namespace ProjectEden.Patches
             // 原版那四个数组是按 const kMaxMeshCnt = 100 的字面量分配的，而 100
             // 恰好只够 segment=5。理由见 StockSegmentMeshCount 的注释。
             EnsureMeshArrays(__result, Segment);
+
+            // **AstroData.uRadius 是在 CreatePlanet 体内算出来的，我们的后置来不及。**
+            // @0AA9–0AAF：`astrosData[planet.id].uRadius = planet.realRadius`，
+            // 而那一句在 @094F 写完 radius 之后、方法返回之前——所以它拿到的是原版的 200，
+            // 我们改完半径它已经定型了。
+            //
+            // **这个字段有 45 个读取方法**（枚举所得）：星际船的到达时间与派船判断、
+            // 玩家导航、戴森球火箭、弹射器、战斗与敌人寻路、掉落物重力……
+            // 全都会以为这颗星只有 200 大。玩家最先看见的是「丢在地上的东西到处漂流」：
+            // TrashSystem.Gravity 把「地面」取成 uRadius + 0.35 = 200.35，
+            // 而掉落物在 400.x —— `V_9 < V_12` 永远不成立，**它永远落不了地**。
+            //
+            // 早先那次「谁读 radius」的普查只扫了 ldfld，**漏掉了属性调用
+            // get_realRadius()**，所以这一处当时没被数进来。枚举要连属性一起枚举。
+            GalaxyData galaxy = __result.star?.galaxy;
+
+            if (galaxy?.astrosData != null
+                && __result.id >= 0 && __result.id < galaxy.astrosData.Length)
+            {
+                galaxy.astrosData[__result.id].uRadius = __result.realRadius;
+
+                MarkResizedAstro(__result.id);
+            }
 
             Interlocked.Increment(ref _resized);
 
