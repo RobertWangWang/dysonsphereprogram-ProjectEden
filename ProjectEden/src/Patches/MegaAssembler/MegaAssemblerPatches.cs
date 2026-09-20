@@ -322,6 +322,7 @@ namespace ProjectEden.Patches
                     component.InternalUpdate(power, productRegister, consumeRegister);
 
                     ran++;
+                    MegaTickProfiler.AddCalls(1);
 
                     if (MegaBatchSettle.IsSteadyUnit(ref component, servedBefore, producedBefore,
                                                      cycleBefore, extraBefore))
@@ -379,6 +380,7 @@ namespace ProjectEden.Patches
                 component.InternalUpdate(power, productRegister, consumeRegister);
 
                 ran++;
+                MegaTickProfiler.AddCalls(1);
 
                 long sum = ProducedSum(produced);
                 int nowTime = component.time;

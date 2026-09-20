@@ -135,6 +135,32 @@ namespace ProjectEden.Patches
         internal static void AddStorage(long t0) { if (t0 != 0L) Interlocked.Add(ref _tStorage, Stopwatch.GetTimestamp() - t0); }
         internal static void AddSlots(long t0) { if (t0 != 0L) Interlocked.Add(ref _tSlots, Stopwatch.GetTimestamp() - t0); }
         internal static void AddOther(long t0) { if (t0 != 0L) Interlocked.Add(ref _tOther, Stopwatch.GetTimestamp() - t0); }
+
+        /// <summary>
+        /// <c>RunExtraCycles</c> 里**真的调了几次** <c>AssemblerComponent.InternalUpdate</c>。
+        ///
+        /// <para><b>它要回答的是「配方周期那 87% 到底是不是真的」。</b></para>
+        /// 分段表报出每台每 tick 19.4 µs，而按面板的「生产设施 4.865 ms」反推，
+        /// 本地这颗星球 4632 台单线程只有约 1 µs 可用——**两者差 20 倍，而探针自身
+        /// 已经量过只占 1.4%（一次 GetTimestamp 23 ns），排除了**。
+        ///
+        /// 除以这个计数就得到「每次 InternalUpdate 多少纳秒」，而那个数是**可以独立判断
+        /// 合不合理的**：那个方法 693 条 IL，落在 200~400 ns 才正常。
+        /// <list type="bullet">
+        /// <item>落在合理区间 → 时间是真的，那么低报的是面板：
+        /// <c>GetThreadTaskTime_MainToAll</c> 算的是
+        /// <c>WorkersTaskEnd − max(TaskBegin, WorkersTaskBegin)</c>，
+        /// 工作线程晚开工的话，主线程在那之前干的活不在这个区间里。</item>
+        /// <item>荒唐地小（比如 10 ns）→ 说明 <c>ran</c> 比实际调用多，归因错了。</item>
+        /// <item>荒唐地大（比如 5 µs）→ <c>_tCycles</c> 里混进了不属于它的时间
+        /// （等待、嵌套、被抢占）。</item>
+        /// </list>
+        /// **三种情况该动的地方完全不同**，所以这个数必须量，不能猜——
+        /// 上一轮我猜「是探针在量自己」，猜错了。
+        /// </summary>
+        internal static void AddCalls(int n) { if (_sampling && n > 0) Interlocked.Add(ref _calls, n); }
+
+        private static long _calls;
         /// <summary>
         /// 旧入口，留给还没改过来的调用点。计数已经挪进 <see cref="BeginBuilding"/>——
         /// 抽样判定必须和计数在同一处做，否则「计到的台次」和「计时的那些台次」会对不上，
@@ -144,7 +170,7 @@ namespace ProjectEden.Patches
 
         private static float _nextReport;
         private static long _lastGameTick = -1;
-        private static long _lc, _lst, _lsl, _lo, _lb, _lsm;
+        private static long _lc, _lst, _lsl, _lo, _lb, _lsm, _lcalls;
         private static int _entered;
 
         // ── 标定：不信 Stopwatch.Frequency，量一遍 ──────────────────
@@ -229,6 +255,13 @@ namespace ProjectEden.Patches
             long o = Interlocked.Read(ref _tOther) - _lo;
             long b = Interlocked.Read(ref _buildings) - _lb;
 
+            // 抽中的那些建筑里，RunExtraCycles 真的调了几次 InternalUpdate。
+            // 它和 _tCycles 是同一批样本，所以相除就是「每次调用多少纳秒」
+            long callsNow = Interlocked.Read(ref _calls);
+            long calls = callsNow - _lcalls;
+
+            _lcalls = callsNow;
+
             Snapshot();
 
             long total = c + st + sl + o;
@@ -307,6 +340,16 @@ namespace ProjectEden.Patches
                 + $"，其中**探针自身约 {overheadTicks * msPerFrame:0.###} ms（{overheadShare * 100:0.#}%）**"
                 + $"（实测一次 GetTimestamp {probeTicksPerCall * 1e9 / measuredFreq:0} ns × 每台 {TimestampsPerBuilding} 次）"
                 + $"，扣掉之后 **{(total - overheadTicks) * msPerFrame:0.###} ms/帧**。"
+                // 这一段是给「配方周期那 87% 是不是真的」做判据的，见 AddCalls 的注释。
+                // 每次 InternalUpdate 的纳秒数可以独立判断合不合理：那个方法 693 条 IL，
+                // 200~400 ns 才正常
+                + (calls > 0
+                    ? $"　**每台每 tick 调 {calls / (double)sampled:0.#} 次 InternalUpdate，"
+                      + $"每次 {c / (double)calls * 1e9 / measuredFreq:0} ns**"
+                      + "（693 条 IL，落在 200~400 ns 才正常：明显偏小说明调用数被多算了，"
+                      + "明显偏大说明配方周期那一段混进了不属于它的时间）。"
+                    : "　⚠ **RunExtraCycles 一次 InternalUpdate 都没调到**——"
+                      + "要么补跑周期全被空转提前退出省掉了，要么计数没接上。")
                 + (overheadShare > 0.3
                     ? "　⚠ **探针自身超过三成，这张表只能看排序、不能看绝对值**——"
                       + "抽样降的是总开销，降不了单个样本内部的偏差：被抽中那台的 12 次取值"
