@@ -265,6 +265,41 @@ namespace ProjectEden.Utils
         public int tickDivider;
 
         /// <summary>
+        /// 建在这几类恒星的星系里就有加成。取值是 <c>EStarType</c> 的名字
+        /// （<c>BlackHole</c> / <c>NeutronStar</c> / <c>WhiteDwarf</c> / <c>GiantStar</c> /
+        /// <c>MainSeqStar</c>），写法和 <c>ores.json</c> 里 <c>placement.starTypes</c> 一致。
+        /// 留空 = 建在哪都一样。
+        ///
+        /// <b>这是「就地生产」的奖励，驱动的是玩家真的在做的那个决策。</b>
+        /// 反物质线的三种原料只在黑洞／中子星系产，而**黑洞系只有 1 颗行星**
+        /// （<c>StarGen.CreateStarPlanets</c> @009B–00A5，写死无随机）——那颗行星既放不下
+        /// 整条产线，也没有任何扩张余地。于是玩家要在「把矿运出去、在别处敞开了建」
+        /// 和「挤在那一颗星球上换加成」之间分配，而配套（蓄能柜、碳化钨、活性复合材）
+        /// 全得反向运进去。
+        ///
+        /// <b>刻意不挂 <c>star.mass</c>。</b> 量过：黑洞质量是
+        /// <c>18 + (r1 × r2) × 30</c>（<c>StarGen.CreateStar</c> @024F–0265），
+        /// 两个随机数相乘、极度偏左（中位 23.6，85% 低于 33）。而**默认 64 星的一局只有
+        /// 1 个黑洞**，所以质量对一个存档而言是个常数——挂在它上面，玩家不是在做决策，
+        /// 是在抽种子，而且八成抽到个小数。同一族的教训见合金那条「单轴阈值会让第二个
+        /// 自由度变成摆设」。
+        /// </summary>
+        public string[] bonusStarTypes;
+
+        /// <summary>
+        /// 在 <see cref="bonusStarTypes"/> 那几类星系里的提速倍数。&lt;= 1 或没配 = 无加成。
+        ///
+        /// 作用在 <see cref="tickDivider"/> 上（除以它），**不动产量、不克隆配方**——
+        /// 合金那套逐建筑改 <c>recipeExecuteData</c> 的重机器这里一点都用不上。
+        /// 而且和缺电缩放叠在同一个量上，两者不会打架。
+        ///
+        /// <b>代价要说明白：面板上看不出来。</b>「制造速度」那一行读的是 <c>speed</c>，
+        /// 而 <c>speed</c> 永远是 1e8、绝不能动（动了这台建筑就不再被 <c>MegaTick</c> 接管）。
+        /// 和生物温室的日照是同一个坑，只能靠文档和日志说。
+        /// </summary>
+        public float bonusSpeedup;
+
+        /// <summary>
         /// 发电段。配了这一段，这座巨型建筑就<b>同时</b>是一台发电机。
         ///
         /// <b>这不是在绕过组件模型，是组件模型本来就允许。</b>

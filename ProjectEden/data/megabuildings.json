@@ -418,9 +418,14 @@
       "//power": "3.0 GW = 2.4（压缩）+ 0.6（采集）。workEnergyPerTick = 功率 ÷ 60。**耗电和速度是解耦的**——SetPCState 按 workEnergyPerTick 算、不看 speed，所以「慢而且极耗电」不需要任何新机制。",
       "//speed": "**注意：cyclesPerTick 现在还是全局配置，这座和另外九座跑一样的速度。** 要让它真正慢下来得两步：先把 cyclesPerTick 挪进逐建筑字段，再上跳 tick（MegaLightPatches 的 time = -speedOverride - 1 那一招，两个计时器都要压）。而且 cyclesPerTick=1 并不是慢速——speed=1e8 之下配方时间完全不起作用，一 tick 结算一个周期就是 60 次/秒。详见 反物质设计.md 第六节。",
       "itemId": 6683,
+      "//bonus": "**就地生产加成：建在黑洞系里快一倍。四座都给，所以玩家的决策是个梯度而不是二选一——往那一颗星球上挤多少条线。** 驱动的是「建在哪」：三种原料只在黑洞／中子星系产，而黑洞系**只有 1 颗行星**（StarGen.CreateStarPlanets @009B–00A5，写死无随机），既放不下整条产线也没有任何扩张余地；配套（电浆蓄能柜、碳化钨、活性复合材）还全得反向运进去。所以「运矿出去敞开了建」和「挤在原地换加成」是一笔真账。\\n\\n**刻意不挂 star.mass。** 量过：黑洞质量 = 18 + (r1 × r2) × 30（StarGen.CreateStar @024F–0265），两个随机数相乘、极度偏左，中位 23.6、85% 低于 33；而默认 64 星的一局**只有 1 个黑洞**，所以质量对一个存档是个常数——挂在它上面，玩家不是在做决策，是在抽种子，而且八成抽到个小数。同族教训见合金那条「单轴阈值会让第二个自由度变成摆设」。\\n\\n作用在 tickDivider 上（除以它），不动产量、不克隆配方。**面板上看不出来**——「制造速度」读的是 speed，而 speed 永远是 1e8、绝不能动。和生物温室的日照同一个坑。",
       "//throttle": "**这一组四座共用 tickDivider = 70，那不是巧合，是配平。** 一次炉子循环出 8 霍金辐射 + 4 高能γ光子，正好喂满磁分离塔一轮（吃 8）和对产生室一轮（吃 4），而这两座各出 2 反质子 / 2 正电子，又正好喂满彭宁阱一轮——整条链是 1:1:1:1，所以四座该跑同样的**周期/秒**。60 ÷ 70 ≈ 0.857 次/秒。\n\n**注意「倍率」在这里已经不是配平的单位了。** speed = 1e8 之下配方自己的秒数不控制吞吐（一个 tick 就能把 timeSpend 填满），所以同样的 0.857 次/秒，对 35 秒的炉子是 30 倍、对 8 秒的对产生室是 6.9 倍。**要配平一条链，对齐的是分频数，不是倍率。**\n\n换算：某配方 t 秒、想要 n 倍速 → tickDivider ≈ 60t/n。",
       "cyclesPerTick": 1,
       "tickDivider": 70,
+      "bonusStarTypes": [
+        "BlackHole"
+      ],
+      "bonusSpeedup": 2.0,
       "modelId": 690,
       "recipeId": 6693,
       "displayName": "视界蒸发炉",
@@ -456,6 +461,10 @@
       "itemId": 6684,
       "cyclesPerTick": 1,
       "tickDivider": 70,
+      "bonusStarTypes": [
+        "BlackHole"
+      ],
+      "bonusSpeedup": 2.0,
       "modelId": 689,
       "recipeId": 6694,
       "displayName": "磁分离塔",
@@ -489,6 +498,10 @@
       "itemId": 6685,
       "cyclesPerTick": 1,
       "tickDivider": 70,
+      "bonusStarTypes": [
+        "BlackHole"
+      ],
+      "bonusSpeedup": 2.0,
       "modelId": 688,
       "recipeId": 6695,
       "displayName": "对产生室",
@@ -522,6 +535,10 @@
       "itemId": 6686,
       "cyclesPerTick": 1,
       "tickDivider": 70,
+      "bonusStarTypes": [
+        "BlackHole"
+      ],
+      "bonusSpeedup": 2.0,
       "modelId": 687,
       "recipeId": 6696,
       "displayName": "彭宁阱复合室",

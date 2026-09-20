@@ -50,8 +50,10 @@ namespace ProjectEden.Patches
     {
         private struct Entry
         {
-            internal int Cycles;    // 0 = 跟全局
-            internal int Divider;   // <=1 = 每 tick 都跑
+            internal int Cycles;              // 0 = 跟全局
+            internal int Divider;             // <=1 = 每 tick 都跑
+            internal EStarType[] BonusStars;  // null = 建在哪都一样
+            internal float BonusSpeedup;      // <=1 = 无加成
         }
 
         /// <summary>
@@ -90,14 +92,27 @@ namespace ProjectEden.Patches
                 int cycles = b.cyclesPerTick;
                 int divider = b.tickDivider;
 
-                if (cycles <= 0 && divider <= 1) continue;   // 没配就不占表位
+                EStarType[] bonusStars = ParseStarTypes(b.bonusStarTypes, b.displayName);
+                float speedup = b.bonusSpeedup;
+
+                bool hasBonus = bonusStars != null && speedup > 1f;
+
+                if (cycles <= 0 && divider <= 1 && !hasBonus) continue;   // 没配就不占表位
 
                 if (divider > MaxDivider) divider = MaxDivider;
 
                 ids.Add(b.itemId);
-                entries.Add(new Entry { Cycles = cycles, Divider = divider });
+                entries.Add(new Entry
+                {
+                    Cycles = cycles,
+                    Divider = divider,
+                    BonusStars = hasBonus ? bonusStars : null,
+                    BonusSpeedup = hasBonus ? speedup : 0f,
+                });
+
                 names.Add($"{b.displayName}（{(cycles > 0 ? cycles + " 周期/tick" : "周期跟全局")}"
-                          + $"{(divider > 1 ? $"，{divider} tick 结算一次" : "")}）");
+                          + $"{(divider > 1 ? $"，{divider} tick 结算一次" : "")}"
+                          + $"{(hasBonus ? $"，建在 {string.Join("/", System.Array.ConvertAll(bonusStars, s => s.ToString()))} 系提速 ×{speedup:0.##}" : "")}）");
             }
 
             _protoIds = ids.ToArray();
@@ -118,6 +133,33 @@ namespace ProjectEden.Patches
                 $"巨型建筑逐台节流：{_protoIds.Length} 座单配了速度 —— {string.Join("、", names.ToArray())}。"
                 + "**注意 cyclesPerTick = 1 不是 1 倍速**：speed = 1e8 之下配方时间不起作用，"
                 + "一 tick 结算一个周期就是 60 次/秒（35 秒的配方 = 2100 倍）。要真的慢下来靠 tickDivider。");
+        }
+
+        /// <summary>
+        /// 星体类型名 → 枚举。写法和 <c>ores.json</c> 的 <c>placement.starTypes</c> 完全一致，
+        /// 解析不出来的逐个报错并跳过（**不是整条丢掉**：写错一个还剩别的能用）。
+        /// </summary>
+        private static EStarType[] ParseStarTypes(string[] names, string who)
+        {
+            if (names == null || names.Length == 0) return null;
+
+            var types = new List<EStarType>();
+
+            foreach (string name in names)
+            {
+                if (System.Enum.IsDefined(typeof(EStarType), name ?? ""))
+                {
+                    types.Add((EStarType)System.Enum.Parse(typeof(EStarType), name));
+
+                    continue;
+                }
+
+                ProjectEdenPlugin.Log.LogError(
+                    $"{who} 的 bonusStarTypes 里「{name}」不是合法的星体类型，"
+                    + $"合法值：{string.Join("、", System.Enum.GetNames(typeof(EStarType)))}");
+            }
+
+            return types.Count > 0 ? types.ToArray() : null;
         }
 
         /// <summary>表里有没有这台建筑。没有就走全局那套，一个分支都不多花。</summary>
@@ -167,8 +209,31 @@ namespace ProjectEden.Patches
 
             if (divider <= 1) return false;
 
+            // ── 就地生产加成：建在原料产地的星系里就快 ──────────────
+            //
+            // **驱动的是「建在哪」，不是恒星有多重。** 黑洞系只有 1 颗行星（写死无随机），
+            // 放不下整条产线也没有扩张余地，所以玩家要在「运矿出去敞开了建」和
+            // 「挤在那一颗上换加成」之间分配——那才是决策。恒星质量刻意没参与：
+            // 一局只有一个黑洞，挂在它上面就是抽种子不是做选择（见 MegaBuildingEntry 的注释）。
+            EStarType[] bonus = _entries[i].BonusStars;
+
+            if (bonus != null)
+            {
+                StarData star = factory.planet?.star;
+
+                if (star != null && System.Array.IndexOf(bonus, star.type) >= 0)
+                {
+                    var faster = (int)(divider / _entries[i].BonusSpeedup);
+
+                    divider = faster < 1 ? 1 : faster;
+                }
+            }
+
             // 缺电就拉长间隔。照抄原版的线性：供电率减半，间隔翻倍。
             // powerRatio 低于 0.1 的时候原版自己会整台停摆，所以这里不用管下界。
+            //
+            // 放在加成**之后**：两者都作用在分频数上，而缺电是当下的状态、加成是位置属性，
+            // 先算位置再算状态，读起来和「这台机器本来多快 → 现在电不够打几折」一致。
             if (powerRatio > 0.01f && powerRatio < 1f)
             {
                 var scaled = (int)(divider / powerRatio);
