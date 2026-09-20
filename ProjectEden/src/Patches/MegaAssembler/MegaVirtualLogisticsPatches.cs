@@ -120,6 +120,86 @@ namespace ProjectEden.Patches
 
         private static int _logged;
 
+        // ── 取货是不是散开了 ─────────────────────────────────────
+        //
+        // **这一族的问题是「总量对、分布错」，而分布错不会自己浮出来。**
+        // 取货那一趟原本固定从 1 号站开始、有多少拿多少，于是下标最小的那个供货方
+        // 每 tick 被薅干，别的永远轮不到——玩家报的原话是
+        // 「很多巨型建筑只找一个大型采矿机取货」。修成轮转起点之后，
+        // **日志里没有任何一个已有的数会因此变化**：产量一样、总量一样、耗时一样。
+        //
+        // 所以这里记的就是症状本身：**一种货在一次搬运里用了几个不同的站**。
+        // 修之前这个数恒等于 1（第一个撞见的站就把需求扣光了），
+        // 修之后应当接近「真正供这种货的站数」。代理指标回答不了这个问题。
+
+        [ThreadStatic] private static Dictionary<int, int> _suppliers;
+
+        private static Dictionary<int, int> Suppliers => _suppliers ?? (_suppliers = new Dictionary<int, int>());
+
+        private static long _spreadSum;     // Σ（每种货这一趟用到的站数）
+        private static long _spreadSamples; // 样本数＝（货种 × 搬运趟数）
+        private static long _spreadMax;     // 这一窗口里最散的一次
+
+        private static void NoteSupplier(int itemId)
+        {
+            Suppliers.TryGetValue(itemId, out int n);
+            Suppliers[itemId] = n + 1;
+        }
+
+        /// <summary>把这一趟的分布并进全局计数。并行路径，所以用 <c>Interlocked</c>。</summary>
+        private static void FlushSpread()
+        {
+            foreach (KeyValuePair<int, int> kv in Suppliers)
+            {
+                Interlocked.Add(ref _spreadSum, kv.Value);
+                Interlocked.Increment(ref _spreadSamples);
+
+                long cur = Interlocked.Read(ref _spreadMax);
+
+                while (kv.Value > cur)
+                {
+                    long prev = Interlocked.CompareExchange(ref _spreadMax, kv.Value, cur);
+
+                    if (prev == cur) break;
+
+                    cur = prev;
+                }
+            }
+
+            Suppliers.Clear();
+        }
+
+        /// <summary>
+        /// 每 60 秒报一行。用 <c>time % 3600</c> 而不是 <c>next = time + 3600</c>——
+        /// 换存档时 <c>gameTick</c> 会倒退，后者会永远不再到期、报告静默死掉
+        ///（本仓库第 4 号坑）；取模最多只是换个时刻触发。
+        /// </summary>
+        private static void ReportSpread()
+        {
+            long samples = Interlocked.Exchange(ref _spreadSamples, 0);
+            long sum = Interlocked.Exchange(ref _spreadSum, 0);
+            long max = Interlocked.Exchange(ref _spreadMax, 0);
+
+            if (samples <= 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "巨型建筑取货分布：过去 60 秒**一次货都没取**——要么巨型建筑的需求格都满着，"
+                    + "要么别的站没有可供的货。这一行本身正常，不是故障。");
+
+                return;
+            }
+
+            double avg = sum / (double)samples;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑取货分布：过去 60 秒平均**一种货用 {avg:0.00} 个不同的站**取货"
+                + $"（最散的一次 {max} 个，样本 {samples}）。"
+                + "**这个数就是症状本身**：固定起点时它恒等于 1——第一个撞见的站把需求一口气扣光，"
+                + "后面的站全被跳过，于是几十台大型采矿机里只有一台在出货。"
+                + "轮转起点之后它应当接近「真正供这种货的站数」。"
+                + "**贴近 1 就说明轮转没生效**，而那件事没有任何别的数会告诉你。");
+        }
+
         [HarmonyPostfix]
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance, long time)
@@ -139,7 +219,10 @@ namespace ProjectEden.Patches
             if (factory.factorySystem?.assemblerPool == null) return;
 
             Inbound(__instance, factory);
+            FlushSpread();
             Outbound(__instance, factory);
+
+            if (time % 3600 == 0) ReportSpread();
         }
 
         // ── 入库：别的站的 Supply → 巨型建筑的 Demand ─────────
@@ -242,6 +325,7 @@ namespace ProjectEden.Patches
                         station.storage[s].inc -= (int)incTake;
 
                         Need[itemId] = need - take;
+                        NoteSupplier(itemId);
                         Add(Pool, itemId, take);
                         Add(PoolInc, itemId, incTake);
                         Add(PoolQua, itemId, quaTake);
