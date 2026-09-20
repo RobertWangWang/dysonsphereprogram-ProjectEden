@@ -189,8 +189,18 @@ namespace ProjectEden.Patches
             var got = false;
 
             // 二趟：走一遍所有站点的 Supply 格取货
-            for (var i = 1; i < transport.stationCursor; i++)
+            //
+            // **起点每 tick 轮转，否则只有下标最小的那个供货方会被用到。**
+            // 这一趟是「有多少拿多少、需求扣光就跳过后面所有站」，所以固定从 1 开始
+            // 等于每 tick 都把同一台采矿机薅干，而别的采矿机永远轮不到——
+            // 玩家报的原话是「很多巨型建筑只找一个大型采矿机取货」。
+            // 总量一直是对的，所以它不缺货、不报错，只是分布错了。
+            int start = Rotation(transport);
+
+            for (var k = 0; k < transport.stationCursor - 1; k++)
             {
+                int i = 1 + (start + k) % (transport.stationCursor - 1);
+
                 StationComponent station = transport.stationPool[i];
 
                 if (station == null || station.id != i || station.storage == null) continue;
@@ -244,8 +254,13 @@ namespace ProjectEden.Patches
             if (!got) return;
 
             // 三趟：回填到巨型建筑的 Demand 格
-            for (var i = 1; i < transport.stationCursor; i++)
+            //
+            // 同样要轮转：这一趟是「池子里有多少给多少」，固定起点会让下标最小的那座
+            // 巨型建筑一直吃到满，后面的要等它满了才分得到。
+            for (var k = 0; k < transport.stationCursor - 1; k++)
             {
+                int i = 1 + (start + k) % (transport.stationCursor - 1);
+
                 StationComponent station = transport.stationPool[i];
 
                 if (!IsMegaStation(station, i, factory)) continue;
@@ -332,8 +347,18 @@ namespace ProjectEden.Patches
             var moved = false;
 
             // 二趟：塞进别的站空着的 Demand 格
-            for (var i = 1; i < transport.stationCursor; i++)
+            //
+            // 同样轮转：这一趟是「有多少给多少」，固定起点会让下标最小的那个收货方
+            // 独吞全部出货，后面的站要等它装满才分得到。入库那一侧是同一个形状。
+            //
+            // （另外三趟不用动，而这一点是数过的，不是看着像：一趟和这个方法的三趟
+            // 都是**求和 / 按记账回扣**，和访问顺序无关。）
+            int start = Rotation(transport);
+
+            for (var k = 0; k < transport.stationCursor - 1; k++)
             {
+                int i = 1 + (start + k) % (transport.stationCursor - 1);
+
                 StationComponent station = transport.stationPool[i];
 
                 if (station == null || station.id != i || station.storage == null) continue;
@@ -451,6 +476,42 @@ namespace ProjectEden.Patches
                     return true;
 
             return false;
+        }
+
+        /// <summary>
+        /// 这一 tick 从哪个站点开始扫。
+        ///
+        /// <para><b>为什么需要它。</b></para>
+        /// 虚拟物流里有三趟是「有多少拿多少 / 有多少给多少」，而它们原本都从 1 号站开始。
+        /// 于是下标最小的那个供货方每 tick 被薅干，需求一扣光后面的站就全被
+        /// <c>need &lt;= 0 → continue</c> 跳过——**别的采矿机永远轮不到**。
+        /// 玩家报的原话是「很多巨型建筑只找一个大型采矿机取货」。
+        /// 总量一直是对的，所以它不缺货、不报错，**只是分布错了**，
+        /// 而那种错不会自己浮出来。
+        ///
+        /// <para><b>步长刻意不是 1。</b></para>
+        /// 每 tick 把起点挪一格听起来够了，实际不够：轮到的是**站点列表**的下一格，
+        /// 而不是「下一个供这种货的站」。6397 个站里若有 20 台铁矿采矿机，
+        /// 起点每次 +1 的话，「第一个被撞见的铁矿供货方」要三百多 tick 才换一次。
+        /// 用一个大步长（1009，和站点数几乎不会有公因子）让相邻两 tick 的起点落在
+        /// 列表的很远处，于是几乎每 tick 换一个供货方。
+        ///
+        /// <para><b>它是统计意义上的均摊，不是精确配额。</b></para>
+        /// 要精确按存量比例分，得先加一趟「汇总各站可供量」的全量扫描——
+        /// 而那正是上一轮刚从物流运输里削掉的那种开销（容量引导那一刀 604 → 23 ms）。
+        /// 症状是「只用一台」，轮转就够；真要配额再说，别顺手把刚省下的还回去。
+        ///
+        /// 无状态：直接用 <c>GameMain.gameTick</c> 推，所以这条并行路径上不需要任何
+        /// per-planet 的可变状态，也就没有第 4 号坑那类并发容器的问题。
+        /// </summary>
+        internal static int Rotation(PlanetTransport transport)
+        {
+            int n = transport.stationCursor - 1;
+
+            if (n <= 1) return 0;
+
+            // gameTick 是 long，乘 1009 在十亿量级仍然远不溢出
+            return (int)(GameMain.gameTick * 1009 % n);
         }
 
         /// <summary>这个站点是不是挂在巨型建筑上的。</summary>

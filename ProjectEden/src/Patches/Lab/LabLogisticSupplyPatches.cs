@@ -203,8 +203,20 @@ namespace ProjectEden.Patches
         {
             var any = false;
 
-            for (var i = 1; i < transport.stationCursor; i++)
+            // **起点每 tick 轮转**，理由和虚拟物流那边一字不差（见
+            // MegaVirtualLogisticsPatches.Rotation）：这一趟是「有多少拿多少、
+            // 缺口扣光就跳过后面所有站」，固定从 1 开始等于每 tick 薅同一个站，
+            // 别的站永远轮不到。总量对、不报错，只是分布错。
+            //
+            // 这一处是**数出来的，不是顺手改的**：巨型建筑那边报出症状之后，
+            // 把「收集缺口 → 从站点取货 → 分发」这一族的六趟全看了一遍，
+            // 研究站这条是同一个形状的另外两处。
+            int start = MegaVirtualLogisticsPatches.Rotation(transport);
+
+            for (var k = 0; k < transport.stationCursor - 1; k++)
             {
+                int i = 1 + (start + k) % (transport.stationCursor - 1);
+
                 StationComponent station = transport.stationPool[i];
 
                 if (station == null || station.id != i || station.storage == null) continue;
@@ -388,8 +400,13 @@ namespace ProjectEden.Patches
         {
             var any = false;
 
-            for (var i = 1; i < transport.stationCursor; i++)
+            // 同上：这一趟是「有多少给多少」，固定起点会让下标最小的那个站独吞全部出货
+            int start = MegaVirtualLogisticsPatches.Rotation(transport);
+
+            for (var k = 0; k < transport.stationCursor - 1; k++)
             {
+                int i = 1 + (start + k) % (transport.stationCursor - 1);
+
                 StationComponent station = transport.stationPool[i];
 
                 if (station == null || station.id != i || station.storage == null) continue;
