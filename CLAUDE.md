@@ -1945,6 +1945,32 @@ config *explicitly* pins (a `megaTab` `gridRow`/`gridCol`, or a non-zero `gridIn
 and would just add a spurious duplicate warning. Filing does not move anything (`ReserveGrid` only
 reports), so a genuine pin-vs-pin collision still surfaces as the loud warning it should be.
 
+**And that fix made things strictly worse before it made them better, because a pre-reservation is
+self-referential.** The very next launch printed both halves side by side:
+
+```
+279| machines.json 手工钉死的合成面板格位已提前登记 2 个
+696| 小型速采机的物品格位 3207 已被占用，改用 3809
+```
+
+The thing occupying 3207 **was us**. `ResolveGridIndex` calls `GridTaken`, whose first line
+consults the reservation set — so the pin filed on the claimant's behalf blocked the claimant. The
+cell went to nobody: not to the auto-assignment it was fenced off from, and not to the machine it
+was fenced off for. And the two wasted cells pushed every later auto-assignment along, taking the
+「超过了 14 列」 warning from **1 to 3** — 双元推进剂 and 金属浆料燃料 moved past column 14, which
+is to say they stopped existing in the loot filter and both signal pickers.
+
+`ResolveGridIndex` now takes `mine`, which exempts **only the ledger half** for exactly that one
+cell (a real proto sitting there in LDB still moves it), and `ReserveGrid` lets the same owner
+re-file its own cell silently, since pre-reserve and register-time both file it by design.
+
+**The general shape: a two-step "claim then acquire" flow is self-blocking unless the acquire step
+says who it is.** Claiming early is the whole point, and the acquire step's occupancy test is the
+claim table — so the earlier the claim, the harder it blocks its own owner, and **it does not
+error**: it reads as an ordinary fallback. Same family as *a scrub is not coverage* — a mechanism
+that does not mark what it itself wrote cannot tell "someone else left this" from "I just left
+this".
+
 **The general rule: a reservation ledger orders claims by when they are filed, not by whether they
 were written in a config file.** When a registry pins a value, it has to file that value *before
 every registry that auto-assigns into the same space* — which for this repo means a separate

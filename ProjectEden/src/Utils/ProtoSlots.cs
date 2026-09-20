@@ -94,6 +94,10 @@ namespace ProjectEden.Utils
             {
                 GridOwners.TryGetValue(key, out string first);
 
+                // 同一个主人再登记一次自己那一格，不是撞车。预占（PreReserveGrids）
+                // 和注册时的登记会对同一格调两次，那是设计如此。
+                if (!string.IsNullOrEmpty(label) && label == first) return;
+
                 ProjectEdenPlugin.Log.LogWarning(
                     $"合成面板{(kind == GridKind.Item ? "物品" : "配方")}格位 {grid} 被登记了两次："
                     + $"{(string.IsNullOrEmpty(first) ? "先前某条" : first)} 和 "
@@ -208,9 +212,24 @@ namespace ProjectEden.Utils
 
         internal static bool GridTaken(int grid, GridKind kind)
         {
+            return GridTaken(grid, kind, false);
+        }
+
+        /// <summary>
+        /// <paramref name="ignoreReservation"/> 为真时只看 LDB 里真实存在的 proto，不看登记簿。
+        ///
+        /// **这是给「我自己先占下的那一格」用的，别的场合都不该传真。** 预占（见
+        /// <see cref="ReserveGrid"/> 的调用方 MachineRegistry.PreReserveGrids）会把手工钉死的
+        /// 格位提前登记掉，好让别人的自动分配绕开它——可轮到钉的那一方自己去解析时，
+        /// 登记簿里那条正是它自己写的，于是它会认定「这格被占了」然后挪走，
+        /// **那一格从此谁也用不上**。实测代价不止是挪走：白吃掉的两个可见格位把
+        /// 双元推进剂和金属浆料燃料挤过了第 14 列，而那等于它们在掉落过滤里不存在。
+        /// </summary>
+        internal static bool GridTaken(int grid, GridKind kind, bool ignoreReservation)
+        {
             if (kind == GridKind.Item)
             {
-                if (ReservedItemGrids.Contains(grid)) return true;
+                if (!ignoreReservation && ReservedItemGrids.Contains(grid)) return true;
 
                 foreach (ItemProto item in LDB.items.dataArray)
                     if (item != null && item.GridIndex == grid)
@@ -219,7 +238,7 @@ namespace ProjectEden.Utils
                 return false;
             }
 
-            if (ReservedRecipeGrids.Contains(grid)) return true;
+            if (!ignoreReservation && ReservedRecipeGrids.Contains(grid)) return true;
 
             foreach (RecipeProto recipe in LDB.recipes.dataArray)
                 if (recipe != null && recipe.GridIndex == grid)
@@ -400,8 +419,13 @@ namespace ProjectEden.Utils
         /// 也<b>不能往行上扩</b>：RefreshRecipeIcons 里 row &gt;= 8 直接跳过，第 9 行画都不画。
         /// 只能往列上扩，多出来的列靠合成器的横向翻页露出（见 ReplicatorExpandPatches）。
         /// </summary>
+        /// <param name="mine">
+        /// 本调用方**自己预占过**的那一格（没有就传 0）。它在登记簿里那条是自己写的，
+        /// 不该把自己挡住——见 <see cref="GridTaken(int, GridKind, bool)"/> 的说明。
+        /// 只豁免登记簿这一半，LDB 里真有 proto 占着照样要躲开。
+        /// </param>
         internal static int ResolveGridIndex(int wanted, string label, GridKind kind,
-            Func<int, bool> alsoTaken = null, int alsoAvoid = 0)
+            Func<int, bool> alsoTaken = null, int alsoAvoid = 0, int mine = 0)
         {
             if (wanted <= 0) wanted = 1601;
 
@@ -447,7 +471,10 @@ namespace ProjectEden.Utils
                 {
                     int grid = page * 1000 + row * 100 + col;
 
-                    if (grid == alsoAvoid || GridTaken(grid, kind) || (alsoTaken != null && alsoTaken(grid)))
+                    bool self = mine > 0 && grid == mine;
+
+                    if (grid == alsoAvoid || GridTaken(grid, kind, self)
+                        || (!self && alsoTaken != null && alsoTaken(grid)))
                         continue;
 
                     if (grid != wanted)

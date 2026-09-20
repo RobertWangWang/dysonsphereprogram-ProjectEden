@@ -370,9 +370,13 @@ namespace ProjectEden
                 machine.ItemId = ProtoSlots.ResolveItemId(entry.itemId, entry.displayName);
                 machine.ModelId = ProtoSlots.ResolveModelId(entry.modelId, entry.displayName);
 
+                // mine：PreReserveGrids 替这条提前占下的那一格。不豁免的话它会被自己
+                // 写进登记簿的那条挡住，然后挪走——那一格就此谁也用不上（实测挤掉了
+                // 双元推进剂和金属浆料燃料的可见格位）。
                 machine.Grid = ProtoSlots.ResolveGridIndex(
                     WantedGrid(entry, source), entry.displayName,
-                    ProtoSlots.GridKind.Item, g => Pending(g, ProtoSlots.GridKind.Item));
+                    ProtoSlots.GridKind.Item, g => Pending(g, ProtoSlots.GridKind.Item),
+                    0, PinnedGrid(entry));
 
                 // 本分类没有可画的空槽时，退到本 mod 自己那一类（巨型建筑），
                 // 而不是硬塞一个没有按钮的槽位——那会让建造栏每帧空引用
@@ -389,7 +393,8 @@ namespace ProjectEden
 
                 ProtoSlots.ReserveItemId(machine.ItemId);
                 ProtoSlots.ReserveModelId(machine.ModelId);
-                ProtoSlots.ReserveGrid(machine.Grid, ProtoSlots.GridKind.Item);
+                // 带上名字：PreReserveGrids 用的是同一个名字，同主人再登记一次不算撞车
+                ProtoSlots.ReserveGrid(machine.Grid, ProtoSlots.GridKind.Item, entry.displayName);
                 ProtoSlots.ReserveBuildIndex(machine.BuildIndex, machine.Entry?.displayName);
 
                 CloneModel(machine, source);
@@ -1402,9 +1407,12 @@ namespace ProjectEden
             }
 
             machine.RecipeId = ProtoSlots.ResolveRecipeId(e.recipeId, e.displayName);
+            int pinnedRecipe = e.recipeGridIndex > 0 ? e.recipeGridIndex : PinnedGrid(e);
+
             machine.RecipeGrid = ProtoSlots.ResolveGridIndex(
                 e.recipeGridIndex > 0 ? e.recipeGridIndex : machine.Grid, e.displayName + "（配方）",
-                ProtoSlots.GridKind.Recipe, g => Pending(g, ProtoSlots.GridKind.Recipe));
+                ProtoSlots.GridKind.Recipe, g => Pending(g, ProtoSlots.GridKind.Recipe),
+                0, pinnedRecipe);
 
             var recipe = new RecipeProto
             {
@@ -1437,7 +1445,8 @@ namespace ProjectEden
             MegaBuildingRegistry.RecipeIds.Add(machine.RecipeId);
 
             ProtoSlots.ReserveRecipeId(machine.RecipeId);
-            ProtoSlots.ReserveGrid(machine.RecipeGrid, ProtoSlots.GridKind.Recipe);
+            ProtoSlots.ReserveGrid(machine.RecipeGrid, ProtoSlots.GridKind.Recipe,
+                e.displayName + "（配方）");
         }
 
         // ── LDB 建表之后：核对 ID、图标改色 ──────────────────
