@@ -1322,6 +1322,103 @@ requirement; the owner cut that. The three places that depend on the answer — 
 rests on — all read `UsedByTechs`, **counted back out of `LDB.techs`** rather than inferred from the
 switch, so flipping the switch moves all three with no second decision written anywhere.
 
+### Bigger planets — `src/Patches/Planet/`
+
+`planet.json` doubles every ordinary planet's radius (200 → 400), giving **4× the buildable area**
+with every building occupying the same number of cells. **On by default since 1.12.1** (owner
+decision), and **it invalidates any save made before that** — see the save note below.
+
+**Why it is cheap: vanilla already keys the build grid on the radius.** `PlanetAuxData..ctor`
+@0015 is `new PlanetGrid(type, (int)(radius / 4f + 0.1f) * 4, identity)`, and `PlanetGrid.SnapTo`
+derives latitude as `lat/(2π) × segment`, longitude from `cos(latitude) × segment`, then subdivides
+by five. So **cell count ∝ segment² ∝ radius² while each cell keeps a constant physical size**.
+Terrain does not smear either: `PlanetAlgorithm*.GenerateTerrain` samples its noise at
+`vertices[i].xyz * radius` — **world coordinates** — so landscape features keep their physical size
+and a bigger planet simply has more of them.
+
+**One hook, because none of it is saved.** `PlanetData.radius` has exactly three writes
+(`CreatePlanet` @0751 gas giant / @094F everything else, plus the ctor default), and
+`radius`/`scale`/`precision`/`segment` appear in no `Export`/`Import` — the galaxy is regenerated
+from the seed on every load. So a postfix on `PlanetGen.CreatePlanet` replays deterministically.
+Three numbers lock together: `precision = radius`, `segment = radius / 40`, which keeps
+`precision/segment` at vanilla's 40 — hence **the radius must be a multiple of 40**.
+
+**The guard tests the END STATE, not the planet type**: `radius==200 && precision==200 &&
+segment==5`. That single condition excludes gas giants (80/64/2), `EPlanetType.None`, and anything
+another mod already moved.
+
+#### Four vanilla constants are hardcoded to radius 200, and finding them is the whole story
+
+Every one was found by a player-visible symptom, not by a sweep. **Assume more exist** (see
+*Known gaps*).
+
+| What | Where | Symptom at radius 400 |
+|---|---|---|
+| `kMaxMeshCnt = 100` | `const`, inlined into four `newarr` in `PlanetData..ctor` | mesh count is `4 × segment²` = 400; writing the 101st tile crashes `ModelingPlanetMain` @107A |
+| `20020` | `GetModPlane`: `return (short)(plane*133 + 20020)` | every foundation cell's rendered **and collided** height is pulled to 200.2 — the ground collapses 200 units inward |
+| `210` / `800` / `600` | `TrashSystem.Gravity` | dropped items never query real terrain, gravity is 21× too weak → they drift over the surface |
+| `AstroData.uRadius` | `CreatePlanet` @0AA9 sets it from `realRadius` **inside the method** | stale at 200, so the trash "ground" is 200.35 and **items can never land** |
+
+**`kMaxMeshCnt` is the lesson about searching.** An earlier survey reported it as "zero
+references, not a gate". That was exactly backwards: **zero field references means it is a `const`,
+inlined as a literal at every allocation site** — the thing you cannot find by field name is the
+thing most likely to bite.
+
+**`20020` is `(200 + 0.2) × 100`, and only the READ side is wrong.** `FlattenTerrain` @0578
+computes the level as `RoundToInt((pos.magnitude - 0.2 - realRadius) / 1.333333)` — correctly
+radius-relative. Fix the three consumers (`ModelingPlanetMain` @0BA8, `UpdateDirtyMesh` @0116,
+`QueryModifiedHeight` @00C6), **not `GetModPlane` itself**: it returns `Int16`, and the correct
+value 40020 overflows 32767. All three treat the result as "height × 100", so one additive float
+offset covers them; at radius 200 the offset is 0 and the value is bit-identical to vanilla.
+
+**`uRadius` is the lesson about enumeration.** The survey that decided "one hook is enough" scanned
+`ldfld PlanetData::radius` and **missed `get_realRadius()`, a property**. That single stale field
+has **45 reader methods** — interstellar ship arrival times and dispatch, player navigation, Dyson
+sphere rockets, ejectors, combat and enemy pathing all believed the planet was 200 across.
+**Enumerate property getters alongside field reads, or the census is fiction.**
+
+**The `TrashSystem` constants scale per body, keyed on an explicit id table.** `astrosData` holds
+**stars and planets together**, and a star's `uRadius` is `StarData.radius × 1200` — a few hundred
+to a couple of thousand, so it **can coincide with our radius**. Matching on the value would
+silently catch a small star; a `bool[]` indexed by astro id cannot.
+
+#### Seven rounds on one bug, and why
+
+「出生点永远是个水洼，走进去掉下去出不来」 took seven launches. Three "independent" measurements —
+`QueryHeight`, a ring scan, and a brute-force nearest-vertex scan — **all read the same
+`heightData`**, which was correct the entire time. What had collapsed was the *geometry*. Two
+things broke the deadlock, and only one of them was mine:
+
+- **the player's own report** that walking in *dropped them through* — which reclassified the
+  problem from "water" to "a hole";
+- a probe that finally put `planet.meshes` vertices **side by side with** `heightData`.
+
+**When several measurements agree that nothing is wrong, first ask whether they are measuring the
+same thing.** Independence is about the data source, not about the code path.
+
+And the probe's own verdict line was wrong in the same family: it judged "is there water" instead
+of "do the two numbers disagree", so once both sides agreed on a real 0.2-deep puddle it still
+printed 「QueryHeight 在撒谎」. **A verdict that does not compare the two sources cannot tell
+disagreement from agreement.**
+
+#### The save lock, and the ceiling
+
+**Building positions are planet-local with magnitude ≈ radius**, so changing the radius — including
+turning the switch off — puts every building in an existing save at the wrong altitude. There is
+**no code-level fallback**: our `IModCanSave` block is read *after* galaxy generation, so a save
+cannot record the radius it was built with. The warning is therefore the only thing between a
+player and a ruined save, and it is written in four places (package README, CHANGELOG, both feature
+guides, startup log). `InitModData` assigns the saved array by reference **without a length check**,
+so a mismatched `modData` used to crash; it now reallocates and logs loudly.
+
+**The hard wall is 655.35**: `heightData` is `UInt16` in units of `height × 0.01`, and
+`GenerateTerrain` writes `(ushort)((radius + relief) * 100)` with **no clamp** — exceed it and the
+terrain wraps. Relief is absolute, so headroom is `655.35 − tallest mountain` regardless of radius.
+The config cap is 600. **Three softer limits arrive first and none is in the code**: memory
+(~19 MB/planet at 2×, and *scanned* planets count too), **one planet is one work item** (so an
+overbuilt planet is single-threaded), and terrain draw calls scale with tile count. **2× is the
+only multiplier that has been measured.**
+
 ### Power coverage — `src/Patches/Power/PowerCoveragePatches.cs`
 
 One more cache than the usual save-baked chain: `PrefabDesc.powerCoverRadius` → `PowerNodeComponent.coverRadius` (**saved**) → `PowerSystem.OnNodeAdded` squares it into `PowerNetworkStructures.Node.coverRadius2` **and links the covered consumers right there**. Writing `coverRadius` at runtime therefore changes nothing: the squared cache is stale and every `PowerConsumerComponent.networkId` is already fixed. The fix-up runs the vanilla teardown/rebuild pair (`OnNodeRemoving` → set → `OnNodeAdded`), which is what the game itself does when a substation is dismantled and rebuilt.
@@ -2192,6 +2289,9 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 (which logs a WARNING every time, precisely so it cannot be forgotten).
 
 `data/*.json` and `assets/icons/*.png` are embedded resources (`JsonHelper` → `ProjectEden.data.<name>.json`, `TextureHelper` → `ProjectEden.assets.icons.<name>.png`). **`JsonHelper.Load` checks `BepInEx/config/ProjectEden/<name>.json` first and falls back to the embedded copy**, logging a WARNING every time a disk override is used — same shape as the LDBTool `CustomID.cfg` trap: a forgotten override makes every later edit to the embedded JSON look like it did nothing, silently. This exists because embedding alone means **one rebuild per switch flip**, which is fine for content configs and unusable for `cheats.json`; that is exactly how the first cheats build was reported as broken — all five switches were `false` and there was no file in the profile to change. `TextureResourcesPatches` prefixes `Resources.Load` for `Assets/projecteden/`, so custom icons need no AssetBundle. `src/Compatibility/` holds one file per third-party mod, all wired as `SoftDependency`.
+
+`planet.json` (bigger planets: the master switch — **on by default since 1.12.1** — the radius
+multiplier, and the `probe` diagnostic; see *Bigger planets*) is the twenty-third.
 
 The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector, `localDispatchPerTick` — how many planetary drones one station may launch per tick, see *Game internals: planetary drone dispatch* — and `inventoryStackSize`, the one `ItemProto.StackSize` shared by the inventory, chests, the delivery package and the mecha's ammo/fuel slots, see trap 4c), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
 
@@ -3940,6 +4040,16 @@ intercept `SteamAchievementManager` so nothing is uploaded); that layer is unwri
 an owner decision, not an oversight.
 
 ## Known gaps
+
+- **More radius-200 constants almost certainly remain.** The four found so far (`kMaxMeshCnt`,
+  `GetModPlane`'s `20020`, `TrashSystem.Gravity`'s `210/800/600`, and the stale `AstroData.uRadius`)
+  were each produced by a player-visible symptom, never by a sweep. A heuristic scan — "methods that
+  read a planet/astro radius **and** contain a literal in 150–900" — flags **143 methods**; most are
+  false positives (360/180 are angles), but it proves the class is not exhausted. The most
+  suspicious survivor is `GameCamera.Logic` (155 / 192.8 / 220.95 / 255 / 200). **The cheapest route
+  stays the same: a player reports "X behaves oddly on a big planet", then read the IL of whatever
+  owns X.** Building a reliable automatic sweep would mean separating "planet-scale distance" from
+  "angle/colour/duration", which the literal alone cannot do.
 
 - **物质分解设施** (GenesisBook's 6th mega building) is not ported — its 垃圾回收 recipe type has no vanilla equivalent.
 - ~~Mega buildings' 30 slots are invisible to the player.~~ **No longer true.** `MegaStationWindowPatches` still reports `stationId` as 0 — that is what keeps `inspectStationId` at 0 so vanilla writes nothing about this building — and `MegaBothWindowsPatches` opens the station window **itself**, from a per-frame `UIGame._OnUpdate` postfix gated on "is the assembler window open", so **both panels are open at once**. The opposite split was tried first (stop filtering, let vanilla open the station window) and it **broke every station-carrying building**: `inspectStationId` was left non-zero while the window ended up closed, after which `inspectStationId == 0 && stationId > 0` never held again and advanced miners and ordinary stations stopped opening at all. **Do not share ownership of a switch vanilla keeps state for** — take it entirely or leave it entirely; the middle ground strands its state machine somewhere it cannot return from, and the symptom shows up on unrelated buildings. The item in each slot is still automatic (requires→Demand, products→Supply), but the **direction is written once, when the slot is first assigned to that item, and is the player's afterwards** — forcing it every tick is what made the station panel's three buttons snap back, and setting an input slot to Storage is how you feed a mega building by belt. `UIEntityBriefInfo.icons` is still the binding constraint for the *hover* panel.
