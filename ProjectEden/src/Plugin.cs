@@ -92,6 +92,7 @@ namespace ProjectEden
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
             AbnormalityConfig = JsonHelper.Load<Patches.AbnormalityConfig>("abnormality");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
+            Patches.Diagnostics.CpuCostProbe.Load();
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             Patches.LensPatches.Config = JsonHelper.Load<Patches.LensConfig>("lens");
             AmmoRegistry.Load();
@@ -125,6 +126,9 @@ namespace ProjectEden
             // 读的是 Harmony 自己的补丁表，所以必须在 PatchAll 之后
             Patches.MegaAssemblerPatches.Report();
             Patches.PlanetCensus.Report();
+            // 同上：它的状态行要报「挂点接上了没有」，那只能在 PatchAll 之后从
+            // Harmony 自己的补丁表里读——「我调了 PatchAll 且没抛异常」不是同一件事
+            Patches.Diagnostics.CpuCostProbe.Report();
             Patches.StationOutputSkipPatches.Report();
             Patches.HubCourierPatches.Report();
             Patches.StationTrafficCoalescer.Report();

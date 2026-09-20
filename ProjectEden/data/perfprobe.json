@@ -1,0 +1,14 @@
+{
+  "//": "CPU 分项耗时探针。把「统计面板 → 性能测试」那张分项表直接打进日志，省掉人肉抄十行毫秒数再贴回来。",
+
+  "//为什么单独一个文件": "JsonHelper 的磁盘覆盖是**整份文件**的。把这个开发开关塞进 stations.json，就意味着为了翻一个 bool 而遮住整份物流配置——槽位容量、充能功率、集装层数全部定格在覆盖那一刻，之后对内嵌那份的每一次修改都静默失效。cargoprobe.json 单开一份就是同一个理由。",
+
+  "//为什么默认关": "**开着它真的要钱。** PerformanceMonitor.SummarizeCpuStats 开头就是 if (!CpuProfilerOn) return;，而 UIPerformancePanel._OnOpen 的第一件事才是 SetCpuProfilerActive(true)——也就是说原版在你翻开那一页之前一分钱都不花。本探针打开 = 常驻开着那一页。量完改回 false。",
+
+  "//单位": "timeCostsAve 里存的是「计数器差 ÷ performanceFrequency」（SummarizeCpuStats @0137–013E），而 performanceFrequency = PerformanceCounter.Frequency（BeginRenderingFrame @0000–0006），即每秒计数——所以那个 Double 的单位是**秒**，×1000 才是面板上的毫秒。这一条是从 IL 读出来的，不是推的：本仓库的 MegaTickProfiler 曾经拿 Stopwatch.Frequency 当真，报出过 12 倍的假数。",
+
+  "enabled": false,
+
+  "//perfProbeSeconds": "多久报一行。20 秒够用：timeCostsAve 本身就是滑动平均，报太密只是同一个数打很多遍。",
+  "perfProbeSeconds": 20
+}
