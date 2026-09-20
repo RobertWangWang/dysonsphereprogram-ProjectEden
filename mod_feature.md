@@ -300,6 +300,54 @@ Both share the same speed-up logic as the advanced mining machine:
 > vanilla stopped at the first hit and this keeps going until the budget runs out. The log reports the actual
 > multiplier and the dispatch-interval distribution every 60 seconds; lower the number if the logic frame suffers.
 
+> **Several vessels per dispatch evaluation (10 by default; vanilla sends one).** Since 1.10.7.
+>
+> The interstellar side has **exactly the same shape**: `DetermineDispatch`'s pairing scan already walks the whole
+> segment ring, and merely **leaves the moment it settles on one pair**. So the fix is the same — those three
+> "leave" branches become "first ask whether there is budget left", and if there is, control returns to vanilla's
+> own continue path. **Not one of vanilla's dispatch decisions is reimplemented**, the loop-back test is untouched
+> (so one evaluation still walks at most one ring), and the "not enough power" exit is left exactly as it is.
+>
+> **The same route can also send several ships in a row (4 by default, `remoteSameRouteMax`).**
+> With only the above in place, the measured result in game was just **2.28×, and the budget of 10
+> was never once exhausted** — because advancing to the next pair after every ship makes one
+> evaluation's ceiling "how many pairs in this ring have work" (measured: 2.3 out of ~7). So after a
+> ship goes out there is now a third destination: **jump back to the ring head without advancing the
+> cursor** and look at the same pair again.
+>
+> The retry can neither over-dispatch nor spin, and **both of those are measured, not designed**:
+> every dispatch debits both ends on the spot (the supplier's goods are subtracted outright, the
+> demand side records the reservation), and "how much more can be sent" is computed from the debited
+> numbers; once a side runs out, vanilla itself moves the cursor on. As for spinning — each of the
+> two dispatch methods has exactly one failure exit, reached only when there is no idle vessel, which
+> is precisely what the guard already checks.
+>
+> **`remoteSameRouteMax` is a fairness knob, not a safety one.** Because this mod raises a logistics
+> slot to 10,000,000, "the demand is satisfied" essentially never happens on such a save, so one
+> route would swallow the whole evaluation and leave the rest of the ring unserved that round. The
+> default 4 against a budget of 10 guarantees at least **3 distinct routes per evaluation**;
+> rotation across evaluations is unaffected, because running out of budget leaves through the exit,
+> and the exit advances the cursor all the same.
+>
+> The budget is `remoteShipsPerDispatch` in `stations.json`; **1 restores vanilla behaviour**, and the cap is **64**.
+> That 64 is not a pick: a station's idle vessels are recorded in a 64-bit bitmask, so there can never be more than
+> 64 of them and a larger budget would have no vessel to send.
+>
+> **But "one ship a second" is two things multiplied together, and the above fixes only one of them.** The other is
+> the **evaluation rate**: vanilla splits the pairings into six rotating passes, and the default `routePriority`
+> ("ignore") rides the **once-a-second** pass — that is where the "one second" comes from. Set the station on the
+> *fetching* end to "prioritize" in its panel and its pairings move into the **six-times-a-second** pass, **with no
+> configuration change at all**. The two levers multiply.
+>
+> That half is **deliberately left alone** (it is the player's own routing intent and not ours to decide), but the
+> log reports the galaxy-wide priority distribution every 60 seconds, so "the burst did not take effect" and "the
+> burst works, the evaluation rate is still once a second" can be told apart.
+>
+> One real difference from the planetary patch: on the interstellar side vanilla **re-checks "are there idle
+> vessels" inside the loop itself**, and the two dispatch methods check again on entry, so there is no
+> past-the-end-of-the-array hazard here. The guards still copy vanilla's own predicates verbatim, but the purpose
+> is **to stop early when there are no vessels**, not to prevent a crash.
+
 ### Carry capacity and stacking
 
 - Drones carry **10,000** per trip

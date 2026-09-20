@@ -2903,9 +2903,121 @@ That buys three things that were previously impossible:
 
 ## Game internals: interstellar ship dispatch
 
-Read out of IL, **deliberately not patched** — recorded so it doesn't get re-derived.
+Read out of IL. **Patched** since 1.10.7 (`RemoteDispatchBurstPatches`); the cadence half is still
+deliberately unpatched.
 
-`GalacticTransport.GameTick` slices each second into 6 passes gated by `DetermineFramingDispatchTime(tick, t)` (`t=1` → `tick%10`, `t=2,3` → `%30`, rest → `%60`); each pass only visits stations whose `routePriority` matches. `StationComponent.DetermineDispatch` is **straight-line code with no backward branch**: one call examines exactly one supply/demand pair — the one at `remotePairProcesses[pass]`, which then advances — and launches **at most one ship**.
+`GalacticTransport.GameTick` slices each second into 6 passes gated by `DetermineFramingDispatchTime(tick, t)` (`t=1` → `tick%10`, `t=2,3` → `%30`, rest → `%60`); each pass only visits stations whose `routePriority` matches.
+
+**Two claims that stood here for several versions are measured false, and the second one had been
+quoted as a design constraint.** This section used to say `StationComponent.DetermineDispatch` is
+*"straight-line code with no backward branch"* that *"examines exactly one supply/demand pair … and
+launches at most one ship"*, and prescribed a lever built on that. Against the shipped assembly
+(1250 instructions):
+
+- **There are two backward branches**: `0D0C bne.un → 0109` (the outer pair ring) and
+  `0B65 bne.un → 0873` (the demand side's inner ring).
+- **The method contains zero `stfld` to `idleShipCount` / `workShipCount`** — launching happens
+  inside `DispatchSupplyShip` / `DispatchDemandShip`.
+
+"At most one ship" is right as an *effect*; the mechanism is not. The real shape is **identical to
+`InternalTickLocal`** — a scan over the whole segment ring that leaves early on the first pair it
+settles:
+
+```
+0078  if (segment length <= 0) return;      // the only early return; cursor untouched
+0109  do {                                  // ring head
+          ref pair = remotePairs[cursor];
+          ...
+          // this pair is settled  → br      0D11   ← LEAVES the ring
+          // inner scan launched   → brtrue  0D11   ← leaves
+          // power ratio <= 0.1    → brfalse 0D11   ← leaves (left alone)
+          // nothing to do here    →
+0CD8      cursor++ ; wrap at segment length
+0D0C  } while (cursor at entry != cursor);
+0D11  cursor++ ; wrap at segment length
+0D3A  ret
+```
+
+Two identical cursor-advance blocks, one for continue and one for exit — the same mould as the
+planetary `1175` / `11A5`. **So the fix is the same one**: redirect the three "settled → leave"
+branches through a budget check into vanilla's own continue path at `0CD8`.
+
+**Doing only that measured 2.28× with the budget never once exhausted, which named the next
+bottleneck precisely.** Advancing the cursor after every ship makes one evaluation's ceiling *"how
+many pairs in this ring have work"* — measured at 2.3 of ~7, with 0% of evaluations stopped by the
+10-ship budget. So the remaining limit is **one ship per route per evaluation**, and the fix is a
+third destination: **jump back to the ring head `0109` without advancing the cursor**, re-examining
+the same pair.
+
+**Retrying a pair is self-limiting by vanilla's own bookkeeping, and every step of that is
+measured:**
+
+- **A dispatch debits both ends immediately.** `DispatchSupplyShip` @034A does
+  `storage[pair.supplyIndex].count -= carryCnt` *and* @02E9 `other.storage[demandIndex].remoteOrder
+  += carryCnt`; `DispatchDemandShip` (which sends an empty ship to fetch, so no `count` write at all)
+  does @0305 `+= ` on the demand side and @0340 `-= ` on the supply side. And
+  `remoteDemandCount = max - (count + remoteOrder)`, `remoteSupplyCount = count + remoteOrder`. So
+  the retry reads numbers that have already been debited.
+- **When a side runs out, vanilla itself moves on.** `DetermineDispatch` @0351 / @0359 are
+  `if (supply <= 0) goto 0499` / `if (totalDemand <= 0) goto 0499`, and `0499` → `SetPriorityLock`
+  → `04A9 br → 0CD8`, the continue tail.
+- **A retry cannot spin.** `DispatchSupplyShip` and `DispatchDemandShip` have **exactly one
+  `return false` each**, reached from **exactly one branch** — `QueryIdleShip(...) < 0` at `001F blt`
+  / `000F blt`. Enumerated: no other source jumps to either `ldc.i4.0 ; ret`. So *"no idle ship"* is
+  the only failure mode, and that is already the guard's second gate.
+
+**What the retry path does give up is the ring bound**, because it bypasses the
+`cursor at entry != cursor` test. The replacement bounds are the per-evaluation budget and a
+per-route cap, and **every ship passes through `BurstMode`**, so both are enforced per dispatch.
+
+**The per-route cap is a fairness knob, not a safety one — and it is load-bearing because of this
+mod's own 10M slots.** Vanilla would self-limit on demand; here `storage[].max` is 10,005,000, so
+"the demand is satisfied" essentially never happens and one route would swallow the whole
+evaluation, leaving the rest of the ring unserved that round. `remoteSameRouteMax` ships at **4**
+against a budget of 10, i.e. at least ⌈10/4⌉ = **3 distinct routes per evaluation**; cross-evaluation
+rotation is unaffected either way, because budget exhaustion exits through `0D11`, which advances the
+cursor. Same family as the catalyst slot colliding with `SyncStorageLayout` and the drill-bit slot
+with `StorageCount`: **a rule this repo added for one feature silently constrains a later one.**
+
+**The three-way dispatch is a `switch`, deliberately, and `dup` would have been invalid IL.** A
+`dup` + `beq` pair leaves the duplicated int on the stack when the branch *is* taken, and the branch
+target must be reached with an empty stack — structurally writable, rejected only at JIT, which is
+the exact failure class recorded under the quality transform. `OpCodes.Switch` pops its operand and
+dispatches three ways with every target at depth 0. The jump table is built **indexed by the mode
+constants** (`targets[ModeStop] = lExit` …) so the constants and the branch order cannot drift apart.
+
+**Why NOT the "call it N−1 more times" lever this section used to prescribe.** Its precondition
+does hold (the cursor advances on every early-out; the `0078` return never enters the ring, and
+not advancing there is correct). But each repeat re-runs the method prologue — `_tmp_iter_remote++`,
+re-deriving the segment bounds, re-entering `Monitor` — where redirecting three branches costs only
+"one more slot in the ring". It also cannot interact with the six-pass rotation outside.
+
+**The array-overflow hazard that made the planetary guard mandatory does not exist here, and the
+asymmetry is worth keeping.** Planetary `idleDroneCount <= 0` sits *outside* the loop and is never
+re-checked inside, so bursting without re-checking runs off the end of `workDroneDatas`. Interstellar
+re-checks **twice**: `03F5` / `07F9` inside the ring body (`idleShipCount == 0`, `energy > 6000000`),
+and `DispatchSupplyShip` @0017 / `DispatchDemandShip` @0007 open with `QueryIdleShip(nextShipIndex)`
+and `return false` on a negative — and `QueryIdleShip` scans `idleShipIndices`, which
+`IdleShipGetToWork` keeps in lockstep with `idleShipCount`, so *"an idle ship exists"* and *"a
+`workShipDatas` slot is free"* are the same fact. `BurstContinue` copies both gates verbatim anyway,
+**to stop early rather than to stop a crash**.
+
+**One of the three rewritten branches is not strictly "a ship went out", and that has to be stated
+precisely.** `V_35` (supply site) and `V_43` (demand site) are set to 1 at the *merge point* of the
+"dispatched" and "not dispatched" paths (IL `045E` / `0BA0`) — they mean **"there was enough energy
+to try"**. So vanilla also leaves the ring when a pair had energy but no ship. Continuing there
+would waste one ring slot — except that *no idle ship* is the **only** way `Dispatch*Ship` fails, and
+`BurstContinue`'s first gate is exactly `idleShipCount > 0`. The two predicates agree, so no local
+variable is needed to capture the return value.
+
+**Threading: main thread, measured.** `GameLogic.OnGameLogicFrame` → `GalacticTransportGameTick` →
+`GalacticTransport.GameTick`, one serial loop over `stationPool`; there is **no `_Parallel` variant**
+(contrast `FactoryTransportGameTick_Parallel` on the planetary side). So the budget is a plain
+static, not `[ThreadStatic]`.
+
+**`_tmp_iter_remote` is a per-call counter written into `ShipData::gene`, and `gene` has no readers
+but `Export`/`Import`.** Several ships in one call therefore share a gene value, and nothing acts on
+it. Checked because it is exactly the kind of per-call identity that bursting would break.
 
 `remotePairOffsets[7]` splits `remotePairs` into 6 segments, each with its own cursor:
 
@@ -2916,13 +3028,31 @@ Read out of IL, **deliberately not patched** — recorded so it doesn't get re-d
 | 2, 3 | `AddRouteRemotePair(3, 4)` | 2, 3 | 2×/s | same |
 | 4, 5 | `AddRouteRemotePair(5, 6)` | 4, 5 | 1×/s | same (segment 5 is Prioritize-only) |
 
-So a default station holding 20 pairs takes 20 seconds to cycle once: **slow fetching is dispatch cadence, not ship speed, carry capacity or storage size.** Giving the *fetching* station a route priority moves its pairs into segment 1 — a 12× speedup with no code change, which is why this stays unpatched.
+So before 1.10.7 a default station holding 20 pairs took 20 seconds to cycle once: **slow fetching is dispatch cadence, not ship speed, carry capacity or storage size.** Giving the *fetching* station a route priority moves its pairs into segment 1 — **6×**, not the 12× this line used to claim (`tick%10` fires 6 times a second, `tick%60` once) — with no code change, which is why the cadence half stays unpatched. The two levers multiply: route priority × `remoteShipsPerDispatch`.
 
 Multiple ships per route already work: `StationStore.remoteOrder` reserves both ends (`remoteDemandCount = max - (count + remoteOrder)`), so the next evaluation sees the reduced demand. The real gates are `idleShipCount > 0` and `energy >= 6 MJ + CalcTripEnergyCost` (which adds a flat **100 MJ per warp jump** — this is what the 30 GW charging power buys). **64 ships per station is a type-level cap**: `idleShipIndices` is a `UInt64` bitmask indexed `1L << (index & 63)`.
 
-If cadence ever does need raising, the lever is a reentrancy-guarded postfix on `DetermineDispatch` calling it N−1 more times — the cursor advances on its own, so repeat calls just walk further down the list under full vanilla logic (same idea as `RunExtraCycles`). Two things to verify first: that the cursor advances on *every* early-out branch, and the CPU cost (1250 instructions plus `Monitor` traffic, × stations × N).
+**Anchoring the transpiler needed one more step than the planetary one, and that is the transferable
+part.** The "cursor +1 with wrap" pattern occurs **6 times** here (`016D, 02C9, 056F, 064E, 0CD8,
+0D11`), not twice, so "take them in order" does not work. The rule is three checkable facts instead:
+the **exit** block is the unique anchor that reaches a `ret` within 24 instructions before reaching
+any backward branch; the **continue** block is the highest-indexed anchor below it; and there must be
+**exactly one** backward branch between them, targeting an index above neither — i.e. the ring head.
+All of it was simulated against the shipped assembly before the patch was written: 6 anchors, exit
+unique at `0D11`, continue at `0CD8`, one backward branch to `0109`, branches to the exit
+**2 `br` / 1 `brtrue` / 1 `brfalse` / 0 other**, and all three rewrite sites outside every
+try/handler range.
 
-**That trick is specific to this method and does NOT port to the planetary side** — `StationComponent.InternalTickLocal` fuses dispatch with station charging, the adaptive-interval sampler and the in-flight drone simulation, so re-calling it charges twice and flies every drone N× faster. See *Game internals: planetary drone dispatch* below; the answer there was to redirect three branches instead.
+**The retracted lever, and why the retraction matters more than the fix.** This section used to
+prescribe *"a reentrancy-guarded postfix calling it N−1 more times"*, and added that the trick is
+*"specific to this method and does NOT port to the planetary side"* — because `InternalTickLocal`
+fuses dispatch with station charging, the adaptive-interval sampler and in-flight drone simulation.
+That contrast was real and it was also **backwards**: the planetary method was patched by redirecting
+three branches, and the same redirection turned out to be the better answer *here* too. The sentence
+that sent the reasoning the wrong way was the unmeasured "straight-line code with no backward branch"
+above it. Same family as *"only 14 `ERecipeType` values remain"* and `kMaxCargoFlowSpeedPerSecond`:
+**a sentence in this file is a claim until the IL is re-read**, and a lever derived from an unmeasured
+claim inherits its error.
 
 ## Game internals: planetary drone dispatch — and why the interstellar idiom does not port
 
@@ -2978,9 +3108,12 @@ drone fleet is handling only the leftovers. **Before tuning either throttle, che
 exists** — both throttles are downstream of that.
 
 **The interstellar idiom does not port, and this is the part worth remembering.** The section above
-says the lever for `DetermineDispatch` is a reentrancy-guarded postfix calling it N−1 more times,
-because that method is dispatch-only and straight-line. **`InternalTickLocal` fuses four jobs**, and
-re-calling it corrupts three of them:
+*used to* say the lever for `DetermineDispatch` is a reentrancy-guarded postfix calling it N−1 more
+times, because that method is dispatch-only and straight-line. **That premise was measured false in
+1.10.7** — `DetermineDispatch` is a ring scan too, and it was patched by the same branch
+redirection — so the contrast drawn here is no longer between two methods, only between two
+techniques. The conclusion below stands unchanged on its own evidence: **`InternalTickLocal` fuses
+four jobs**, and re-calling it corrupts three of them:
 
 | IL | what it does | what a second call does |
 |---|---|---|

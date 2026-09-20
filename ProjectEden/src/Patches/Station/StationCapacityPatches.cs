@@ -331,6 +331,29 @@ namespace ProjectEden.Patches
         public int localDispatchPerTick;
 
         /// <summary>
+        /// 星际物流运输船：一次派船评估最多放几艘。0 或 1 = 原版（一次一艘）。
+        /// 见 <see cref="RemoteDispatchBurstPatches"/>：原版的配对扫描本来就会走遍整段
+        /// 配对环，只是定下一对就跳出去了。硬上限 64（<c>idleShipIndices</c> 是 UInt64 位图，
+        /// 一个站点至多只可能有 64 艘闲置船）。
+        ///
+        /// <b>它只管「一次评估放几艘」，管不了「多久评估一次」</b>：默认优先级的站点
+        /// 原版一秒才被评估一次，把取货端的 <c>routePriority</c> 设成「优先」是另外的
+        /// 6 倍，两者相乘。
+        /// </summary>
+        public int remoteShipsPerDispatch;
+
+        /// <summary>
+        /// 同一条运输线（同一对供需配对）一次评估最多连发几艘。**1 = 逐对轮转**（1.10.7 的行为），
+        /// 缺配置 = 4，不可能超过 <see cref="remoteShipsPerDispatch"/>。
+        ///
+        /// 见 <see cref="RemoteDispatchBurstPatches"/>：重试同一对是**安全的**——每次派船
+        /// 当场扣掉两端（供给端 <c>count</c>，需求端 <c>remoteOrder</c>），扣光了原版自己换对。
+        /// 这个上限管的是**公平性**：本 mod 的物流站格容量是 1000 万，所以需求几乎扣不光，
+        /// 一条线能把整次评估的额度吃干净。
+        /// </summary>
+        public int remoteSameRouteMax;
+
+        /// <summary>
         /// 「货物账本」探针。<b>只观察，不改任何游戏逻辑</b>，用来验证
         /// 「与 cargoPool 平行、按 cargoId 索引的数组」这套骨架跟不跟得住——
         /// 扩容、ID 回收、读档、并行四处都会被检出来。见 CargoLedgerProbe。
