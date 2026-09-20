@@ -61,7 +61,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXXIV. Black holes and neutron stars: veins placed by star type, and shipping electricity](#xxxiv-black-holes-and-neutron-stars-veins-placed-by-star-type-and-shipping-electricity)
 - [XXXV. The logic frame on a big factory: three optimisations that cost no output](#xxxv-the-logic-frame-on-a-big-factory-three-optimisations-that-cost-no-output)
 - [XXXVI. Antimatter: hoarding what a black hole evaporates](#xxxvi-antimatter-hoarding-what-a-black-hole-evaporates)
-- [XXXVII. Bigger planets: twice the radius, four times the buildable area (off by default)](#xxxvii-bigger-planets-twice-the-radius-four-times-the-buildable-area-off-by-default)
+- [XXXVII. Bigger planets: twice the radius, four times the buildable area (on by default)](#xxxvii-bigger-planets-twice-the-radius-four-times-the-buildable-area-on-by-default)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -4509,18 +4509,27 @@ Saturated Getter ×3   → Porous Getter ×2 + Hydrogen ×1    (Redox Chemical P
 
 Regeneration returns fewer than it consumed (3 → 2), so it is a **lossy** loop, not a perpetual one.
 
-## XXXVII. Bigger planets: twice the radius, four times the buildable area (off by default)
+## XXXVII. Bigger planets: twice the radius, four times the buildable area (on by default)
 
-One switch (`enabled` in `planet.json`) and one multiplier (`radiusMultiplier`, default 2.0).
-This section adds no items, recipes or buildings — it changes the size of every ordinary planet
-in the galaxy.
+One switch (`enabled` in `planet.json`, **on by default since 1.12.1**) and one multiplier
+(`radiusMultiplier`, default 2.0). This section adds no items, recipes or buildings — it changes
+the size of every ordinary planet in the galaxy.
 
-**The important part first: only turn it on for a brand-new save, and never change the number
-afterwards.** A building's position is stored in planet-local coordinates whose magnitude is
-approximately the radius, so changing the radius puts every building in every existing save at the
-wrong altitude. This is a harder commitment than this mod's preloader: that one means "the save
-will not open once you uninstall", this one means "**changing this number is the same as starting
-over**".
+> ### ⚠️ It invalidates older saves
+>
+> A building's position is stored in planet-local coordinates whose magnitude is approximately the
+> radius. With the radius going from 200 to 400, **every building in a save made under 1.12.0 or
+> earlier ends up 200 units underground**. There is no way back.
+>
+> **To keep using an existing save**, create `BepInEx\config\ProjectEden\planet.json` in your
+> profile containing `{ "enabled": false }` and restart the game — no rebuild needed. The startup
+> log always states whether it is on or off.
+>
+> **To use the feature**, start a new save, and never change the multiplier afterwards — changing
+> it is the same as starting over.
+
+This is a harder commitment than this mod's preloader: that one means "the save will not open once
+you uninstall", this one means "**changing this number is the same as starting over**".
 
 ### Why it is cheap: the build grid already derives from the radius
 
@@ -4576,7 +4585,7 @@ terrain data — and **the terrain data was correct throughout**. What collapsed
 What cracked it was the phrase "walking into it drops you through" (which turned the problem from
 "water" into "a hole"), plus a final probe that put the geometry and the terrain data side by side.
 
-### The costs, and why it ships off
+### The costs, and that default
 
 | Radius | Multiplier | Buildable area | Terrain tiles | Memory per planet |
 |---:|---:|---:|---:|---:|
