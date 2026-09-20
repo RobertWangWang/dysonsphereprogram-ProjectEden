@@ -69,6 +69,7 @@ namespace ProjectEden.Patches
         {
             Bootstrapped.Clear();
             Settled.Clear();
+            SettledLogged.Clear();
         }
 
         /// <summary>
@@ -342,22 +343,33 @@ namespace ProjectEden.Patches
             }
         }
 
-        private static int _settledLogged;
+        /// <summary>已经报过停扫的星球。<b>并发容器</b>，理由同 <see cref="Bootstrapped"/>。</summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte>
+            SettledLogged = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
 
         /// <summary>
-        /// 第一颗星球停扫时报一行。**没有这一行，「早退生效了」和「这段代码根本没进来」
+        /// 每颗星球停扫时报一行。**没有这一行，「早退生效了」和「这段代码根本没进来」
         /// 在日志里长得一模一样**——而它们的唯一区别要到下一次量耗时才看得出来，
         /// 那是一整个来回。本仓库记过七次的那条。
+        ///
+        /// <para><b>按星球记，不是整局记一次——这一条是栽过之后改的。</b></para>
+        /// 第一版用一个全局 one-shot，结果最先 settle 的是一颗空星球
+        ///（<c>stationCursor == 1</c>），日志里留下「行星 104 的 **0 个站点**已全部引导完毕」，
+        /// 而真正有 6397 个站、正是这次要优化的那颗，**一个字都没报**。
+        ///
+        /// 这正是本仓库记过的那条：<b>「记一次」应该是每类一次，不是每局一次</b>
+        ///（<c>MegaStationPatches</c> 的储物格转储当年栽在同一处：八种巨型建筑里只有最先
+        /// tick 的那一种会打印）。星球数是十几个量级，逐颗报一行不会淹没日志。
         /// </summary>
         private static void ReportSettledOnce(int planetId, int cursor)
         {
-            if (System.Threading.Interlocked.Exchange(ref _settledLogged, 1) != 0) return;
+            if (!SettledLogged.TryAdd(planetId, 0)) return;
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"物流站容量引导：行星 {planetId} 的 {cursor - 1} 个站点已全部引导完毕，"
                 + "**这颗星球从此不再每 tick 全量扫描**（站点数变了、或者每 600 tick 的兜底到期时再扫）。"
                 + "引导本身一直是每站一次，可外面那圈扫描原先是永远跑的——实测它每帧 0.5 ms，"
-                + "是本 mod 挂在物流运输上的五个后置里最贵的一个。整局只报这一行。");
+                + "是本 mod 挂在物流运输上的五个后置里最贵的一个。每颗星球只报一行。");
         }
 
         /// <summary>
