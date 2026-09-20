@@ -65,7 +65,36 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>换存档时要清，否则新存档里同号的站点会被当成已经引导过。</summary>
-        internal static void ClearBootstrapped() => Bootstrapped.Clear();
+        internal static void ClearBootstrapped()
+        {
+            Bootstrapped.Clear();
+            Settled.Clear();
+        }
+
+        /// <summary>
+        /// 每颗星球「上一趟全量扫描什么都没做」时的 <c>stationCursor</c> 和下次兜底重扫的 tick。
+        ///
+        /// <para><b>为什么需要它：一次性的是抬升，不是扫描。</b></para>
+        /// 下面那个 <c>for</c> 每 tick 走一遍全星球的站点，而抬升本身被
+        /// <see cref="Bootstrapped"/> 挡成每站一次——于是引导早就做完了，扫描还在每 tick
+        /// 跑 6397 次「HashSet 查找 + 元组哈希 + 并发字典探测」。
+        ///
+        /// **实测它是本 mod 五个后置里最贵的一个**：每 20 秒 604 ms、每帧 0.5 ms，
+        /// 比虚拟物流（524 ms）还高——而虚拟物流是真在搬货的。
+        ///
+        /// <para><b>失效条件有两个，第二个是兜底。</b></para>
+        /// <list type="number">
+        /// <item><c>stationCursor</c> 变了＝有新站点（新建的站点从 <c>prefabDesc</c> 直接拿到
+        /// 我们改过的值，本来就不需要引导；但 cursor 变了说明世界变了，重扫一趟最省心）。</item>
+        /// <item>每 600 tick（10 秒）无条件重扫一趟。**这是给「我没想到的那种失效」留的**——
+        /// 代价是原来的 1/600，而它让任何漏掉的失效路径在 10 秒内自愈。</item>
+        /// </list>
+        ///
+        /// 用 <c>GameMain.gameTick</c> 排期在这里是安全的，尽管本仓库记过它换存档会倒退：
+        /// 倒退只会让判断提前到期、**多扫一趟**，方向是安全的那一侧。
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, (int Cursor, long NextScan)>
+            Settled = new System.Collections.Concurrent.ConcurrentDictionary<int, (int, long)>();
 
         private struct ChargeTarget
         {
@@ -214,7 +243,20 @@ namespace ProjectEden.Patches
             PowerConsumerComponent[] consumerPool = factory.powerSystem?.consumerPool;
             int capacity = Config.slotCapacity;
 
-            for (var i = 1; i < __instance.stationCursor; i++)
+            // 引导做完之后就别再每 tick 扫一遍全星球了（理由见 Settled 的注释）
+            int cursor = __instance.stationCursor;
+            int planetId = factory.planetId;
+            long tick = GameMain.gameTick;
+
+            if (Settled.TryGetValue(planetId, out (int Cursor, long NextScan) done)
+                && done.Cursor == cursor && tick < done.NextScan)
+                return;
+
+            // 这一趟到底动没动东西。**必须真的记「改了没有」，不能记「扫过了」**——
+            // 后者在第一趟就会settled，而第一趟正是要干活的那一趟
+            var touched = false;
+
+            for (var i = 1; i < cursor; i++)
             {
                 StationComponent station = __instance.stationPool[i];
 
@@ -261,7 +303,11 @@ namespace ProjectEden.Patches
                         // 0 = 还没铺过的格子；等于原版默认 = 老存档里没人动过的格子。
                         // 其余一律不碰——那是玩家自己设的。
                         if (current == 0 || (vanillaMax > 0 && current == vanillaMax))
+                        {
                             station.storage[s].max = capacity;
+
+                            touched = true;
+                        }
                     }
 
                     ReportBootstrapOnce();
@@ -279,9 +325,47 @@ namespace ProjectEden.Patches
                 // 那个滑条（UIStationWindow.OnMaxChargePowerSliderValueChange）写的正是这个字段，
                 // 无条件覆写会让它一松手就缩回去。
                 if (consumerPool[pcId].workEnergyPerTick <= charge.vanilla)
+                {
                     consumerPool[pcId].workEnergyPerTick = charge.target;
+
+                    touched = true;
+                }
+            }
+
+            // 这一趟一个字都没改 → 记下「在这个 cursor 上已经做完了」，
+            // 下一趟直接早退，直到站点数变了或者 10 秒的兜底到期
+            if (!touched)
+            {
+                Settled[planetId] = (cursor, tick + RescanTicks);
+
+                ReportSettledOnce(planetId, cursor);
             }
         }
+
+        private static int _settledLogged;
+
+        /// <summary>
+        /// 第一颗星球停扫时报一行。**没有这一行，「早退生效了」和「这段代码根本没进来」
+        /// 在日志里长得一模一样**——而它们的唯一区别要到下一次量耗时才看得出来，
+        /// 那是一整个来回。本仓库记过七次的那条。
+        /// </summary>
+        private static void ReportSettledOnce(int planetId, int cursor)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _settledLogged, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"物流站容量引导：行星 {planetId} 的 {cursor - 1} 个站点已全部引导完毕，"
+                + "**这颗星球从此不再每 tick 全量扫描**（站点数变了、或者每 600 tick 的兜底到期时再扫）。"
+                + "引导本身一直是每站一次，可外面那圈扫描原先是永远跑的——实测它每帧 0.5 ms，"
+                + "是本 mod 挂在物流运输上的五个后置里最贵的一个。整局只报这一行。");
+        }
+
+        /// <summary>
+        /// 兜底重扫的间隔。600 tick ＝ 10 秒，开销是原来的 1/600。
+        /// **它不是为已知的失效路径准备的**——已知的那条（站点数变了）由 cursor 挡着；
+        /// 这一条是给「我没想到的那种」留的，让任何漏网的失效在 10 秒内自愈。
+        /// </summary>
+        private const long RescanTicks = 600;
     }
 
     [Serializable]
