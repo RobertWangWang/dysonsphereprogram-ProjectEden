@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import struct
+import subprocess
 import sys
 import zipfile
 
@@ -118,6 +119,22 @@ def check_fresh():
             % (os.path.relpath(built, ROOT), culprit, how))
 
 
+def check_guides():
+    u"""特性指南这一对的结构检查，实现在 tools/check_guides.py。
+
+    **拆成单独一个文件是为了能单独跑。** 指南是边写边改的，而打包是最后一步——
+    检查只能在打包时跑，等于要等到最后才知道 TOC 漏了一条。
+
+    和 check_changelog 一样，**不管过不过都把数目打出来**：一个通过时完全沉默的检查，
+    和一个根本没跑的检查，在输出里分不出来。
+    """
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), u'check_guides.py')
+    code = subprocess.call([sys.executable, script], cwd=ROOT)
+
+    if code != 0:
+        raise SystemExit(u'特性指南结构检查没过，见上')
+
+
 def main():
     need(PLUGIN, u'先跑：dotnet build -c Release')
     need(NEWTON, u'ProjectEden/lib/Newtonsoft.Json.dll 应该在仓库里')
@@ -131,6 +148,7 @@ def main():
     check_manifest(manifest)
     check_versions(manifest[u'version_number'])
     check_changelog(manifest[u'version_number'])
+    check_guides()
 
     name = sys.argv[1] if len(sys.argv) > 1 else u'%s-%s' % (manifest[u'name'], manifest[u'version_number'])
     zip_path = os.path.join(DIST, name + u'.zip')
