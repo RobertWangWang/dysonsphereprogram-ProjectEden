@@ -230,6 +230,9 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance, long time)
         {
+            // 诊断打点：放在一切 return 之前（理由见 LabLogisticSupplyPatches 同一行）
+            Diagnostics.TransportSplitProbe.Phase("综合物流枢纽");
+
             if (time % IntervalTicks != 0) return;
 
             PlanetFactory factory = __instance.factory;

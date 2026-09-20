@@ -196,6 +196,9 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance)
         {
+            // 诊断打点：放在一切 return 之前（理由见 LabLogisticSupplyPatches 同一行）
+            Diagnostics.TransportSplitProbe.Phase("物流站容量引导");
+
             if (Config == null) return;
 
             bool fixCapacity = Config.slotCapacity > 0 && TargetProtoIds.Count > 0;

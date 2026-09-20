@@ -141,6 +141,9 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance)
         {
+            // 诊断打点：放在一切 return 之前（理由见 LabLogisticSupplyPatches 同一行）
+            Diagnostics.TransportSplitProbe.Phase("轨道采集器");
+
             if (_speed <= 0) return;
 
             PlanetData planet = __instance.planet;

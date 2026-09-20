@@ -72,6 +72,10 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance, long time)
         {
+            // 诊断打点：**放在一切 return 之前**，否则「这一条便宜」和「这一条根本没跑」
+            // 在账上长得一模一样。开关关着时它是一句立即返回
+            Diagnostics.TransportSplitProbe.Phase("实验室取料");
+
             if (Config == null) return;
             if (!Config.logisticSupply && !Config.logisticOutput) return;
 

@@ -124,6 +124,9 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance, long time)
         {
+            // 诊断打点：放在一切 return 之前（理由见 LabLogisticSupplyPatches 同一行）
+            Patches.Diagnostics.TransportSplitProbe.Phase("巨型建筑虚拟物流");
+
             if (Config == null || !Config.virtualLogistics) return;
 
             int interval = Config.virtualIntervalTicks > 0 ? Config.virtualIntervalTicks : 10;
