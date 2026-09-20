@@ -124,7 +124,8 @@ namespace ProjectEden.Patches
             if (factory == null) return;
             if (component.speed < MegaBuildingRegistry.MegaSpeedThreshold) return;
 
-            MegaTickProfiler.CountBuilding();
+            // 抽样判定必须排在所有 Now() 之前：它决定这一 tick 的十二个计时点开不开
+            MegaTickProfiler.BeginBuilding(component.entityId);
 
             long tOther = MegaTickProfiler.Now();
 

@@ -315,5 +315,16 @@ namespace ProjectEden.Patches.Diagnostics
     {
         public bool enabled = false;
         public float perfProbeSeconds = 20f;
+
+        /// <summary>
+        /// 把「生产设施」那一栏劈开：巨型建筑每 tick 的耗时按阶段拆成
+        /// 配方周期 / 储物格同步 / 传送带槽位 / 其余。见 <see cref="MegaTickProfiler"/>。
+        ///
+        /// **和上面那个 <c>enabled</c> 是两件独立的事**，所以是两个开关：
+        /// 一个读原版的逐任务计数器，一个在本 mod 自己的代码里打点。
+        /// 两个探针不共享开关，也不共享失败路径——上一轮把劈半探针的报表写在
+        /// CPU 探针的结尾，结果那边一早退它就跟着沉默了。
+        /// </summary>
+        public bool phaseTiming = false;
     }
 }

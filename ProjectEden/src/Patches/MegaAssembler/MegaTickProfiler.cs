@@ -3,6 +3,7 @@
 // 按 GPL-3.0 发布，详见仓库根目录的 LICENSE 与 NOTICE。
 // Released under GPL-3.0; see LICENSE and NOTICE at the repository root.
 
+using System;
 using System.Diagnostics;
 using System.Threading;
 using HarmonyLib;
@@ -49,15 +50,74 @@ namespace ProjectEden.Patches
 
                 if (e >= 0) return e != 0;
 
-                e = MegaBuildingRegistry.Config?.phaseTiming == true ? 1 : 0;
+                // **开关首选 perfprobe.json，megabuildings.json 那个留作兼容。**
+                //
+                // 它是个开发开关，而 megabuildings.json 是内容配置。JsonHelper 的磁盘覆盖
+                // 是**整份文件**的——为了翻这一个 bool 去覆盖 megabuildings.json，就等于
+                // 把十六座巨型建筑的速度、耗电、模型、节流全部定格在覆盖那一刻，
+                // 之后对内嵌那份的每一次修改都静默失效。cargoprobe.json 和 perfprobe.json
+                // 单开一份正是为了这件事。
+                e = Diagnostics.CpuCostProbe.Config?.phaseTiming == true
+                    || MegaBuildingRegistry.Config?.phaseTiming == true
+                    ? 1
+                    : 0;
+
                 _enabled = e;
 
                 return e != 0;
             }
         }
 
-        /// <summary>关掉时返回 0，调用方据此跳过 <c>Add*</c>——一次字段读，没有时间戳开销。</summary>
-        internal static long Now() => Enabled ? Stopwatch.GetTimestamp() : 0L;
+        /// <summary>
+        /// 这一台建筑这一 tick 要不要计时。**抽样是这个探针能被打开的前提。**
+        ///
+        /// <para><b>为什么原来开不得。</b></para>
+        /// <c>MegaTick</c> 里有十二个计时点，而这颗测试星球上有 4632 台巨型建筑——
+        /// 每秒 4632 × 60 × 12 ≈ **86 万次 <c>Stopwatch.GetTimestamp()</c>**，
+        /// 在 Mono 下那是个 icall。它和它要测的东西（生产设施那一栏 5.8 ms/帧）
+        /// **到了同一个量级**，于是这个探针一打开，测出来的就不再是原来那个系统了。
+        /// 本仓库为此把它默认关着，而关着的探针回答不了任何问题。
+        ///
+        /// <para><b>抽样把这件事变成可能。</b></para>
+        /// 只对 <c>entityId</c> 落在 1/64 上的建筑计时，开销降到 1.3 万次/秒，
+        /// 而样本量仍有 4632/64 × 60 ≈ **4300 个/秒**，够得很。
+        /// 报表里按「计到的台次 : 总台次」把时间乘回去，**并且把两个数都打出来**——
+        /// 一个不报样本量的抽样估计没法判断可不可信。
+        ///
+        /// <b>按 <c>entityId</c> 分层而不是随机</b>：同一台建筑每一 tick 的取舍一致，
+        /// 所以量到的是「这些建筑的完整时间序列」而不是「所有建筑的随机片段」，
+        /// 配方切换、槽位堆积这类跨 tick 的状态不会被抽样切碎。而 <c>entityId</c>
+        /// 和「跑什么配方」之间没有相关性，所以这个分层是无偏的。
+        /// </summary>
+        [ThreadStatic] private static bool _sampling;
+
+        /// <summary>抽样率的掩码：63 ＝ 1/64。</summary>
+        private const int SampleMask = 63;
+
+        private static long _sampled;
+
+        /// <summary>
+        /// 每台建筑进 <c>MegaTick</c> 时调一次，定下这一 tick 计不计时。
+        /// 关掉时是一次字段读，开着时多一次 AND 和一次 <c>Interlocked</c>。
+        /// </summary>
+        internal static void BeginBuilding(int entityId)
+        {
+            if (!Enabled)
+            {
+                _sampling = false;
+
+                return;
+            }
+
+            Interlocked.Increment(ref _buildings);
+
+            _sampling = (entityId & SampleMask) == 0;
+
+            if (_sampling) Interlocked.Increment(ref _sampled);
+        }
+
+        /// <summary>关掉、或者这一台没被抽中时返回 0，调用方据此跳过 <c>Add*</c>。</summary>
+        internal static long Now() => _sampling ? Stopwatch.GetTimestamp() : 0L;
 
         private static long _tCycles;   // RunExtraCycles：真正的配方结算
         private static long _tStorage;  // MegaStationPatches.UpdateStationStorage：30 格同步
@@ -69,11 +129,16 @@ namespace ProjectEden.Patches
         internal static void AddStorage(long t0) { if (t0 != 0L) Interlocked.Add(ref _tStorage, Stopwatch.GetTimestamp() - t0); }
         internal static void AddSlots(long t0) { if (t0 != 0L) Interlocked.Add(ref _tSlots, Stopwatch.GetTimestamp() - t0); }
         internal static void AddOther(long t0) { if (t0 != 0L) Interlocked.Add(ref _tOther, Stopwatch.GetTimestamp() - t0); }
-        internal static void CountBuilding() { if (Enabled) Interlocked.Increment(ref _buildings); }
+        /// <summary>
+        /// 旧入口，留给还没改过来的调用点。计数已经挪进 <see cref="BeginBuilding"/>——
+        /// 抽样判定必须和计数在同一处做，否则「计到的台次」和「计时的那些台次」会对不上，
+        /// 而乘回去的系数正是这两个数的比。
+        /// </summary>
+        internal static void CountBuilding() { }
 
         private static float _nextReport;
         private static long _lastGameTick = -1;
-        private static long _lc, _lst, _lsl, _lo, _lb;
+        private static long _lc, _lst, _lsl, _lo, _lb, _lsm;
         private static int _entered;
 
         // ── 标定：不信 Stopwatch.Frequency，量一遍 ──────────────────
@@ -173,7 +238,26 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            double msPerFrame = 1000.0 / measuredFreq / ticks;
+            // **抽样：只有 1/64 的建筑被计时，所以要按「总台次 : 计时台次」乘回去。**
+            // 分母取实际抽到的数而不是名义的 1/64——掩码是按 entityId 分的，
+            // 而 entityId 不保证均匀，实际比例可能不是正好 64。
+            long sampled = Interlocked.Read(ref _sampled) - _lsm;
+
+            _lsm += sampled;
+
+            double scale = sampled > 0 ? b / (double)sampled : 0.0;
+
+            if (sampled <= 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑·分段耗时：这 60 秒里 {b} 台次**一台都没抽中**"
+                    + $"（按 entityId & {SampleMask} == 0 分层）——要么建筑太少，"
+                    + "要么它们的 entityId 恰好全都避开了这个掩码。本次不报表。");
+
+                return;
+            }
+
+            double msPerFrame = 1000.0 / measuredFreq / ticks * scale;
 
             // **自检：累计耗时不可能超过墙钟 × 线程数。** 超了就说明分母还是错的，
             // 或者这些建筑真的散在很多星球上并行跑——两种情况的结论完全不同，
@@ -182,7 +266,8 @@ namespace ProjectEden.Patches
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"巨型建筑·分段耗时（{ticks} 个逻辑帧、{b / (double)ticks:0} 台/帧、"
-                + $"折合 {busyThreads:0.##} 条线程满载）："
+                + $"**抽样 {sampled}/{b} 台次、乘回 {scale:0.#}×**、"
+                + $"折合 {busyThreads * scale:0.##} 条线程满载）："
                 + $"配方周期 {c * msPerFrame:0.###} ms（{100.0 * c / total:0.#}%）、"
                 + $"储物格同步 {st * msPerFrame:0.###} ms（{100.0 * st / total:0.#}%）、"
                 + $"传送带槽位 {sl * msPerFrame:0.###} ms（{100.0 * sl / total:0.#}%）、"
