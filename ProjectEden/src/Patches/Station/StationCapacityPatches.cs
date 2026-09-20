@@ -284,6 +284,13 @@ namespace ProjectEden.Patches
     [Serializable]
     internal class StationsConfig
     {
+        /// <summary>
+        /// 巨型建筑的物流站跳过派机空扫。**默认关**，它会让那些站点彻底不再派出
+        /// 行星内运输机——理由、账和三道守卫全写在
+        /// <see cref="MegaStationTickSkipPatches"/> 上。
+        /// </summary>
+        public bool skipIdleMegaStationTick;
+
         public int slotCapacity;
 
         /// <summary>储物格数量。超过 6 需要 StationExpandPatches 一并接管。</summary>

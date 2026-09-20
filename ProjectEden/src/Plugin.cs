@@ -130,6 +130,7 @@ namespace ProjectEden
             // Harmony 自己的补丁表里读——「我调了 PatchAll 且没抛异常」不是同一件事
             Patches.Diagnostics.CpuCostProbe.ReportStatus();
             Patches.StationOutputSkipPatches.Report();
+            Patches.MegaStationTickSkipPatches.Report();
             Patches.HubCourierPatches.Report();
             Patches.StationTrafficCoalescer.Report();
             Patches.LocalDispatchBurstPatches.Report();
