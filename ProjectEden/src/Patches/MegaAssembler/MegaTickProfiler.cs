@@ -98,7 +98,7 @@ namespace ProjectEden.Patches
         private const int ProbeCalibrationPairs = 2000;
 
         /// <summary>一台被抽中的建筑在 <c>MegaTick</c> 里要付多少次 <c>GetTimestamp()</c>。</summary>
-        private const int TimestampsPerBuilding = 12;
+        private const int TimestampsPerBuilding = 15;
 
         private static long _sampled;
 
@@ -161,6 +161,28 @@ namespace ProjectEden.Patches
         internal static void AddCalls(int n) { if (_sampling && n > 0) Interlocked.Add(ref _calls, n); }
 
         private static long _calls;
+
+        /// <summary>
+        /// 只包住 <c>AssemblerComponent.InternalUpdate</c> 那一次调用本身。
+        ///
+        /// <para><b>把「配方周期」再劈一刀，而且是最后一刀。</b></para>
+        /// 实测每台每 tick 的配方周期是 16.8 µs，可里面真正的 <c>InternalUpdate</c>
+        /// 只有 **1.7 次**——按 693 条 IL 该有的 200~400 ns 算，那是 0.5 µs。
+        /// **剩下 16 µs 是那一段里的别的东西**，而那一段里除了调用就只剩
+        /// <see cref="MegaBatchSettle"/> 的记账：每次调用前后给 <c>served[]</c> /
+        /// <c>produced[]</c> 拍快照、<c>IsSteadyUnit</c> 逐项比对、<c>ProducedSum</c> 求和。
+        ///
+        /// <b>取值开销已经被排除，而且不靠标定：</b> <c>_tOther</c> 里有 3 个区间 ＝ 6 次取值，
+        /// <c>_tCycles</c> 只有 1 个区间 ＝ 2 次；如果时间主要花在取值本身，前者该是后者的
+        /// 三倍，而实测 <c>_tOther</c> 只占 1.2%、<c>_tCycles</c> 占 86.5%。
+        ///
+        /// <b>这里不去逐个包住记账代码，而是只包住调用</b>——记账 ＝ 配方周期 − 调用，
+        /// 减法比枚举可靠：漏包一处记账，减法仍然把它算在记账头上，
+        /// 而逐个包会把漏掉的那处悄悄算成 0。每台只多 3.4 次取值。
+        /// </summary>
+        internal static void AddInner(long t0) { if (t0 != 0L) Interlocked.Add(ref _tInner, Stopwatch.GetTimestamp() - t0); }
+
+        private static long _tInner;
         /// <summary>
         /// 旧入口，留给还没改过来的调用点。计数已经挪进 <see cref="BeginBuilding"/>——
         /// 抽样判定必须和计数在同一处做，否则「计到的台次」和「计时的那些台次」会对不上，
@@ -170,7 +192,7 @@ namespace ProjectEden.Patches
 
         private static float _nextReport;
         private static long _lastGameTick = -1;
-        private static long _lc, _lst, _lsl, _lo, _lb, _lsm, _lcalls;
+        private static long _lc, _lst, _lsl, _lo, _lb, _lsm, _lcalls, _linner;
         private static int _entered;
 
         // ── 标定：不信 Stopwatch.Frequency，量一遍 ──────────────────
@@ -262,6 +284,11 @@ namespace ProjectEden.Patches
 
             _lcalls = callsNow;
 
+            long innerNow = Interlocked.Read(ref _tInner);
+            long inner = innerNow - _linner;
+
+            _linner = innerNow;
+
             Snapshot();
 
             long total = c + st + sl + o;
@@ -343,9 +370,18 @@ namespace ProjectEden.Patches
                 // 这一段是给「配方周期那 87% 是不是真的」做判据的，见 AddCalls 的注释。
                 // 每次 InternalUpdate 的纳秒数可以独立判断合不合理：那个方法 693 条 IL，
                 // 200~400 ns 才正常
+                // 配方周期再劈一刀：调用本身 vs 批量结算的记账。
+                // 记账＝配方周期−调用，用减法而不是逐个包住记账代码——漏包一处，
+                // 减法仍然把它算在记账头上，逐个包会把它悄悄算成 0
+                + $"　【配方周期内部】InternalUpdate 本身 {inner * msPerFrame:0.###} ms"
+                + $"（{(c > 0 ? 100.0 * inner / c : 0):0.#}%）、"
+                + $"**批量结算的记账 {(c - inner) * msPerFrame:0.###} ms"
+                + $"（{(c > 0 ? 100.0 * (c - inner) / c : 0):0.#}%）**。"
                 + (calls > 0
                     ? $"　**每台每 tick 调 {calls / (double)sampled:0.#} 次 InternalUpdate，"
-                      + $"每次 {c / (double)calls * 1e9 / measuredFreq:0} ns**"
+                      + $"每次 {inner / (double)calls * 1e9 / measuredFreq:0} ns**"
+                      + $"（此前按整个配方周期算是 {c / (double)calls * 1e9 / measuredFreq:0} ns，"
+                      + "那个数把记账也算进了调用里）"
                       + "（693 条 IL，落在 200~400 ns 才正常：明显偏小说明调用数被多算了，"
                       + "明显偏大说明配方周期那一段混进了不属于它的时间）。"
                     : "　⚠ **RunExtraCycles 一次 InternalUpdate 都没调到**——"

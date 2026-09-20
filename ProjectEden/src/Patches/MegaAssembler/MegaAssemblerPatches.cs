@@ -319,7 +319,11 @@ namespace ProjectEden.Patches
                     int cycleBefore = component.cycleCount;
                     int extraBefore = component.extraCycleCount;
 
+                    long tInner = MegaTickProfiler.Now();
+
                     component.InternalUpdate(power, productRegister, consumeRegister);
+
+                    MegaTickProfiler.AddInner(tInner);
 
                     ran++;
                     MegaTickProfiler.AddCalls(1);
@@ -377,7 +381,11 @@ namespace ProjectEden.Patches
             // 原本那次调用紧随其后，所以这里只补差额
             for (var i = 1 + ran; i < cycles; i++)
             {
+                long tInner = MegaTickProfiler.Now();
+
                 component.InternalUpdate(power, productRegister, consumeRegister);
+
+                MegaTickProfiler.AddInner(tInner);
 
                 ran++;
                 MegaTickProfiler.AddCalls(1);
