@@ -1921,6 +1921,36 @@ fourth spelling appears. Note it deliberately keeps **item and recipe grids sepa
 two independent grids (`ProtoSlots.GridKind`) and may legally share a cell, so merging them
 reports false positives, which is its own way of making a real collision invisible.
 
+**And a fourth mistake followed immediately, from the fix for the third: pinning a number is
+worthless if the pin is filed later than someone else's auto-assignment.** 小型速采机's item cell
+was moved off a real collision onto a cell `check_slots.py` reported as free — and the next launch
+printed the *same* 「已被占用，改用 3807」 as before. The cell had been taken in between:
+
+```
+288| 钒渣油的物品格位 3601 已被占用，改用 3207      ← ores.json, gridIndex 0 = "resolver picks"
+419| 钴块 · 甲醇还原的配方格位 3601 已被占用，改用 3207
+695| 小型速采机的物品格位 3207 已被占用，改用 3807   ← the pin, 400 lines too late
+```
+
+`PreAddDataAction` order is **mega buildings → `ores.json` → drill bits → `machines.json`**, and
+`ores.json` has a batch of items whose `gridIndex` is **0**, meaning *"let the resolver pick"* — and
+the resolver scans the visible band from the start. `MachineRegistry.OnPreAddData`'s `ReserveGrid`
+call files **the resolved result**, i.e. it runs after the cell is already gone. So the ledger is
+doing its job and the pin still loses, because the ledger only ever knew about it too late.
+
+Fixed by `MachineRegistry.PreReserveGrids`, a handler that **registers nothing and only files
+claims**, hooked between the mega buildings and `ores.json` in `Plugin.cs`. It files only cells the
+config *explicitly* pins (a `megaTab` `gridRow`/`gridCol`, or a non-zero `gridIndex`) — never
+`WantedGrid`'s fall-back to the source building's vanilla cell, which is occupied by vanilla anyway
+and would just add a spurious duplicate warning. Filing does not move anything (`ReserveGrid` only
+reports), so a genuine pin-vs-pin collision still surfaces as the loud warning it should be.
+
+**The general rule: a reservation ledger orders claims by when they are filed, not by whether they
+were written in a config file.** When a registry pins a value, it has to file that value *before
+every registry that auto-assigns into the same space* — which for this repo means a separate
+claim-only pass, because the registry that pins runs last. Same family as the three above, one
+level in: not "which key holds the number" but "when does the ledger learn about it".
+
 **Mecha fuel has a power multiplier as well as an energy total.** `Mecha.GenerateEnergy` computes `ratio = ItemProto.ReactorInc + 1` (then folds in the proliferator table) and multiplies `reactorPowerGen` by it, so `ReactorInc = 1.5` means **+150% power**. It scales *rate*, not *total* — `HeatValue` is still what determines how long one unit lasts, so a high `ReactorInc` drains each unit faster.
 
 **The vanilla spread that used to be quoted here was wrong in four of five entries, and it had been

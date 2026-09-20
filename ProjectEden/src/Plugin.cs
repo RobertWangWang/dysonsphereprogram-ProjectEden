@@ -151,6 +151,15 @@ namespace ProjectEden
             // 所以 FuelNeedsCapacityPatches 那个使用点前置不是保险，是唯一正确的位置。
             LDBTool.PostAddDataAction += MegaBuildingRegistry.OnPostAddData;
 
+            // **这一趟只登记格位、不注册任何东西，位置就是它的全部意义。**
+            // machines.json 手工钉死的合成面板格位必须抢在 ores.json 的自动分配之前登记：
+            // ores.json 有一批物品写的是 gridIndex 0（「让解析器挑」），而解析器从可见区
+            // 从头扫空格，会把还没登记的钉死格位吃掉。MachineRegistry.OnPreAddData 里那句
+            // ReserveGrid 登记的是**解析结果**，那时格子早没了。
+            // 排在这里而不是塞进 MegaBuildingRegistry：登记簿由它的 ClearReservations 清空，
+            // 所以只能在它之后；而顺序决策集中在本文件，跨注册器互调看不出先后。
+            LDBTool.PreAddDataAction += MachineRegistry.PreReserveGrids;
+
             // 自定义矿脉排在巨型建筑之后：那边的 PostAddData 会重跑 ProtoPreload，
             // 图标改色必须在 Preload 之后做，否则会被 Preload 用原图覆盖回去
             LDBTool.PreAddDataAction += OreRegistry.OnPreAddData;
@@ -314,6 +323,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= MegaBuildingRegistry.OnPostAddData;
             LDBTool.PreAddDataAction -= OreRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= OreRegistry.OnPostAddData;
+            LDBTool.PreAddDataAction -= MachineRegistry.PreReserveGrids;
             LDBTool.PreAddDataAction -= MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= MachineRegistry.OnPostAddData;
             LDBTool.PostAddDataAction -= Utils.LateItemRef.ResolveAll;

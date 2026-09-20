@@ -227,6 +227,72 @@ namespace ProjectEden
 
         // ── 注册 ──────────────────────────────────────────────
 
+        /// <summary>
+        /// 把 machines.json 里**手工钉死**的合成面板格位提前登记掉。
+        ///
+        /// <b>为什么要单开这一趟：钉的时机比钉的值更重要。</b> 注册顺序是
+        /// 巨型建筑 → ores.json → 钻头 → 本文件，而 ores.json 里有一批物品的
+        /// <c>gridIndex</c> 写的是 0（「让解析器挑」），解析器**从可见区从头扫空格**。
+        /// 于是本文件钉的格位还没登记，就已经被前面那批自动分配吃掉了——
+        /// <see cref="OnPreAddData"/> 里那句 <c>ReserveGrid</c> 是在**解析之后**才调的，
+        /// 登记的是解析结果，救不了被抢的那一格。
+        ///
+        /// 实测：小型速采机钉在第 2 行第 7 列，被「钒渣油」（自动分配）和
+        /// 「钴块 · 甲醇还原」抢走，日志只说「已被占用，改用 3807」——
+        /// 读起来像一次成功的回退，实际是这个号从此跟着 ores.json 的物品数量漂。
+        ///
+        /// <b>只登记显式钉死的，不登记回落值。</b> <c>WantedGrid</c> 在没配 megaTab、
+        /// 也没配 gridIndex 时会回落到源建筑的格位——那是原版占着的格子，本来就要挪，
+        /// 提前登记它只会平白多一条重复警告。
+        ///
+        /// 登记本身不挪任何东西（见 <see cref="ProtoSlots.ReserveGrid"/>）：两处手工钉的
+        /// 格位真撞了，它会吼，然后由人去改配置。
+        /// </summary>
+        internal static void PreReserveGrids()
+        {
+            if (Config == null || !Config.enabled || Config.machines == null) return;
+
+            var pinned = 0;
+
+            foreach (MachineEntry entry in Config.machines)
+            {
+                if (entry == null || !entry.enabled) continue;
+
+                int grid = PinnedGrid(entry);
+
+                if (grid > 0)
+                {
+                    ProtoSlots.ReserveGrid(grid, ProtoSlots.GridKind.Item, entry.displayName);
+                    pinned++;
+                }
+
+                // 建造配方没单配 recipeGridIndex 时跟着物品格位走，和 BuildRecipe 里的回落一致
+                int recipeGrid = entry.recipeGridIndex > 0 ? entry.recipeGridIndex : grid;
+
+                if (recipeGrid > 0)
+                    ProtoSlots.ReserveGrid(recipeGrid, ProtoSlots.GridKind.Recipe,
+                        entry.displayName + "（配方）");
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"machines.json 手工钉死的合成面板格位已提前登记 {pinned} 个"
+                + "——注册顺序排在 ores.json 的自动分配之前，否则钉的号会被抢走");
+        }
+
+        /// <summary>
+        /// 这条配置**显式**要求的物品格位；没有显式要求则 0。
+        /// 和 <see cref="WantedGrid"/> 的区别只有一个：不走「回落到源建筑格位」那一支。
+        /// </summary>
+        private static int PinnedGrid(MachineEntry entry)
+        {
+            if (entry.megaTab && MegaBuildingRegistry.TabIndex > 0)
+                return MegaBuildingRegistry.GridIndex(
+                    entry.gridRow > 0 ? entry.gridRow : 1,
+                    entry.gridCol > 0 ? entry.gridCol : 1);
+
+            return entry.gridIndex > 0 ? entry.gridIndex : 0;
+        }
+
         internal static void OnPreAddData()
         {
             Machines.Clear();

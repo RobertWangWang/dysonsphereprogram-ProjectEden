@@ -149,11 +149,18 @@ def cells(kind):
 
 for kind, label in (("item", "物品"), ("recipe", "配方")):
     t = survey("%s格位（gridIndex + gridRow/gridCol）" % label, cells(kind),
-               "ores.json 写 %d 的是「让解析器挑」，已排除" % PLACEHOLDER)
+               "ores.json 写 %d 或 0 的是「让解析器挑」，不在这张表里" % PLACEHOLDER)
     for row in (1, 2, 3):
         base = PAGE * 1000 + row * 100
         print("  第 %d 页第 %d 行空闲（1..14 列）：%s"
               % (PAGE, row, [c for c in range(1, 15) if base + c not in t]))
+
+print("""
+注意：上面的「空闲」只代表**没有别的配置钉在这一格**，不代表你钉过去就一定拿得到。
+ores.json 里 gridIndex 写 0 的那批物品由解析器从可见区从头扫空格，而它注册在
+machines.json 之前——所以 machines.json 新钉一个号，必须同时确认
+MachineRegistry.PreReserveGrids 会把它提前登记掉（它只登记显式钉死的格位）。
+这一条是实测出来的：小型速采机钉到一个「空闲」格，照样被自动分配抢走了。""")
 
 print("\n%s" % ("全部无冲突" if _bad == 0 else "共 %d 处冲突，见上" % _bad))
 sys.exit(1 if _bad else 0)
