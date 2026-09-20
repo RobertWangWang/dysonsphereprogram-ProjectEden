@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.11.0";
+        public const string VERSION = "1.12.0";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -92,6 +92,9 @@ namespace ProjectEden
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
             AbnormalityConfig = JsonHelper.Load<Patches.AbnormalityConfig>("abnormality");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
+            // 行星放大（planet.json，默认关）。自己 Load：倍率要在这里就吸附成合法
+            // 半径并算出 precision/segment，开机状态行才报得出「实际会按哪组数跑」
+            Patches.PlanetRadiusPatches.Load();
             Patches.Diagnostics.CpuCostProbe.Load();
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             Patches.LensPatches.Config = JsonHelper.Load<Patches.LensConfig>("lens");
@@ -109,6 +112,7 @@ namespace ProjectEden
             ReportCheats();
             ReportAbnormality();
             ReportCargoProbe();
+            Patches.PlanetRadiusPatches.Report();
             Patches.CargoWidening.Report();
             Patches.QualityWidening.Report();
             Patches.QualitySourcePatches.Report();
@@ -131,6 +135,8 @@ namespace ProjectEden
             Patches.Diagnostics.CpuCostProbe.ReportStatus();
             Patches.StationOutputSkipPatches.Report();
             Patches.MegaStationTickSkipPatches.Report();
+            // 转译器跑完才数得出改写了几处
+            Patches.PlanetModPlanePatches.Report();
             Patches.HubCourierPatches.Report();
             Patches.StationTrafficCoalescer.Report();
             Patches.LocalDispatchBurstPatches.Report();

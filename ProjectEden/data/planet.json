@@ -1,0 +1,37 @@
+{
+  "//": "把行星做大。**默认关**——这是本仓库唯一一个开了就没法回头的开关，比 preloader 还硬，理由见下面的 //存档。",
+
+  "//how": "改这里：BepInEx/config/ProjectEden/planet.json（不存在就新建，内容照抄本文件）。改完重开游戏，不用重新编译。",
+
+  "//为什么单独一个文件": "JsonHelper 的磁盘覆盖是**整份文件**的。塞进 stations.json 就意味着为了翻一个 bool 而遮住整份物流配置，之后对内嵌那份的每一次修改都静默失效。cargoprobe.json / abnormality.json / perfprobe.json 都是为同一条理由单独成文件的。",
+
+  "//能做的理由": "**可建造格子数本来就是从半径推出来的**，这一条是从 IL 读出来的，不是推的。PlanetAuxData..ctor @0015：\n\n    mainGrid = new PlanetGrid(type, (int)(radius / 4f + 0.1f) * 4, identity)\n\n而 PlanetGrid.SnapTo 里纬度是 lat/(2pi) * segment、再「*5 取整 /5」细分五格，经度由 DetermineLongitudeSegmentCount 按 cos(纬度)*segment 给。所以**格子数正比于 segment 的平方、也就是半径的平方，而每格的物理尺寸恒定**——半径 200 -> 400 就是实打实 4 倍可建造面积，建筑占格一格不变。这一块一行代码都不用写。",
+
+  "//三个数必须一起动": "radius 只改大，地形会跟着变糊：高度图样本数是 (precision+1)^2*4，摊在 4 倍表面上就是四分之一的密度，地基和地形起伏会变成建筑的两倍大。所以三个数绑在一起：\n\n    radius    = 200 * 倍率        （原版 200）\n    precision = radius            （原版 200，恰好等于半径）\n    segment   = radius / 40       （原版 5）\n\nprecision/segment 是每块地形网格的顶点边长（ModelingPlanetMain @0869、AddHeightMapModLevel @0013），原版是 40，上面这组换算让它恒等于 40。**所以半径必须是 40 的倍数**：不整除的话分块铺不满球面。本文件会把倍率吸附到最近的合法半径并在日志里报出来。",
+
+  "//存档": "**开了就回不去，而且改倍率等于重开档。** 建筑坐标存的是行星局部坐标、模长约等于 radius，半径一改，所有星球上已有的建筑全部在错误的高度。这比 preloader 那条更硬——preloader 是「卸了就打不开」，这条是「配置里这个数一改就等于重开」。\n\n还有一条会直接崩：PlanetRawData.InitModData 只有 16 条指令，@0003 就是 stfld，**把存档里的 modData 数组按引用直接装上、不查长度**。modData 长度 = dataLength/2 = (precision+1)^2*2，老存档那份 80802 字节装进 precision=400 的星球（要 321602）-> 第一次读地形就越界抛异常。是崩，不是降级。\n\n**所以：只在全新存档上开，开了之后不要再动这个数。**",
+
+  "//代价": "1. 内存正比于 precision 的平方。PlanetRawData 那堆数组（vertices/normals 两个 Vector3[] 占大头）每颗星约 5 MB -> 2 倍半径约 20 MB，而且**已加载的和被扫描过的都要算**，稀有矿勘探器一口气扫几十颗时会翻上去。\n2. CalcVerts 掉出快路径。@0000 和 @0043 是 precision 200 和 80 **两个写死值**的记忆化拷贝，其余走 @0083 的通用路径，每颗星重算六十多万个顶点。正确，只是慢。\n3. 地形网格块数 = 4 * segment^2（量法见下一条），2 倍半径就是 100 -> 400 块，也就是 4 倍地形绘制调用。每块的顶点数不变（仍是 41^2）。\n4. **一颗星球就是一个工作项**（ResetFrame 的工作项数量是行星数，_inserter_parallel 按行星整颗偷取），所以一颗超建的星球是单线程的。星球变大不会让现有工厂变慢，但它**拿掉了原先那道天然的实体数上限**，而那条线程已经是瓶颈。",
+
+  "//更正-网格数组": "**本文件早先写着「kMaxMeshCnt 全程零引用，不构成闸」，那是错的，而且第一次试玩就因为它崩了**（ModelingPlanetMain @107A 的 stelem.ref 越界）。kMaxMeshCnt 是 const int = 100，也就是字面量，被内联烘死在 PlanetData..ctor 的四个 newarr 上（Mesh / MeshRenderer / MeshCollider / dirtyFlags）——**按字段引用去搜搜不到的，正是最该担心的那一类**。\n\n而 100 恰好等于 segment=5 时的实际块数，一点余量都没有：块数 = 4 象限 * segment * segment，量自 ModelingPlanetMain 的三层循环（外层 V_21 < 4 @0EAC，内两层以 precision/segment 为步长走到 precision，@0E8B/@0E9B）。segment 提到 10 要 400 块，于是写到第 100 块就越界。\n\n现在 CreatePlanet 后置会把这四个数组一并撑到 4*segment^2。其余消费方都安全，这是数过的：ModelingPlanetMain 里那三个 100 是 new List<>(100) 的初始容量（会自己长），UnloadMeshes / UpdateDirtyMeshes / PlanetReformAll / PlanetReformRevert 全是 ldlen 兜底，GetUnloadedCopy 是 MemberwiseClone 之后把这四个置空。",
+
+  "//本 mod 反而适合大星球": "原版大星球的隐藏代价是无人机单程距离翻倍、行星内物流变慢。而这里巨型建筑早就不派无人机了（虚拟物流直接在储物格之间搬，skipIdleMegaStationTick 这一版还转正成默认开），所以这条代价在本 mod 里基本不存在。",
+
+  "//和银河尺度冲突": "装了 GalacticScale 2 时本开关**自动失效并在日志里说明**。GS2 自己就在决定每颗星的半径，我们再乘一道等于把它的尺寸逻辑和 scale 一起打乱。两个都想改同一个数的时候，让先到的那个说了算。",
+
+  "enabled": false,
+
+  "//radiusMultiplier": "半径倍率，基准是原版的 200。会被吸附到最近的合法半径（40 的倍数）并夹在 [200, 600] 之内。**实测过的只有 2.0（半径 400）。**",
+
+  "//上限是怎么来的": "**硬墙是 655.35，来自 heightData**：它是 UInt16、单位「高度 × 0.01」，而写入侧（PlanetAlgorithm*.GenerateTerrain，例如 PlanetAlgorithm7 @02C0-02E1）是 `heightData[i] = (ushort)((radius + 起伏) * 100)`——**conv.u2 直接截断，没有任何钳位**。超过就回绕到接近 0，整颗星的地形炸掉。所以约束是「半径 + 最高山 < 655.35」。\n\n**起伏不随半径缩放**（查过：噪声采样坐标是 vertices*radius 即世界坐标，所以地貌物理尺寸恒定，半径变大只是同样大小的山更多座；振幅系数和 radius 无关）。于是余量 = 655.35 - 最高山，和半径无关。\n\n配置上限取 600（3 倍，面积 9 倍）是留余量：给最高山留了 55 格，而 vanilla 的山大约 10-15 格。理论上限在 640 附近，具体取决于这一局最高的山——把 probe 打开，日志里会直接报「全星球高度极值」和推算出的半径上限。\n\n**一条被否掉的上限**：本文件早先写着 480，理由是 DetermineLongitudeSegmentCount 在 >=500 时离开 segmentTable。重读 @002C-0045 之后那是错的——segmentTable[n] **只在 n < 500 时才取**，而数组长 512，所以永远不越界；n >= 500 走「进位到百」的另一支，同样能跑。看着像上限的数，在找到执行它的代码之前只是个主张。",
+
+  "//放大代价一览": "半径 / 倍率 / 可建造面积 / 精度 / 地形分块数 / 每颗星内存：\n  200  1.0x   1.0x   200   100 块    4.9 MB   （原版）\n  400  2.0x   4.0x   400   400 块   19.3 MB   （已实测）\n  480  2.4x   5.8x   480   576 块   27.8 MB\n  560  2.8x   7.8x   560   784 块   37.8 MB\n  600  3.0x   9.0x   600   900 块   43.4 MB   （配置上限）\n内存那一列是 PlanetRawData 的数组合计（vertices/normals 两个 Vector3[] 占大头），**已加载的和被扫描过的都要算**——稀有矿勘探器一口气扫几十颗时这一列会翻上去，实际上它比 655.35 那道硬墙更早成为瓶颈。",
+  "radiusMultiplier": 2.0,
+
+  "//地基基准面-必读": "**原版把地基的基准面写死在半径 200 上，这是放大功能唯一一个真正的拦路 bug，已修。** PlanetRawData.GetModPlane 末尾是 `return (short)(plane * 133 + 20020)`，而 20020 = (200 + 0.2) * 100，全程序集只出现这一处。写入侧是对的（FlattenTerrain @0578 算等级用的是 (pos.magnitude - 0.2 - realRadius) / 1.333333，跟着半径走），错的只是读回来时的基准。\n\n后果：半径 400 的星球上，任何 modLevel > 0 的格子，渲染和碰撞高度 h*(1-t) + 基准面*t 都被拉向 200.2，**地面塌进星球内部 200 格**。开局唯一设 modLevel 的地方是 BuildFinally -> FlattenTerrain 给初始部署仓整的那块地，所以表现是「出生点永远是个水洼，走进去掉下去出不来」。而玩家自己铺的任何地基都会塌成同样的洞——**这条不修，放大功能等于没有地基系统**。\n\n修法见 PlanetModPlanePatches：改三个消费方而不是 GetModPlane 本身，因为它返回 Int16，而正确值 (realRadius+0.2)*100 在半径 400 时是 40020，超过 32767 会溢出。半径 200 时偏移为 0，返回值和原版逐位相同。",
+
+  "//查这个 bug 花了七轮，教训记在这里": "前六轮都在错的层里找，因为三个「独立」测量（QueryHeight、环带扫描、暴力最近顶点）**共用同一份 heightData**，而 heightData 从头到尾都是对的——塌的是几何。真正解开它的是两件事：玩家报的「走过去会掉下去、出不来」（把问题从「水」改成「洞」），以及最后那个**拿几何和数据对质**的探针。教训：**当几个测量一致地说「没问题」时，先问它们是不是在量同一个东西**。",
+
+  "//probe": "出生点诊断探针，**默认关**。打开之后会在落地 5 秒后做一次全量扫描：暴力遍历约 64 万个地形顶点，再读最近四块网格的顶点数组，把「地形数据」和「真正被画出来/拿去碰撞的几何」摆在一起对质。一次性，约几十毫秒加几 MB 垃圾——够贵，所以默认关着。它就是查出上面那个根因的工具，留着是因为「数据对、几何错」这一类问题只有两侧对质才看得出来。",
+  "probe": false
+}

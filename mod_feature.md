@@ -61,6 +61,7 @@ no power spacing / pump anywhere), likewise in section XIV. Alloy ammo's "one pr
 - [XXXIV. Black holes and neutron stars: veins placed by star type, and shipping electricity](#xxxiv-black-holes-and-neutron-stars-veins-placed-by-star-type-and-shipping-electricity)
 - [XXXV. The logic frame on a big factory: three optimisations that cost no output](#xxxv-the-logic-frame-on-a-big-factory-three-optimisations-that-cost-no-output)
 - [XXXVI. Antimatter: hoarding what a black hole evaporates](#xxxvi-antimatter-hoarding-what-a-black-hole-evaporates)
+- [XXXVII. Bigger planets: twice the radius, four times the buildable area (off by default)](#xxxvii-bigger-planets-twice-the-radius-four-times-the-buildable-area-off-by-default)
 - [Config Quick Reference](#config-quick-reference)
 
 > Each section stands on its own — no need to read in order. For config file names, jump to the last section.
@@ -4507,6 +4508,99 @@ Saturated Getter ×3   → Porous Getter ×2 + Hydrogen ×1    (Redox Chemical P
 ```
 
 Regeneration returns fewer than it consumed (3 → 2), so it is a **lossy** loop, not a perpetual one.
+
+## XXXVII. Bigger planets: twice the radius, four times the buildable area (off by default)
+
+One switch (`enabled` in `planet.json`) and one multiplier (`radiusMultiplier`, default 2.0).
+This section adds no items, recipes or buildings — it changes the size of every ordinary planet
+in the galaxy.
+
+**The important part first: only turn it on for a brand-new save, and never change the number
+afterwards.** A building's position is stored in planet-local coordinates whose magnitude is
+approximately the radius, so changing the radius puts every building in every existing save at the
+wrong altitude. This is a harder commitment than this mod's preloader: that one means "the save
+will not open once you uninstall", this one means "**changing this number is the same as starting
+over**".
+
+### Why it is cheap: the build grid already derives from the radius
+
+Vanilla itself keys build-grid density on the radius — one line in `PlanetAuxData`'s constructor:
+
+```
+mainGrid = new PlanetGrid(type, (int)(radius / 4f + 0.1f) * 4, identity)
+```
+
+Snapping then derives latitude as `lat/(2π) × segment`, longitude as `cos(latitude) × segment`,
+and subdivides each by five. So **the cell count scales with the square of the radius while each
+cell keeps a constant physical size** — doubling the radius gives exactly 4× the buildable area
+with every building occupying the same number of cells. None of that needed any code.
+
+Terrain does not smear out either: the noise is sampled in **world coordinates**, so mountain
+size, coastline curvature and the density of rocks and trees are identical to vanilla. What
+changes is that there is more of the same-sized landscape.
+
+### Three numbers have to move together
+
+Raising the radius alone spreads the height-map samples over four times the surface, leaving a
+quarter of the density — foundation tiles and terrain relief would end up twice the size of the
+buildings standing on them. So the three numbers are locked together:
+
+```
+radius = 200 × multiplier      precision = radius      segment = radius / 40
+```
+
+`precision / segment` is the vertex edge length of one terrain mesh tile; vanilla is 200/5 = 40,
+and the mapping above keeps it at exactly 40 — the cost being that **the radius must be a multiple
+of 40**. Anything else is snapped to the nearest legal value and the log says so. Tile count is
+`4 × segment²`, so 100 tiles become 400, each still 41² = 1681 vertices.
+
+### Two vanilla constants are hardcoded to radius 200
+
+Neither is optional, and neither presents as "a number is off".
+
+**(1) The mesh arrays are allocated from `kMaxMeshCnt = 100`, and 100 is exactly enough for
+segment = 5.** It is a `const`, inlined as a literal into four `newarr` instructions — searching
+for the field name finds nothing. Segment 10 needs 400 tiles, and writing the 101st overruns the
+array and crashes.
+
+**(2) The foundation base plane is hardcoded as `20020 = (200 + 0.2) × 100`.** The write side is
+correct (flattening derives the foundation level from `realRadius`); **only the base used when
+reading it back is wrong**. On a radius-400 planet every cell carrying a foundation has its
+rendered and collided height pulled toward 200.2 — **the ground collapses 200 units into the
+planet's interior**. The only place a new game lays a foundation is under the starting pod, so the
+symptom is "**you always spawn in a pond, and walking into it drops you through with no way
+out**". Any foundation the player lays would collapse the same way.
+
+This one took seven rounds, because three seemingly independent measurements all read the same
+terrain data — and **the terrain data was correct throughout**. What collapsed was the geometry.
+What cracked it was the phrase "walking into it drops you through" (which turned the problem from
+"water" into "a hole"), plus a final probe that put the geometry and the terrain data side by side.
+
+### The costs, and why it ships off
+
+| Radius | Multiplier | Buildable area | Terrain tiles | Memory per planet |
+|---:|---:|---:|---:|---:|
+| 200 | 1.0× | 1.0× | 100 | 4.9 MB |
+| **400** | **2.0×** | **4.0×** | 400 | 19.3 MB |
+| 600 | 3.0× | 9.0× | 900 | 43.4 MB |
+
+The configured ceiling is 600; the real wall is **655.35**. Terrain height is a 16-bit integer in
+units of `height × 0.01`, and the write path has **no clamp at all** — exceed it and the value
+wraps, destroying the whole planet's terrain. Relief does not scale with radius, so the headroom
+is `655.35 − the tallest mountain`, independent of the radius itself.
+
+**Three other limits arrive earlier, and none of them is in the code**: memory (loaded *and*
+scanned planets both count, so a prospecting sweep over dozens of planets hits this first), **one
+planet is one work item** (the engine hands a whole planet to one thread, so an overbuilt planet is
+single-threaded and more cores do not help), and terrain draw calls scale with the tile count. So
+**2× is the only multiplier that has been measured, and the only one recommended**.
+
+**One thing works in this mod's favour**: vanilla's hidden cost for a bigger planet is that drone
+round trips take twice as long. Here the mega buildings stopped launching drones long ago (virtual
+logistics moves goods directly between storage slots), so that cost barely exists.
+
+With **GalacticScale 2** installed this switch disables itself and says why in the log — GS2
+already decides each planet's radius, and two things writing the same number only fight.
 
 ## Config Quick Reference
 
