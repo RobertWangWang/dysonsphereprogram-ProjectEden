@@ -35,6 +35,23 @@ namespace ProjectEden.Patches.Diagnostics
         private static bool _armed;
 
         /// <summary>
+        /// 上一次采到的 <c>Total</c> 和 <c>aveFrame</c>，只为回答「这张表到底有没有在动」。
+        ///
+        /// <b>这一对是被自己坑了一次之后补的。</b> 第一版只在 <c>Total == 0</c> 时报警，
+        /// 结果五次采样打出**一模一样**的 22.398 / 12.409 / 5.889 / 5.207——而那两种情况
+        /// 探针分不开：滑动平均的窗口太长（数是真的，只是阻尼大），还是
+        /// <c>SummarizeCpuStats</c> 压根没被调（数是死的）。
+        ///
+        /// 判据来自它唯一的调用者：<c>PerformanceMonitor.SummarizeCpuStats</c> 全程序集**只有一处**
+        /// 调用，在 <c>DeepProfilerLateScript.LateUpdate</c> @005F，而那个脚本挂在
+        /// <c>UIRoot.instance.deepProfiler</c> 上——它没在跑，这张表就永远停在最后一次的值上。
+        /// <c>aveFrame</c> 是 <c>SlideAverage</c> 每次进来就 +1 的计数器，所以**它不动 = 没在采样**，
+        /// 这是个和被测值无关的独立信号。
+        /// </summary>
+        private static double _lastTotal = -1;
+        private static long _lastAveFrame = -1;
+
+        /// <summary>
         /// 只报这些分项。**不是全部 48 个**——一屏几十行等于没报，而这十几个正是
         /// <c>行星工厂</c> 那棵树上真正会动的叶子，和普查那张对象数量表一一对应。
         /// </summary>
@@ -108,9 +125,47 @@ namespace ProjectEden.Patches.Diagnostics
                 return;
             }
 
+            // **先回答「这张表在动吗」，再给数。** aveFrame 是 SlideAverage 每次进来就 +1 的
+            // 计数器，和被测的毫秒数完全无关——它不动就说明 SummarizeCpuStats 没被调，
+            // 那么下面每一行都是上一次的残值，而残值和「负载稳定」长得一模一样。
+            long aveFrame = PerformanceMonitor.aveFrame;
+            long aveWindow = PerformanceMonitor.aveWindow;
+            long frames = _lastAveFrame < 0 ? -1 : aveFrame - _lastAveFrame;
+
+            if (frames == 0)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"CPU 分项耗时：**这张表没有在更新**（aveFrame 停在 {aveFrame}）。"
+                    + "PerformanceMonitor.SummarizeCpuStats 全程序集只有一处调用——"
+                    + "DeepProfilerLateScript.LateUpdate @005F，挂在 UIRoot.instance.deepProfiler 上。"
+                    + "那个脚本没跑，下面的数就全是残值。本次不报表。");
+
+                _lastAveFrame = aveFrame;
+
+                return;
+            }
+
             var sb = new StringBuilder();
 
             sb.Append("CPU 分项耗时（原版自己的口径，和「统计面板 → 性能测试」同一个数）：");
+
+            // 把「采了多少帧」和「和上次比变了没有」摆在最前面：读数能不能信，先于读数本身
+            sb.Append("\n  本次采样：距上次 ").Append(frames < 0 ? "首次" : frames + " 帧")
+              .Append("　平均窗口 ").Append(aveWindow).Append(" 帧");
+
+            if (_lastTotal >= 0)
+            {
+                double delta = total - _lastTotal;
+
+                sb.Append("　总计较上次 ").Append(delta >= 0 ? "+" : "").Append(delta.ToString("0.000")).Append(" ms");
+
+                if (System.Math.Abs(delta) < 1e-9)
+                    sb.Append("　⚠ **一点没变**——滑动平均阻尼太大或者根本没在采样，"
+                              + "这一栏的数别当实测用");
+            }
+
+            _lastTotal = total;
+            _lastAveFrame = aveFrame;
 
             // 缩进照原版的层级表来，读起来就是面板上那棵树；`行星工厂` 是容器不是开销，
             // 它等于底下那几行之和（本仓库已经在这上面栽过一次）
@@ -135,6 +190,13 @@ namespace ProjectEden.Patches.Diagnostics
                   .Append(name).Append('：').Append(ms.ToString("0.000")).Append(" ms");
 
                 if (total > 0.0) sb.Append("　（").Append((ms / total * 100.0).ToString("0.0")).Append("%）");
+
+                // 本帧值。**平均值阻尼太大时，只有它会动**——两个数并排摆着，
+                // 「这张表死了」和「负载真的很稳」就不再需要猜
+                double[] frame = PerformanceMonitor.timeCostsFrame;
+
+                if (frame != null && idx < frame.Length)
+                    sb.Append("　本帧 ").Append((frame[idx] * 1000.0).ToString("0.000"));
             }
 
             sb.Append("\n  判读：**「行星工厂」是容器不是开销**，它等于底下那几行之和。");
