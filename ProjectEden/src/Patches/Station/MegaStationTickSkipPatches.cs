@@ -204,9 +204,9 @@ namespace ProjectEden.Patches
             if (!ProjectEdenPlugin.StationsConfig.skipIdleMegaStationTick)
             {
                 ProjectEdenPlugin.Log.LogInfo(
-                    "巨型建筑物流站·跳过空扫：已关闭（默认值）。打开它，巨型建筑的站点会**彻底不再派出"
-                    + "行星内运输机**——那本来就是虚拟物流想达成的效果，区别只是从「扫一圈发现没活」"
-                    + "变成「压根不扫」。实测一颗 6397 站的星球上，那一圈空扫占「物流运输」的大头。"
+                    "巨型建筑物流站·跳过空扫：**已手动关闭**（默认是开的）。关掉之后巨型建筑的站点"
+                    + "会恢复派出行星内运输机，代价是每 12.8 帧一次的整圈配对环空扫回来了——"
+                    + "实测一颗 6397 站的星球上，那占原版「物流运输」的 35%。"
                     + "开关在 stations.json 的 skipIdleMegaStationTick");
 
                 return;
