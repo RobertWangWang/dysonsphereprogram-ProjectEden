@@ -3352,8 +3352,15 @@ provable rather than argued.** Both of its loops open with `dir != IODir.Output 
 `beltId == 0 → continue`, and *every* write in the method — `StationStore.count`/`inc`,
 `SlotData.counter`/`beltId`, `SignData.iconType`/`iconId0`, `warperCount` — is downstream of those
 two tests. The one write that a skip does forgo is `outSlotOffset` (IL 03F2, the round-robin
-cursor), and nothing reads it while there are no output ports. Measured skip rate **97.6%**;
-`CargoTrafficMisc` 7.075 → 0.549 ms. **Note that bucket contains no belts**:
+cursor), and nothing reads it while there are no output ports. Measured skip rate **97.6%** on the
+save it was written against; `CargoTrafficMisc` 7.075 → 0.549 ms.
+
+**That 97.6% is a property of that save, not of the patch, and a later save measured 58.9%.** The
+skip fires only when a station has no *output belt port*, and on the second save four in ten mega
+buildings really do have one — so the nested loop runs for them and the rate drops by 40 points.
+Both numbers are correct; what is wrong is reading either as "the skip rate". **When a diagnostic
+prints a ratio, the ratio describes the factory, not the code** — quote it with the save it came
+from, or it becomes a claim that the next measurement contradicts. **Note that bucket contains no belts**:
 `FactoryCargoTrafficMiscGameTick_Parallel`'s body calls exactly piler, monitor, spraycoater and
 station_output.
 
@@ -3399,6 +3406,93 @@ buckets**, re-printing only when the planet or the counts change; it additionall
 by ownership (mega building / collector / plain) and computes `Σ storage.Length × slots.Length`,
 the exact inner-loop count of `UpdateOutputSlots`. That split is what disproved the
 "894 miners are wasting 30 slots each" theory — they average **1.1**.
+
+### A second campaign, on a bigger save — and the instrument was wrong four times before the code was
+
+Measured on **29,251 entities / 4,632 mega buildings / 6,397 stations / 1,764 miners** on one
+planet. Outcome: **`LogisticsTransport` 8.0 → 2.4 ms per frame**, with no output traded away.
+Everything below is measured; the four instrument failures are recorded because each one produced a
+confident, wrong number first.
+
+**Getting a live per-task breakdown into the log took four attempts, and the first three all looked
+like they worked.**
+
+| attempt | what it produced | why |
+|---|---|---|
+| `SetCpuProfilerActive(true)` + read `timeCostsAve` | five samples **bit-identical** | those 8 instructions only set a bool |
+| drive `SummarizeCpuStats` ourselves each frame | every bucket **0** | its samplers all open with `ldsfld DeepProfiler::watchEnabled`, which was false |
+| set `watchEnabled` once at startup | worked one session, **dead the next** | `DeepProfilerLateScript.LateUpdate` writes it too — a race |
+| set it **every frame**, read `ThreadManager.performanceCountersOn*Task*` | live | those counters are a *different pipeline* from the DeepProfiler sample pool |
+
+**The rule this cost four launches to re-learn: a switch named `SetXxxActive` is not evidence that
+anything is being driven.** `DeepProfiler.watchEnabled` is the real master — `GameThreadController.LogicFrame`
+@005B–0060 copies it into `ThreadManager.samplePerformanceCounters` every logic frame, and every
+`DeepProfiler.Begin*/End*Sample` opens by reading it. Same family as *a named constant with zero
+readers is a claim*: **find who writes the number, do not trust what the switch is called.**
+
+**And a probe needs a liveness signal that does not participate in the reading.** The frozen
+`timeCostsAve` looked exactly like a very stable factory. What separated them was `aveFrame` — a
+counter that has nothing to do with milliseconds and must advance every frame. The first version
+only warned on `Total == 0`, which catches "nothing was ever sampled" and not "sampled once, then
+stopped" — and the second is the default state.
+
+**The per-task table cannot be read as a per-task cost.** `FactoryFacility` (1601), `FactoryLabResearch`
+(1700), `FactoryTransport` (1751) and `FactoryLabOutput` (1800) are *consecutive* stages, and
+`GetThreadTaskTime_MainToAll` measures "from my begin until every worker finished" — so their spans
+**overlap**, and four numbers near 5 ms each sum to more than the whole frame. Small numbers in that
+table are trustworthy; large ones are not additive.
+
+**Then the top bucket had six of this mod's own hooks inside it, and the vanilla profiler
+structurally cannot see that.** It times *tasks*, and our code lives inside one. The split is two
+sentinels on the same method — a prefix and a postfix at `Priority.First`, another postfix at
+`Priority.Last` — so `mid − begin` is vanilla's body and `end − mid` is ours, **with no existing
+code touched**. Measured: **86.5% vanilla, 13.5% ours.** A `Phase(name)` call at the top of each of
+our postfixes then split our half further, and its semantics are *"the previous owner stops here"*,
+so **the postfix order (which Harmony does not guarantee for equal priorities) never has to be
+known**.
+
+Counting them also corrected a claim this file had made: **there are five postfixes and one
+prefix**, not six postfixes — `LogisticsGlobalPatches` is a prefix, so its cost was always inside
+"vanilla". *Which method a patch hangs off is not evidence; the annotation is.*
+
+**The two shipped cuts, both from that breakdown:**
+
+- **`StationCapacityPatches` was the single most expensive one — 0.5 ms/frame — and it had been
+  "done" for hours.** Its bootstrap really is once per station (`Bootstrapped.TryAdd` guards it),
+  but **the loop around the guard ran every tick forever**: 6,397 stations × a `HashSet.Contains`
+  and a tuple-keyed `ConcurrentDictionary` probe, 60 times a second. It now records, per planet, the
+  `stationCursor` at which a pass changed nothing and skips until the cursor moves or a 600-tick
+  fallback expires. **604 → 23 ms per 20 s.** The rule: **"this is done once" and "deciding whether
+  this is done costs once" are different statements** — the ledger stopped the repeated *writes*, not
+  the traversal that consulted it.
+- **Mega-building stations skip the dispatch scan** (`skipIdleMegaStationTick`, **off by default**).
+  Vanilla's scan leaves early when it finds work and **walks the entire pair ring when it does not** —
+  and a mega building never finds work, because `MegaVirtualLogisticsPatches` already moved the
+  goods. 4,632 buildings ÷ a 12.8-frame interval ≈ **21,000 whole-ring empty scans per second**.
+  Skipping is **not an equivalence**, it is the stated decision that these stations stop launching
+  drones, which is what virtual logistics was for; hence the default and the three guards
+  (virtual logistics on, `workDroneCount == 0`, and the repo's usual speed-threshold discriminator).
+  Measured **−35% on vanilla's half**, with **+33% on ours** — the work moved rather than vanishing,
+  and the total still fell.
+
+**`生产设施` was then measured and deliberately left alone, and the reasoning is the useful part.**
+`MegaTickProfiler` already existed and was off, because twelve `Stopwatch.GetTimestamp()` per
+building per tick is ~860k icalls/s — *the same order as what it measures*. Sampling 1 in 64 fixes
+the **aggregate** cost; it does **not** fix the per-sample bias, which is a distinction this file's
+own rule did not spell out. With the probe self-calibrating (23 ns per timestamp, 1.4% of the total)
+and the interval split one level further, the breakdown is: recipe cycles **85.7%**, of which
+`InternalUpdate` itself is 60.8% at **1.7 calls per building per tick**, the rest being batch-settle
+bookkeeping. Storage sync is **6–7%** — so the low-risk dirty-flag idea has a ceiling of 7% and is
+not worth it, and the call count is already near its floor (the early exit saves 63.6%, batching
+covers 94.9%). **The remaining lever is caching the batch-settle probe call, which trades a
+correctness guarantee for ~30% of `MegaTick`; the owner declined it.**
+
+And one unresolved number, recorded rather than explained away: **a single `InternalUpdate` measures
+5,669 ns against the 200–400 ns its 693 IL instructions suggest.** Probe overhead is ruled out
+*without* relying on the self-calibration — `_tOther` contains three intervals (six timestamps) and
+`_tCycles` one (two), so if timestamps dominated, `_tOther` would be the larger; it is 1.2% against
+85.7%. The likely mechanism is cache traffic on `productRegister[]` / `consumeRegister[]`, which are
+shared across the ~31 worker threads, but that is a hypothesis and is labelled as one.
 
 ## Game internals: building is part of the logic frame, and this mod makes it quadratic
 
