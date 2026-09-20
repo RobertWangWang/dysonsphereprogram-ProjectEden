@@ -89,6 +89,18 @@ namespace ProjectEden.Patches.Diagnostics
         {
             if (!_armed) return;
 
+            // **每帧重申，不是开机置一次。**
+            // watchEnabled 是个公共静态 bool，而 DeepProfilerLateScript.LateUpdate @00D5 也写它。
+            // 置一次的版本实测是**时灵时不灵**：上一局三次采样全是活的，下一局同样的代码
+            // 报了三次「samplePerformanceCounters 仍是 false」。谁最后写谁赢，而那取决于
+            // Update / LateUpdate / FixedUpdate 的先后——这是竞态，不是逻辑错。
+            //
+            // 本仓库早有这条：**你写下的值，别人不还你就得自己反复写**
+            //（UIStationStorage 的行位置、能量条的框，都是这个形状）。两条静态赋值，
+            // 每帧做一遍的代价可以忽略。
+            DeepProfiler.watchEnabled = true;
+            PerformanceMonitor.SetCpuProfilerActive(true);
+
             if (Interlocked.Exchange(ref _entered, 1) == 0) Arm();
 
             float now = Time.realtimeSinceStartup;
@@ -96,6 +108,12 @@ namespace ProjectEden.Patches.Diagnostics
             if (now < _nextPoll) return;
 
             _nextPoll = now + Config.perfProbeSeconds;
+
+            // **劈半那张表先报，而且不受下面任何早退影响。**
+            // 它用 Stopwatch 自己计时，和 DeepProfiler、watchEnabled、线程计数器全都无关——
+            // 把它排在逐任务表之后，就等于让一个独立的测量去陪另一个测量一起失败。
+            // 上一局正是这样：逐任务表早退，劈半探针一行都没打出来。
+            TransportSplitProbe.ReportWindow();
 
             Report();
         }
@@ -107,11 +125,8 @@ namespace ProjectEden.Patches.Diagnostics
         /// </summary>
         private static void Arm()
         {
-            DeepProfiler.watchEnabled = true;
-            PerformanceMonitor.SetCpuProfilerActive(true);
-
             ProjectEdenPlugin.Log.LogInfo(
-                "CPU 分项耗时：已打开 DeepProfiler.watchEnabled（**真正的总闸**——"
+                "CPU 分项耗时：已打开 DeepProfiler.watchEnabled，并且**每帧重申一次**（**真正的总闸**——"
                 + "GameThreadController.LogicFrame 每逻辑帧把它拷进 ThreadManager.samplePerformanceCounters，"
                 + "而每个 Begin/EndSample 的第 0 条指令就是读它）。"
                 + $"之后每 {Config.perfProbeSeconds:0} 秒报一次。"
@@ -206,11 +221,6 @@ namespace ProjectEden.Patches.Diagnostics
             sb.Append("要么这颗星球上的对象更少，要么把工厂摊到更多星球。");
 
             ProjectEdenPlugin.Log.LogInfo(sb.ToString());
-
-            // 紧跟着报「物流运输」那一栏的劈半，好让两张表说的是同一段时间。
-            // 逐任务表只能告诉你哪个任务贵，而本 mod 有六个后置就挂在最贵的那个任务里面——
-            // 那一刀原版的分析器结构上切不下去
-            TransportSplitProbe.ReportWindow();
         }
 
         /// <summary>
