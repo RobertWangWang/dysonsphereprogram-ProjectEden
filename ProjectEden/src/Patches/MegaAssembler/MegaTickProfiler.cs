@@ -94,6 +94,12 @@ namespace ProjectEden.Patches
         /// <summary>抽样率的掩码：63 ＝ 1/64。</summary>
         private const int SampleMask = 63;
 
+        /// <summary>标定探针自身开销时连续取多少次时间戳。够大才盖得过噪声，又不至于卡住报表。</summary>
+        private const int ProbeCalibrationPairs = 2000;
+
+        /// <summary>一台被抽中的建筑在 <c>MegaTick</c> 里要付多少次 <c>GetTimestamp()</c>。</summary>
+        private const int TimestampsPerBuilding = 12;
+
         private static long _sampled;
 
         /// <summary>
@@ -257,6 +263,31 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // ── 探针量一遍自己 ─────────────────────────────────────
+            //
+            // **抽样降的是总开销，降不了单个样本内部的偏差。** 被抽中的那一台仍然要做
+            // 12 次 GetTimestamp()，而这 12 次全都夹在被测的区间里面——它们量到的
+            // 时间里有一部分就是它们自己。
+            //
+            // 实测症状：报出 19.2 µs/台次、合计 101.889 ms/帧，而同一时刻性能面板的
+            // 「生产设施」只有 4.865 ms。而且**并行度解释不了**：一颗星球是一个工作项、
+            // 由一个线程跑完，本地这颗 4632 台按 19.2 µs 算单线程就要 89 ms，
+            // 放不进 4.865 ms 的墙钟里。
+            //
+            // 所以这里不猜，量：连续取 N 对时间戳，得出这台机器上一次取值的真实代价，
+            // 乘以每台的取值次数，从每个分段里按比例扣掉，**并且把扣掉的量印出来**——
+            // 一个不报自身开销的探针，在开销和信号同量级时给出的是它自己的画像。
+            long probeT0 = Stopwatch.GetTimestamp();
+
+            for (var k = 0; k < ProbeCalibrationPairs; k++) Stopwatch.GetTimestamp();
+
+            long probeCost = Stopwatch.GetTimestamp() - probeT0;
+            double probeTicksPerCall = probeCost / (double)ProbeCalibrationPairs;
+
+            // 每台抽中的建筑付 TimestampsPerBuilding 次
+            double overheadTicks = probeTicksPerCall * TimestampsPerBuilding * sampled;
+            double overheadShare = total > 0 ? overheadTicks / total : 0.0;
+
             double msPerFrame = 1000.0 / measuredFreq / ticks * scale;
 
             // **自检：累计耗时不可能超过墙钟 × 线程数。** 超了就说明分母还是错的，
@@ -272,7 +303,15 @@ namespace ProjectEden.Patches
                 + $"储物格同步 {st * msPerFrame:0.###} ms（{100.0 * st / total:0.#}%）、"
                 + $"传送带槽位 {sl * msPerFrame:0.###} ms（{100.0 * sl / total:0.#}%）、"
                 + $"其余 {o * msPerFrame:0.###} ms（{100.0 * o / total:0.#}%），"
-                + $"合计 {total * msPerFrame:0.###} ms/帧。"
+                + $"合计 {total * msPerFrame:0.###} ms/帧"
+                + $"，其中**探针自身约 {overheadTicks * msPerFrame:0.###} ms（{overheadShare * 100:0.#}%）**"
+                + $"（实测一次 GetTimestamp {probeTicksPerCall * 1e9 / measuredFreq:0} ns × 每台 {TimestampsPerBuilding} 次）"
+                + $"，扣掉之后 **{(total - overheadTicks) * msPerFrame:0.###} ms/帧**。"
+                + (overheadShare > 0.3
+                    ? "　⚠ **探针自身超过三成，这张表只能看排序、不能看绝对值**——"
+                      + "抽样降的是总开销，降不了单个样本内部的偏差：被抽中那台的 12 次取值"
+                      + "全都夹在被测区间里面。"
+                    : "")
                 + "**拿它和性能面板的「生产设施」对着看**：那一栏还包含采矿机和研究站，"
                 + "所以合计必然小于它；差额就是这两者。"
                 + "（如果合计反而**大于**面板那一栏，先看上面那行「折合几条线程」："
