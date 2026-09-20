@@ -38,42 +38,47 @@ namespace ProjectEden.Patches
     {
         private static PowerConfig Config => ProjectEdenPlugin.PowerConfig;
 
-        /// <summary>要放大供电范围的建筑 protoId。</summary>
-        private static readonly HashSet<int> Targets = new HashSet<int>();
+        /// <summary>
+        /// 每个目标 protoId 要用的值。<b>逐项而不是一组</b>——
+        /// 卫星配电站要「全球覆盖」，电力感应塔要「局域但比原版大」，一个数套不住两者。
+        /// </summary>
+        private static readonly Dictionary<int, PowerNodeEntry> Targets = new Dictionary<int, PowerNodeEntry>();
 
         /// <summary>proto 就绪后调用：改 prefabDesc，新建的节点直接带上这个范围。</summary>
         internal static void ApplyPrefabCoverage()
         {
             Targets.Clear();
 
-            if (Config?.itemIds == null || Config.coverRadius <= 0f) return;
+            if (Config == null) return;
 
-            foreach (int itemId in Config.itemIds)
+            foreach (PowerNodeEntry entry in Config.Entries())
             {
-                ItemProto item = LDB.items.Select(itemId);
+                if (entry.coverRadius <= 0f && entry.connectDistance <= 0f) continue;
+
+                ItemProto item = LDB.items.Select(entry.itemId);
                 ModelProto model = item != null ? LDB.models.Select(item.ModelIndex) : null;
 
                 if (model?.prefabDesc == null || !model.prefabDesc.isPowerNode)
                 {
-                    ProjectEdenPlugin.Log.LogWarning($"物品 {itemId} 不是电力节点或没有 prefabDesc，供电范围未改");
+                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是电力节点或没有 prefabDesc，供电范围未改");
                     continue;
                 }
 
                 float beforeCover = model.prefabDesc.powerCoverRadius;
                 float beforeConnect = model.prefabDesc.powerConnectDistance;
 
-                model.prefabDesc.powerCoverRadius = Config.coverRadius;
+                if (entry.coverRadius > 0f) model.prefabDesc.powerCoverRadius = entry.coverRadius;
 
-                // 连接距离默认不动：把它一起放开会让所有节点两两相连，
-                // line_arragement_for_add_node 的连线量按平方增长，节点一多就是性能问题。
-                if (Config.connectDistance > 0f)
-                    model.prefabDesc.powerConnectDistance = Config.connectDistance;
+                // 连接距离默认不动：把它放开会让节点之间两两相连，
+                // line_arragement_for_add_node 的连线量按节点密度的平方增长。
+                if (entry.connectDistance > 0f)
+                    model.prefabDesc.powerConnectDistance = entry.connectDistance;
 
-                Targets.Add(itemId);
+                Targets[entry.itemId] = entry;
 
                 ProjectEdenPlugin.Log.LogInfo(
                     $"{item.name} 供电范围：{beforeCover:0.#} → {model.prefabDesc.powerCoverRadius:0.#} 米" +
-                    $"（连接距离 {beforeConnect:0.#} → {model.prefabDesc.powerConnectDistance:0.#}）");
+                    $"（连接距离 {beforeConnect:0.#} → {model.prefabDesc.powerConnectDistance:0.#} 米）");
             }
         }
 
@@ -86,7 +91,6 @@ namespace ProjectEden.Patches
         {
             if (Targets.Count == 0 || data?.factories == null) return;
 
-            float cover = Config.coverRadius;
             var rebuilt = 0;
 
             for (var f = 0; f < data.factoryCount; f++)
@@ -105,16 +109,24 @@ namespace ProjectEden.Patches
                     int entityId = power.nodePool[i].entityId;
 
                     if (entityId <= 0 || entityId >= entityPool.Length) continue;
-                    if (!Targets.Contains(entityPool[entityId].protoId)) continue;
+                    if (!Targets.TryGetValue(entityPool[entityId].protoId, out PowerNodeEntry entry)) continue;
 
-                    // 已经是目标范围就跳过——新建的节点从 prefabDesc 就拿到了正确值
-                    if (power.nodePool[i].coverRadius >= cover) continue;
+                    float wantCover = entry.coverRadius > 0f ? entry.coverRadius : power.nodePool[i].coverRadius;
+                    float wantConnect = entry.connectDistance > 0f
+                        ? entry.connectDistance
+                        : power.nodePool[i].connectDistance;
+
+                    // **判据是「不等于」而不是「小于」。** 早先写的是 `coverRadius >= cover 就跳过`，
+                    // 那在「只放大」的年代是对的；一旦某一项配成比原版**小**的值（电力感应塔
+                    // 就可能这样），那个判据会把它整批跳过，而且一声不吭。
+                    if (Near(power.nodePool[i].coverRadius, wantCover)
+                        && Near(power.nodePool[i].connectDistance, wantConnect))
+                        continue;
 
                     power.OnNodeRemoving(i);
 
-                    power.nodePool[i].coverRadius = cover;
-
-                    if (Config.connectDistance > 0f) power.nodePool[i].connectDistance = Config.connectDistance;
+                    power.nodePool[i].coverRadius = wantCover;
+                    power.nodePool[i].connectDistance = wantConnect;
 
                     power.OnNodeAdded(i);
 
@@ -123,20 +135,78 @@ namespace ProjectEden.Patches
             }
 
             if (rebuilt > 0)
-                ProjectEdenPlugin.Log.LogInfo($"已重建 {rebuilt} 座已建成配电站的供电范围（拆建流程，消费者已重连）");
+                ProjectEdenPlugin.Log.LogInfo($"已重建 {rebuilt} 座已建成电力节点的供电范围（拆建流程，消费者已重连）");
         }
+
+        /// <summary>浮点相等的容差比较——这两个值都是从存档里读回来的，不能指望位相同。</summary>
+        private static bool Near(float a, float b) => Math.Abs(a - b) < 0.01f;
+    }
+
+    /// <summary>
+    /// 一个电力节点的逐项设置。<b>不同的塔需要不同的数</b>——卫星配电站要的是「全球覆盖」，
+    /// 而电力感应塔要的是「比原版大一些但仍然是局域」，一组值套不住两者。
+    /// </summary>
+    [Serializable]
+    internal class PowerNodeEntry
+    {
+        /// <summary>电力节点的物品 ID。</summary>
+        public int itemId;
+
+        /// <summary>供电范围（米）。0 或负数 = 这一项不改。</summary>
+        public float coverRadius;
+
+        /// <summary>
+        /// 节点之间的连接距离（米）。0 = 保持原版。
+        /// <b>放大它是有代价的</b>：<c>line_arragement_for_add_node</c> 的连线量按节点密度平方增长。
+        /// </summary>
+        public float connectDistance;
+
+        public string comment;
     }
 
     [Serializable]
     internal class PowerConfig
     {
-        /// <summary>要改的电力节点物品 ID</summary>
+        /// <summary>
+        /// 逐项设置。<b>有它就以它为准</b>，下面那三个旧字段只在它为空时才用——
+        /// 老的磁盘覆盖（只有 itemIds/coverRadius/connectDistance）因此仍然照常工作。
+        /// </summary>
+        public PowerNodeEntry[] nodes;
+
+        /// <summary>旧 schema：要改的电力节点物品 ID（所有项共用下面两个值）。</summary>
         public int[] itemIds;
 
-        /// <summary>供电范围（米）。0 保持原版。</summary>
+        /// <summary>旧 schema：供电范围（米）。0 保持原版。</summary>
         public float coverRadius;
 
-        /// <summary>节点之间的连接距离（米）。0 保持原版——不建议动，见类注释。</summary>
+        /// <summary>旧 schema：节点之间的连接距离（米）。0 保持原版。</summary>
         public float connectDistance;
+
+        /// <summary>
+        /// 把两种 schema 归一成一张表。新的优先；都没有就返回空表。
+        /// <b>归一化放在配置类里而不是应用处</b>，这样「读哪一份」这件事只有一个答案。
+        /// </summary>
+        internal IEnumerable<PowerNodeEntry> Entries()
+        {
+            if (nodes != null && nodes.Length > 0)
+            {
+                foreach (PowerNodeEntry e in nodes)
+                    if (e != null && e.itemId > 0)
+                        yield return e;
+
+                yield break;
+            }
+
+            if (itemIds == null || coverRadius <= 0f) yield break;
+
+            foreach (int id in itemIds)
+                yield return new PowerNodeEntry
+                {
+                    itemId = id,
+                    coverRadius = coverRadius,
+                    connectDistance = connectDistance,
+                    comment = "（旧 schema：itemIds + coverRadius）",
+                };
+        }
     }
 }

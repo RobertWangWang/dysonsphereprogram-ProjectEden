@@ -528,11 +528,30 @@ Research mode has no products and takes no part in shipping.
 
 ## VII. Power
 
-**Satellite Substations cover the whole planet** (2000 m, enough for any buildable world).
+**Configured per node type** (`nodes` in `power.json`), because different towers want different things:
 
-The **connection distance between nodes is untouched** — lifting that too would make every node connect to every
-other, and the wiring computation grows quadratically, which is a real frame-rate cost once you have many nodes.
-Power coverage itself does not need it.
+| Building | Coverage | Connection distance |
+|---|---:|---:|
+| **Satellite Substation** | 26.5 → **2000 m** | 53.5 (untouched) |
+| **Tesla Tower** | 10.5 → **30 m** | 22.5 → **60 m** |
+
+> The vanilla figures in those columns are **measured** — the startup log prints them — not quoted from a table.
+
+**One Satellite Substation covers a whole planet.** Where 2000 comes from: `OnNodeAdded` / `OnConsumerAdded`
+project both positions onto a sphere of radius `realRadius + 0.2` and then compare a **straight-line 3-D distance**
+(not an arc), so planet-wide coverage needs `≥ 2 × planet radius`. With bigger planets on (radius 400) that is
+≥ 800.4, so 2000 still has 2.5× headroom; the break-even radius is 999.8. Its **connection distance stays vanilla** —
+one of them is enough, so there is no network to form.
+
+**The Tesla Tower entry exists for bigger planets.** Once the surface area is 4× larger, vanilla's coverage needs 4×
+the towers to blanket a world. At 30 m the covered area is 8.2× vanilla's, so blanketing an enlarged planet now takes
+*half* as many towers as blanketing a vanilla one. The connection distance is set to twice the coverage so two towers
+can still link across a full coverage gap without leaving a hole.
+
+**Raising the connection distance has a real cost, and it should be stated:** `line_arragement_for_add_node`'s wiring
+work grows with the **square of node density**, so a dense field of towers is a measurable expense. That is why the
+substation entry leaves it at 0; if the tower field feels heavy, drop `connectDistance` to 30–40 (anything at or above
+the coverage radius still forms a connected network).
 
 Substations that are already built have their coverage rebuilt on load, and consumers reconnect.
 
@@ -4633,7 +4652,7 @@ already decides each planet's radius, and two things writing the same number onl
 | `perfprobe.json` | Developer switch: prints per-task CPU cost into the log, so nobody has to copy ten milliseconds figures out of Statistics → Performance by hand. **Off by default, and it costs real time when on** |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes, plus `vanillaEdits`: **edit a vanilla recipe's ingredient list in place** (currently one entry: the Hydrogen Fuel Rod's hydrogen ×10 → ×56) |
-| `power.json` | Power node coverage radius |
+| `power.json` | Per-node coverage radius and connection distance (`nodes`): Satellite Substation 2000 m planet-wide, Tesla Tower 30 m with a 60 m link. The old schema (`itemIds` plus one shared value) still works |
 | `belts.json` | Speed of the three belt tiers |
 | `ores.json` | The custom vein table: per-ore IDs, vein density, recolour parameters, recipe lists; extra items (phase, heat value, icon); and the gases injected into gas giants |
 | `machines.json` | The nine new buildings: which vanilla building to clone from, parameters for the six `kind`s (assembler / station / accumulator / exchanger / generator / miner), tint, build recipe |

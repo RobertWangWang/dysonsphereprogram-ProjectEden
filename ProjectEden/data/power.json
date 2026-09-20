@@ -1,11 +1,31 @@
 {
-  "//": "电力节点的供电范围。卫星配电站默认 2212——进游戏后看日志里打印的建筑名确认，认错了改这里就行。",
+  "//": "电力节点的供电范围与连接距离，**逐项配置**。进游戏后看日志里打印的建筑名确认认没认对，认错了改这里就行。",
 
-  "//coverRadius": "供电范围，单位米。OnNodeAdded / OnConsumerAdded 会先把坐标投影到半径 realRadius+0.2 的球面再比三维距离，所以单位就是米，覆盖整颗星球需要 ≥ 2 × 星球半径。普通行星半径 200，填 2000 足够覆盖任何可建造的星球。链路是 PrefabDesc.powerCoverRadius → PowerNodeComponent.coverRadius（进存档）→ OnNodeAdded 平方后缓存进 PowerNetworkStructures.Node.coverRadius2 并在那时挂接用电建筑，所以已建成的节点要走一遍拆建才能生效，由 PowerCoveragePatches 在读档后做。填 0 保持原版。",
+  "//为什么是逐项": "不同的塔要的东西不一样，一组值套不住：卫星配电站要的是「一座管一颗星」，而电力感应塔要的是「局域，但比原版大」。所以 nodes 是个列表，每项自己带 coverRadius 和 connectDistance。\n\n**旧 schema 仍然有效**：如果 nodes 缺失或为空，就回落到下面 itemIds + coverRadius + connectDistance 那三个字段（一组值套所有项）。这是为了不让已经存在的磁盘覆盖静默失效——JsonHelper 的覆盖是整份文件的，老文件里没有 nodes。",
+
+  "//coverRadius-单位": "米。OnNodeAdded / OnConsumerAdded 会先把坐标投影到半径 realRadius+0.2 的球面再比**三维直线距离**（不是弧长），所以单位就是米，而覆盖整颗星球需要 ≥ 2 × 星球半径。开了行星放大（半径 400）就是 ≥ 800.4，2000 仍然够，理论临界半径 999.8。",
+
+  "//生效链路": "PrefabDesc.powerCoverRadius → PowerNodeComponent.coverRadius（**进存档**）→ OnNodeAdded 平方后缓存进 PowerNetworkStructures.Node.coverRadius2，并在那一刻把范围内的用电建筑挂上电网。所以运行时光改 coverRadius 没用，已建成的节点要走一遍原版的「拆—建」，由 PowerCoveragePatches 在读档后做（主线程，一次性）。填 0 = 这一项不改。",
+
+  "//connectDistance-代价": "节点之间的连接距离，单位米。0 = 保持原版。**放大它是有代价的**：line_arragement_for_add_node 的连线量按节点密度的平方增长，塔一多就是实打实的开销。卫星配电站不需要它（一座就够），所以那一项留 0；电力感应塔要连成网才有意义，所以给了值。",
+
+  "nodes": [
+    {
+      "itemId": 2212,
+      "coverRadius": 2000,
+      "connectDistance": 0,
+      "comment": "卫星配电站：一座管一颗星。2000 米在半径 400 的星球上仍有 2.5 倍余量（需要 ≥ 2×半径 = 800.4）。连接距离留 0——一座就够了，不需要连成网。"
+    },
+    {
+      "itemId": 2201,
+      "coverRadius": 30,
+      "connectDistance": 60,
+      "comment": "电力感应塔：覆盖 30 米、连接 60 米（所有者指定）。**这一项是为行星放大配的**：星球表面积变成 4 倍之后，原版那点覆盖半径铺满一颗星要 4 倍数量。连接距离给到覆盖的两倍，是为了两塔之间隔着一整个覆盖圈也还能连上、不留空洞。代价见上面 //connectDistance-代价 那条。"
+    }
+  ],
+
+  "//以下是旧 schema，仅在 nodes 为空时生效": "",
+  "itemIds": [2212],
   "coverRadius": 2000,
-
-  "//connectDistance": "节点之间的连接距离，单位米。0 = 保持原版，建议就留 0：一起放开会让所有节点两两相连，line_arragement_for_add_node 的连线量按平方增长，节点一多就是性能问题。供电覆盖本身不需要它。",
-  "connectDistance": 0,
-
-  "itemIds": [2212]
+  "connectDistance": 0
 }
