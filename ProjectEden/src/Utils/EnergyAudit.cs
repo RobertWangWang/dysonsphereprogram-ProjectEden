@@ -138,7 +138,7 @@ namespace ProjectEden
 
             var own = new HashSet<int>(ProtoSlots.OwnRecipeIds);
 
-            var hits = new List<KeyValuePair<double, string>>();
+            var hits = new List<KeyValuePair<double, RecipeProto>>();
             var scanned = 0;
 
             foreach (RecipeProto r in LDB.recipes.dataArray)
@@ -156,8 +156,7 @@ namespace ProjectEden
 
                 if (delta <= ThresholdJ) continue;
 
-                hits.Add(new KeyValuePair<double, string>(
-                    delta, $"「{r.name}」+{delta / 1e6:0.#} MJ（类型 {(int)r.Type}）"));
+                hits.Add(new KeyValuePair<double, RecipeProto>(delta, r));
             }
 
             string where = string.Join("、", System.Array.ConvertAll(
@@ -176,11 +175,20 @@ namespace ProjectEden
 
             var top = new List<string>();
 
-            for (var i = 0; i < hits.Count && i < TopN; i++) top.Add(hits[i].Value);
+            // **把成分一起打出来，不只是差额。** 只报一个「+14376.5 MJ」，要知道它是怎么来的
+            // 就得去猜配方形状——而猜配方形状正是本文件反复记的那类错。带上每一项的件数和
+            // 热值，这行警告就能自解释：哪个物品扛着这笔能量、哪个是 0，一眼看得出。
+            for (var i = 0; i < hits.Count && i < TopN; i++)
+            {
+                RecipeProto r = hits[i].Value;
+
+                top.Add($"「{r.name}」+{hits[i].Key / 1e6:0.#} MJ（类型 {(int)r.Type}）"
+                        + $"＝ {SideText(r.Items, r.ItemCounts)} → {SideText(r.Results, r.ResultCounts)}");
+            }
 
             ProjectEdenPlugin.Log.LogWarning(
                 $"能量审计·原版侧：巨型建筑能跑的 {scanned} 条**原版**配方里，有 {hits.Count} 条"
-                + $"产出可燃热值高于投入，最大的 {top.Count} 条是 {string.Join("、", top.ToArray())}"
+                + $"产出可燃热值高于投入，最大的 {top.Count} 条是 {string.Join("；", top.ToArray())}"
                 + $"（巨型建筑覆盖的配方类型：{where}）。"
                 + "巨型建筑把耗电摊薄到万分之一，所以这些配方在万倍速下实际上是发电机。"
                 + "**这不一定是本次改动造成的**——原版配方一直在巨型建筑里跑，只是过去没人检查；"
@@ -195,6 +203,38 @@ namespace ProjectEden
         /// 会被算进来——氢从 9.0 改成 1.96 之后，凡是产氢的原版配方账面都会变，
         /// 而那正是这一遍要看的东西。
         /// </summary>
+        /// <summary>
+        /// 把配方一侧写成「物品×件数(热值)」，热值为 0 的照样列出来。
+        ///
+        /// <b>列 0 是有意的。</b> 判断一条新产线会不会把审计推成正差额，判据是
+        /// <c>HeatValue</c> 而不是「它算不算燃料」（<see cref="Burnable"/> 根本不看
+        /// <c>FuelType</c>）。把 0 省掉，读的人就会以为那一项没被算进去。
+        /// </summary>
+        private static string SideText(int[] ids, int[] counts)
+        {
+            if (ids == null || counts == null || ids.Length == 0) return "（空）";
+
+            var sb = new System.Text.StringBuilder();
+
+            for (var i = 0; i < ids.Length && i < counts.Length; i++)
+            {
+                ItemProto proto = LDB.items.Select(ids[i]);
+
+                if (i > 0) sb.Append(" + ");
+
+                sb.Append(proto != null ? proto.name : "?" + ids[i])
+                  .Append('×').Append(counts[i]);
+
+                long heat = proto?.HeatValue ?? 0L;
+
+                sb.Append(heat > 0L
+                    ? $"({heat / 1e6:0.###} MJ)"
+                    : "(0)");
+            }
+
+            return sb.ToString();
+        }
+
         private static double Burnable(int[] ids, int[] counts)
         {
             if (ids == null || counts == null) return 0.0;

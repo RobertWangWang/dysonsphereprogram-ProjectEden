@@ -103,11 +103,14 @@ namespace ProjectEden.Patches
                 List<ItemProto> list = byType[type];
                 var names = new StringBuilder();
 
-                // 只列前四个，够认出这一位是干什么的就行
+                // 只列前四个，够认出这一位是干什么的就行。
+                // **带上热值**：本文件之外唯一知道原版热值的地方是 EnergyAudit 报的差额，
+                // 而差额要靠猜配方形状才能反推出绝对值——那正是本仓库反复记的「按注释复述数字」。
                 for (var i = 0; i < list.Count && i < 4; i++)
                 {
                     if (i > 0) names.Append('、');
-                    names.Append(list[i].Name).Append('(').Append(list[i].ID).Append(')');
+                    names.Append(list[i].Name).Append('(').Append(list[i].ID).Append(')')
+                         .Append(' ').Append(Mj(list[i].HeatValue));
                 }
 
                 if (list.Count > 4) names.Append(" 等 ").Append(list.Count).Append(" 种");
@@ -135,6 +138,69 @@ namespace ProjectEden.Patches
                 ProjectEdenPlugin.Log.LogInfo(
                     $"  已用位掩码 {usedBits}，空位还有 {free.Count} 个：{string.Join("、", free.ConvertAll(v => v.ToString()).ToArray())}"
                     + $"（fuelNeeds 长度 64，所以最大只能到 {1 << (FuelBits - 1)}）");
+
+            DumpHeatWithoutFuelBit(items);
+        }
+
+        /// <summary>
+        /// 「有热值、但一个燃料位都没有」的物品。
+        ///
+        /// <b>这一族是两个工具定义不一致的地方，而不一致本身从来没人报过。</b>
+        /// 上面那张表按 <c>FuelType != 0</c> 分组，所以看不见它们；而
+        /// <c>EnergyAudit.Burnable</c> 算的是 <c>HeatValue × 件数</c>、**完全不看
+        /// <c>FuelType</c>**。于是同一个物品「不是燃料」却照样进能量账——
+        /// 设计一条新产线时按燃料表判断「这东西不带能量」，会直接把审计的结论算反。
+        ///
+        /// 反物质就是这一族：它不在任何 FuelType 组里，但它有没有热值，
+        /// 决定了以它为产物的配方在万倍速机器上是不是发电机。
+        ///
+        /// 它也顺带盖住本文件另一处记过的形状——热值和燃料位是一对，只设一半的话
+        /// 烧起来是零功率。那种是反过来的（有位无值），这里一并报。
+        /// </summary>
+        private static void DumpHeatWithoutFuelBit(ItemProto[] items)
+        {
+            var orphans = new List<ItemProto>();
+
+            foreach (ItemProto proto in items)
+            {
+                if (proto == null) continue;
+
+                if (proto.HeatValue > 0L && proto.FuelType == 0) orphans.Add(proto);
+            }
+
+            if (orphans.Count == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "  有热值但没有燃料位的物品：一个都没有（能量审计和上面这张燃料表口径一致）");
+
+                return;
+            }
+
+            var sb = new StringBuilder();
+
+            for (var i = 0; i < orphans.Count && i < 12; i++)
+            {
+                if (i > 0) sb.Append('、');
+                sb.Append(orphans[i].Name).Append('(').Append(orphans[i].ID).Append(')')
+                  .Append(' ').Append(Mj(orphans[i].HeatValue));
+            }
+
+            if (orphans.Count > 12) sb.Append(" 等 ").Append(orphans.Count).Append(" 种");
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"  **有热值但没有燃料位**（{orphans.Count} 种）：{sb}"
+                + " —— 它们烧不了，但 EnergyAudit 按 HeatValue 记账，照样算进能量差额。"
+                + "给新产线定配方比例时以这一行为准，不要以上面那张燃料表为准。");
+        }
+
+        /// <summary>热值按 MJ 打，省得在日志里数零。</summary>
+        private static string Mj(long heatValue)
+        {
+            if (heatValue <= 0L) return "热值 0";
+
+            double mj = heatValue / 1000000.0;
+
+            return mj >= 1000.0 ? $"热值 {mj / 1000.0:0.###} GJ" : $"热值 {mj:0.###} MJ";
         }
 
         /// <summary>

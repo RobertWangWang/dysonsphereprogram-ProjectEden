@@ -226,13 +226,43 @@ namespace ProjectEden
                 int cat = item.BuildIndex / 100;
                 int slot = item.BuildIndex % 100;
 
-                ItemProto inSlot = cat >= 0 && cat < 16 && slot >= 0 && slot < 13
-                    ? UIBuildMenu.protos[cat, slot]
-                    : null;
+                // **`UIBuildMenu.protos` 只是个窗口，不是真相。** 原版 StaticLoad 只填到
+                // 第 12 格，而 BuildMenuScrollPatches 的 _full 排到 36。所以第 13 格往后
+                // 只查 protos 的话，返回的永远是 null——而这个 null 和「这台建筑真的丢了」
+                // 在日志里长得一模一样。奇点储能厂（第 14 格）就是这么被报成「格位为空」的，
+                // 它其实一直好好待在滑动表第 2 页。
+                //
+                // 读数不随被测的东西变化，就等于没在测。所以查不到的时候要回头问滑动表，
+                // 并且把三种状态分开写：第一屏就在 / 要滚到第几页 / **真的丢了**。
+                // **这条检查跑在注册期**（紧跟 UIBuildMenu.StaticLoad），而滑动表 _full 是
+                // 建造栏第一次打开时才建的。所以这里**不能去问滑动表的运行时状态**——那时它还是
+                // null，"查不到"会被误报成"这台建筑进不了建造栏"，比原来的假警报更响。
+                //
+                // 判据用静态保证：_full 是直接从 BuildIndex 填的，凡是 1..MaxSlot 的格位它都会收。
+                // 所以"够不够得着"在这一刻就能答；只有"落在第几页"要等界面量出一屏几个按钮。
+                const int Windowed = 13;   // 原版 StaticLoad 只填到第 12 格
 
-                string state = inSlot == null ? "格位为空"
-                    : inSlot.ID == entry.itemId ? "已就位"
-                    : $"被 {inSlot.name}({inSlot.ID}) 占用";
+                bool inWindow = cat >= 0 && cat < 16 && slot >= 0 && slot < Windowed;
+
+                ItemProto inSlot = inWindow ? UIBuildMenu.protos[cat, slot] : null;
+
+                int maxSlot = Patches.BuildMenuScrollPatches.MaxSlot;
+
+                string state;
+
+                if (inSlot != null)
+                    state = inSlot.ID == entry.itemId
+                        ? "已就位"
+                        : $"被 {inSlot.name}({inSlot.ID}) 占用";
+                else if (slot < 1 || slot > maxSlot)
+                    state = $"**槽位 {slot} 超出滑动表上限 {maxSlot}，这台建筑进不了建造栏**";
+                else if (!inWindow)
+                    state = Patches.BuildMenuScrollPatches.Locate(cat, slot, out int page, out int idx, out int vis)
+                        ? $"要滚到第 {page} 页第 {idx} 位（一屏 {vis} 个）"
+                        : $"超出原版只填 12 格的范围，由子项滑动接管（上限 {maxSlot} 格）——**这是正常的**，"
+                          + "页码要等建造栏第一次打开、量出一屏几个按钮之后才算得出";
+                else
+                    state = "**格位为空，而且在原版会填的范围内——这台建筑真的没进建造栏**";
 
                 ProjectEdenPlugin.Log.LogInfo(
                     $"  建造栏核对 {item.name}：BuildIndex {item.BuildIndex} → 第 {cat} 类第 {slot} 格，{state}" +

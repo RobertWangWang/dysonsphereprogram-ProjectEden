@@ -217,6 +217,34 @@ namespace ProjectEden.Patches
             return true;
         }
 
+        /// <summary>
+        /// 某个格位在滑动表里落在第几页第几位。供建造栏自检用。
+        ///
+        /// <b>为什么需要这个：`UIBuildMenu.protos` 只是个窗口，不是真相。</b>
+        /// 原版 <c>StaticLoad</c> 只填到第 12 格，而本类的 <c>_full</c> 排到
+        /// <see cref="MaxSlot"/>。任何拿 <c>protos</c> 去判断「这台建筑在不在建造栏里」的
+        /// 检查，对第 13 格往后的建筑都只会得到一个答案——而那个答案和「它真的丢了」
+        /// 长得一模一样。
+        ///
+        /// 返回 false = 这个格位在滑动表里也是空的，那才是真的丢了。
+        /// </summary>
+        internal static bool Locate(int category, int slot, out int page, out int index, out int visible)
+        {
+            page = 0;
+            index = 0;
+            visible = _visible;
+
+            if (_full == null || _visible <= 0) return false;
+            if (category < 0 || category >= Categories) return false;
+            if (slot < 1 || slot > MaxSlot) return false;
+            if (_full[category, slot] == null) return false;
+
+            page = (slot - 1) / _visible + 1;
+            index = (slot - 1) % _visible + 1;
+
+            return true;
+        }
+
         private static int PageCount(int category)
         {
             if (_visible <= 0) return 1;
