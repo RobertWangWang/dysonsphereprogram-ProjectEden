@@ -240,16 +240,28 @@ namespace ProjectEden.Patches
             // 轮到了再由日照决定跑几个周期。
             cycles = MegaThrottle.CyclesFor(factory, component.entityId, cycles);
 
-            if (MegaThrottle.Skip(factory, component.entityId, GameMain.gameTick, power))
+            MegaThrottle.Verdict verdict = MegaThrottle.Decide(factory, component.entityId, GameMain.gameTick, power);
+
+            if (verdict == MegaThrottle.Verdict.Hold)
             {
                 // 前置钩子**取消不了它前面那次调用**——原版的 InternalUpdate 紧接着还会跑一遍，
                 // 而 speedOverride ≫ timeSpend，那一遍自己就能结算一个完整周期。
-                // 所以压制的办法是把计时器预置成「加完也够不着」，两条都要压。
+                // 所以压制的办法是把计时器预置成「加完也够不着」。
                 // 这条是 MegaLightPatches 的教训，不是这里重新发现的。
-                MegaLightPatches.Suppress(ref component);
+                //
+                // **但分频不能直接用 Suppress**：它把增产计时器一并清零，而分频是每一 tick
+                // 都来一遍，清零就等于增产进度永远攒不到门槛。MegaThrottle.Hold 只压主计时器，
+                // 增产那条改成「倒回上一次调用加的那一笔」，进度原样留着。
+                MegaThrottle.Hold(ref component);
 
                 return 0;
             }
+
+            // **压和放是一对，只写压的那一半就是一件产物都不出。**
+            // 原版是「上一次攒、这一次结」（IL 0101 的结算用的是上一次调用攒的 time），
+            // 而分频让「攒满的下一 tick」必然是压制 tick，于是那个周期每次都被抹掉。
+            // 详见 MegaThrottle.Release——它只放行**已经扣过料**的那一个周期。
+            if (verdict == MegaThrottle.Verdict.Release) MegaThrottle.Release(factory, ref component);
 
             if (MegaLightPatches.IsLightDependent(factory, component.entityId))
             {

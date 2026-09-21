@@ -44,7 +44,7 @@ namespace ProjectEden.Patches
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int PlanetId, int StationId), byte>
             Bootstrapped = new System.Collections.Concurrent.ConcurrentDictionary<(int, int), byte>();
 
-        /// <summary>需要改写最大充能功率的建筑 protoId → 原版值与目标值。</summary>
+        /// <summary>需要改写充能功率 / 能量容积的建筑 protoId → 原版值与目标值。</summary>
         private static readonly Dictionary<int, ChargeTarget> ChargePowerByProto = new Dictionary<int, ChargeTarget>();
 
         /// <summary>一个站点原版的充能功率，以及我们希望它至少达到的值。</summary>
@@ -99,8 +99,14 @@ namespace ProjectEden.Patches
 
         private struct ChargeTarget
         {
-            public long vanilla;
-            public long target;
+            /// <summary>本 mod 改动<b>之前</b>的充能功率（每 tick 焦耳），0 = 这一项不管。</summary>
+            public long vanillaPower;
+
+            /// <summary>目标充能功率（每 tick 焦耳），0 = 这一项不管。</summary>
+            public long targetPower;
+
+            /// <summary>目标能量容积（焦耳），0 = 这一项不管。</summary>
+            public long targetEnergyMax;
         }
 
         /// <summary>proto 就绪后调用：改 prefabDesc，并整理出运行时要认的 protoId 集合。</summary>
@@ -144,35 +150,55 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// 改写最大充能功率。只动 chargePower 里显式列出的站点，
+        /// 改写最大充能功率与最大能量容积。只动 stationEnergy 里显式列出的站点，
         /// 免得把巨型建筑的制造功耗也一起改了。
+        ///
+        /// <para><b>两项的性质不一样，所以运行时的补法也不一样，别看它们挨在一起就以为对称。</b>
+        /// <c>workEnergyPerTick</c> 是物流站面板上那根「最大充能功率」滑条写的字段
+        /// （<c>UIStationWindow.OnMaxChargePowerSliderValueChange</c>），所以它只能<b>抬一次</b>；
+        /// 而 <c>energyMax</c> 在整个程序集里只有三处写入——<c>Init</c>、<c>Reset</c>、<c>Import</c>，
+        /// <b>没有任何界面能改它</b>（枚举过：其余全是 ldfld），所以它可以直接对齐，升降都行。</para>
         /// </summary>
         private static void ApplyChargePower()
         {
-            if (Config.chargePower == null) return;
+            if (Config.stationEnergy == null) return;
 
-            foreach (StationChargeEntry entry in Config.chargePower)
+            foreach (StationEnergyEntry entry in Config.stationEnergy)
             {
-                if (entry == null || entry.energyPerTick <= 0) continue;
+                if (entry == null) continue;
+                if (entry.chargePowerWatt <= 0 && entry.maxEnergyJoule <= 0) continue;
 
                 ItemProto item = LDB.items.Select(entry.itemId);
                 ModelProto model = item != null ? LDB.models.Select(item.ModelIndex) : null;
 
                 if (model?.prefabDesc == null || !model.prefabDesc.isStation)
                 {
-                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是物流站或没有 prefabDesc，最大充能功率未改");
+                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是物流站或没有 prefabDesc，充能功率 / 能量容积未改");
                     continue;
                 }
 
-                long before = model.prefabDesc.workEnergyPerTick;
+                // 配置说的是瓦，落到 prefabDesc 是「每 tick 焦耳」——60 tick = 1 秒
+                long targetPower = entry.chargePowerWatt > 0 ? entry.chargePowerWatt / 60L : 0L;
 
-                model.prefabDesc.workEnergyPerTick = entry.energyPerTick;
+                long beforePower = model.prefabDesc.workEnergyPerTick;
+                long beforeAcc = model.prefabDesc.stationMaxEnergyAcc;
 
-                // 记下原版值：运行时只补「还停在原版值」的站点，玩家自己拖过的一律不动
-                ChargePowerByProto[entry.itemId] = new ChargeTarget { vanilla = before, target = entry.energyPerTick };
+                if (targetPower > 0) model.prefabDesc.workEnergyPerTick = targetPower;
+                if (entry.maxEnergyJoule > 0) model.prefabDesc.stationMaxEnergyAcc = entry.maxEnergyJoule;
+
+                // 记下原版功率：运行时只补「还停在原版值」的站点，玩家自己拖过滑条的一律不动
+                ChargePowerByProto[entry.itemId] = new ChargeTarget
+                {
+                    vanillaPower = beforePower,
+                    targetPower = targetPower,
+                    targetEnergyMax = entry.maxEnergyJoule
+                };
 
                 ProjectEdenPlugin.Log.LogInfo(
-                    $"{item.name} 最大充能功率：{before * 60 / 1e9:0.###} GW → {entry.energyPerTick * 60 / 1e9:0.###} GW");
+                    $"{item.name} 最大充能功率：{beforePower * 60 / 1e9:0.###} GW → "
+                    + $"{model.prefabDesc.workEnergyPerTick * 60 / 1e9:0.###} GW；"
+                    + $"最大能量容积：{beforeAcc / 1e9:0.###} GJ → "
+                    + $"{model.prefabDesc.stationMaxEnergyAcc / 1e9:0.###} GJ");
             }
         }
 
@@ -314,20 +340,51 @@ namespace ProjectEden.Patches
                     ReportBootstrapOnce();
                 }
 
-                if (!fixCharge || consumerPool == null) continue;
+                if (!fixCharge) continue;
                 if (!ChargePowerByProto.TryGetValue(protoId, out ChargeTarget charge)) continue;
+
+                // 最大能量容积：**直接对齐，升降都做**。
+                //
+                // 它和下面的充能功率是<b>两种不同性质的值</b>，别因为挨着就照抄那边的「只抬一次」。
+                // energyMax 在整个程序集里只有 Init / Reset / Import 三处写入（其余全是 ldfld），
+                // 也就是说**没有任何界面能改它**——没有「玩家的值」要保，那条规矩不适用；
+                // 反过来，只抬不降会让这个配置项变成单向的（本仓库记过的那条：
+                // 只抬会让配置值改小之后没有效果）。
+                if (charge.targetEnergyMax > 0 && station.energyMax != charge.targetEnergyMax)
+                {
+                    station.energyMax = charge.targetEnergyMax;
+
+                    // 调小时已存的能量可能越界。SetPCState 按 1.05 - energy/energyMax 算需求，
+                    // 越界会算出负的需求量，站点从此不再充电。
+                    if (station.energy > station.energyMax) station.energy = station.energyMax;
+
+                    touched = true;
+                }
+
+                if (consumerPool == null) continue;
+                if (charge.targetPower <= 0) continue;
 
                 int pcId = station.pcId;
 
                 if (pcId <= 0 || pcId >= consumerPool.Length) continue;
 
-                // 只把「还停在原版值」的老站点抬上来，抬过一次之后 current 就高于原版值，
-                // 这里再也不会命中。玩家用面板滑条设的值因此能保住——
+                // 充能功率：**只把「还停在原版值」的老站点抬上来**，抬过一次之后 current 就高于
+                // 原版值，这里再也不会命中。玩家用面板滑条设的值因此能保住——
                 // 那个滑条（UIStationWindow.OnMaxChargePowerSliderValueChange）写的正是这个字段，
                 // 无条件覆写会让它一松手就缩回去。
-                if (consumerPool[pcId].workEnergyPerTick <= charge.vanilla)
+                //
+                // **代价要说出来：把配置值调小，对已经被前一个版本抬上去的站点没有效果。**
+                // 那些站点的当前值高于原版值，和「玩家自己拖上去的」在数据上长得一模一样，
+                // 分不开——所以宁可不动。新建的站点从 prefabDesc 直接拿到新值，
+                // 老站点拖一下滑条就跟上（滑条范围也是从 prefabDesc 推的：prefab/2 ~ prefab×5）。
+                // `!= targetPower` 这一半不是多余的：目标值和原版值撞上时（配置恰好填了原版数，
+                // 或者两个条目共用同一个 prefabDesc 导致第二条记下的「原版值」其实是第一条改过的值），
+                // 光有 `<=` 会让一座已经正确的站点每一趟都被「改」成同一个数并把 touched 置上，
+                // 于是**这颗星球永远 settle 不了**，那圈每 tick 全量扫描就回来了（实测 0.5 ms/帧）。
+                if (consumerPool[pcId].workEnergyPerTick <= charge.vanillaPower
+                    && consumerPool[pcId].workEnergyPerTick != charge.targetPower)
                 {
-                    consumerPool[pcId].workEnergyPerTick = charge.target;
+                    consumerPool[pcId].workEnergyPerTick = charge.targetPower;
 
                     touched = true;
                 }
@@ -412,8 +469,8 @@ namespace ProjectEden.Patches
         /// <summary>物流塔集装层数（解锁函数 29），原版基础值 1</summary>
         public int stationPilerLevel;
 
-        /// <summary>要改写最大充能功率的站点，逐个列出</summary>
-        public StationChargeEntry[] chargePower;
+        /// <summary>要改写最大充能功率 / 最大能量容积的站点，逐个列出</summary>
+        public StationEnergyEntry[] stationEnergy;
 
         /// <summary>气体采集器的采集倍率（PrefabDesc.stationCollectSpeed）。0 = 保持原版</summary>
         public int collectorSpeed;
@@ -472,11 +529,23 @@ namespace ProjectEden.Patches
 
     /// <summary>单个站点的最大充能功率设定。</summary>
     [Serializable]
-    internal class StationChargeEntry
+    internal class StationEnergyEntry
     {
         public int itemId;
 
-        /// <summary>每 tick 焦耳数。60 tick = 1 秒，所以 500000000 = 30 GW。</summary>
-        public long energyPerTick;
+        /// <summary>
+        /// 最大充能功率，单位<b>瓦</b>。落到 <c>PrefabDesc.workEnergyPerTick</c> 时除以 60
+        /// （60 tick = 1 秒）。0 = 不动这一项。
+        ///
+        /// <para>单位写瓦而不是「每 tick 焦耳」是有意的：面板上写的是瓦，所有者说的也是瓦，
+        /// 让配置和它们对齐，除以 60 这一步交给代码。<c>machines.json</c> 的
+        /// <c>workEnergyWatt</c> 早就是这个口径。</para>
+        /// </summary>
+        public long chargePowerWatt;
+
+        /// <summary>
+        /// 最大能量容积，单位<b>焦耳</b>，来自 <c>PrefabDesc.stationMaxEnergyAcc</c>。0 = 不动这一项。
+        /// </summary>
+        public long maxEnergyJoule;
     }
 }

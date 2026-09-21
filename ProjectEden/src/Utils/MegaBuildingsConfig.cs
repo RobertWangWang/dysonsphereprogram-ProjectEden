@@ -28,7 +28,7 @@ namespace ProjectEden.Utils
 
         /// <summary>
         /// 从哪个原版模型克隆外观。49 = 物流运输站。
-        /// 必须选一个带 slotPoses 的模型，否则传送带无法直连——原版组装机没有槽位。
+        /// 必须选一个带传送带接口（PrefabDesc.portPoses）的模型，否则传送带无法直连——原版组装机没有。注意 PrefabDesc.slotPoses 是分拣器口，名字和 SlotConfig 里刚好反过来。
         /// </summary>
         public int copyFromModelId;
 

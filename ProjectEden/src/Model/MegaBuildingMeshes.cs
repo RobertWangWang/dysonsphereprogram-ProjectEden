@@ -12,7 +12,7 @@ namespace ProjectEden.Model
     /// 彼此只靠 <c>tintR/G/B</c> 区分。染色改不了轮廓，这里换的是轮廓。
     ///
     /// <b>为什么只换网格，不从零搭 prefab。</b> <c>PrefabDesc.ReadPrefab</c> 一次性读出
-    /// 占地、碰撞体、传送带接口（<c>SlotConfig.slotPoses</c>）、LOD 距离、材质……
+    /// 占地、碰撞体、传送带接口（<c>SlotConfig.slotPoses</c> → <c>PrefabDesc.portPoses</c>）、LOD 距离、材质……
     /// 自己搭一个 GameObject 全套重来，等于把五样已验证过的东西一起推倒。
     /// 现在是让原有流程照常建好 <c>PrefabDesc</c>，<b>只替换被画出来的那个 Mesh 和它的贴图</b>。
     /// </summary>

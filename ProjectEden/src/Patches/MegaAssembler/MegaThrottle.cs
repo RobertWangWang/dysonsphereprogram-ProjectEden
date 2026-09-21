@@ -193,21 +193,49 @@ namespace ProjectEden.Patches
             return c > 0 ? c : globalCycles;
         }
 
+        /// <summary>这一 tick 这台建筑该怎么办。</summary>
+        internal enum Verdict
+        {
+            /// <summary>没配分频，照常跑。</summary>
+            Free,
+
+            /// <summary>这一 tick 轮不到它：压住原版那次调用。</summary>
+            Hold,
+
+            /// <summary>轮到它了：放行**一个**周期（见 <see cref="Release"/>）。</summary>
+            Release,
+        }
+
         /// <summary>
         /// 这一 tick 轮不轮得到这台建筑结算。
         ///
         /// <paramref name="powerRatio"/> 用来拉长分频数——缺电时降的是频率不是周期数，
         /// 理由见类注释。<c>power</c> 在原版里是 0..1 的供电率。
         /// </summary>
-        internal static bool Skip(PlanetFactory factory, int entityId, long gameTick, float powerRatio)
+        internal static Verdict Decide(PlanetFactory factory, int entityId, long gameTick, float powerRatio)
         {
             int i = IndexOf(factory, entityId);
 
-            if (i < 0) return false;
+            if (i < 0) return Verdict.Free;
 
+            int divider = EffectiveDivider(i, factory, powerRatio);
+
+            if (divider <= 1) return Verdict.Free;
+
+            // **错帧**：用 entityId 当相位，同款建筑的不同实例均匀摊在 divider 个 tick 上。
+            // 不错帧的话那一帧的尖峰等于没分频，而逻辑帧看的是尖峰。抄的是原版物流站
+            // 派机那条 `timeGene % interval != id % interval`。
+            return gameTick % divider != entityId % divider ? Verdict.Hold : Verdict.Release;
+        }
+
+        /// <summary>
+        /// 这台建筑实际的分频数：配置值，先按星系加成缩短，再按供电率拉长。
+        /// </summary>
+        private static int EffectiveDivider(int i, PlanetFactory factory, float powerRatio)
+        {
             int divider = _entries[i].Divider;
 
-            if (divider <= 1) return false;
+            if (divider <= 1) return 1;
 
             // ── 就地生产加成：建在原料产地的星系里就快 ──────────────
             //
@@ -219,7 +247,7 @@ namespace ProjectEden.Patches
 
             if (bonus != null)
             {
-                StarData star = factory.planet?.star;
+                StarData star = factory?.planet?.star;
 
                 if (star != null && System.Array.IndexOf(bonus, star.type) >= 0)
                 {
@@ -241,10 +269,175 @@ namespace ProjectEden.Patches
                 divider = scaled > MaxDivider ? MaxDivider : scaled;
             }
 
-            // **错帧**：用 entityId 当相位，同款建筑的不同实例均匀摊在 divider 个 tick 上。
-            // 不错帧的话那一帧的尖峰等于没分频，而逻辑帧看的是尖峰。抄的是原版物流站
-            // 派机那条 `timeGene % interval != id % interval`。
-            return gameTick % divider != entityId % divider;
+            return divider;
         }
+
+        /// <summary>
+        /// 这台建筑的分频数，供显示用（参考速率 / 理论产能）。没配分频返回 1。
+        /// 供电率按满载算——面板报的是「能跑多快」，不是「此刻多快」。
+        /// </summary>
+        internal static int DividerFor(PlanetFactory factory, int entityId)
+        {
+            int i = IndexOf(factory, entityId);
+
+            return i < 0 ? 1 : EffectiveDivider(i, factory, 1f);
+        }
+
+        /// <summary>
+        /// 轮到这台建筑的那一 tick：把**已经付过料的那一个周期**放出来结算。
+        ///
+        /// <para><b>为什么非要显式放行——只压不放是漏掉的那一半，整条产线因此一件都不出。</b></para>
+        /// 原版 <c>AssemblerComponent.InternalUpdate</c> 是**上一次攒、这一次结**的流水线：
+        ///
+        /// <code>
+        /// 0101: if (time &lt; timeSpend) goto 0383;   // ← 结算，用的是**上一次调用**攒的 time
+        /// 0383: if (replicating) goto 0555;        // 否则扣料、replicating = true
+        /// 055D: if (time &gt;= timeSpend) 不再累加
+        /// 056F: time += power × speedOverride;      // ← 攒，给**下一次调用**用
+        /// </code>
+        ///
+        /// 所以「攒满」和「结算」永远落在相邻两次调用上。而分频把相邻那一次变成了
+        /// Hold tick，<see cref="MegaLightPatches.Suppress"/> 在原版调用之前把 <c>time</c>
+        /// 写成大负数——**刚攒满的那一个周期就这么被抹掉了**，每一次都如此。
+        /// 净效果：第一 tick 扣掉一整份料、<c>replicating</c> 置真，此后永远结算不了，
+        /// 玩家看到的正是「料喂进去了，一件产物都没有」。
+        ///
+        /// <para><b>判据是 <c>replicating</c>，而它恰好就是「这一份料付过了」。</b></para>
+        /// 原版只在 IL 054E 把它置真，而那一句紧跟在扣料（含够不够的检查）之后；
+        /// 结算时 IL 0127 又把它置假。所以 <c>replicating == true</c> ⟺
+        /// 「一整份原料已经扣掉、对应的产物还没发出来」。只在这个前提下强制
+        /// <c>time = timeSpend</c>，**结构上不可能凭空造物**——顶多是把一个
+        /// 已经付过账的周期提前兑现。少了这道判据就会变成无料生产。
+        ///
+        /// <para><b>增产剂那条线同样要放，而且「一次结算给一份额外产出」就是原版在
+        /// 万倍速下的行为，不是我们加的倍率。</b></para>
+        /// <c>extraTimeSpend = TimeSpend × 100000</c>、
+        /// <c>extraSpeed = speed × incTableMilli × 10</c>，在 <c>speed = 1e8</c> 下
+        /// 后者永远大于前者（最慢的 35 秒配方也是 2.5e8 &gt; 2.1e8），
+        /// 所以不分频的巨型建筑本来就是**每结算一个周期就出一份额外产出**。
+        /// <c>extraSpeed &gt; 0</c> 是原版自己「这一份料喷过增产剂」的判据
+        /// （IL 034D 结算时清零，扣料时按 <c>incServed</c> 重算），照抄它。
+        /// </summary>
+        internal static void Release(PlanetFactory factory, ref AssemblerComponent component)
+        {
+            RecipeExecuteData data = component.recipeExecuteData;
+
+            if (data == null) return;
+
+            RewindExtra(ref component);
+
+            // 没有付过料的周期就没有可放的——这时候什么都不做，等下一个周期
+            // （原版这一次调用会去扣料并置 replicating，于是下一次轮到它时就有得放了）
+            if (!component.replicating)
+            {
+                ReportOnce(factory, component.entityId, false, 0);
+
+                return;
+            }
+
+            int before = component.time;
+
+            if (component.time < data.timeSpend) component.time = data.timeSpend;
+
+            // 增产进度按**一个周期的份额**往前推，不是直接推到门槛。
+            // 原版每累加一次：time 涨 speedOverride、extraTime 涨 extraSpeed，
+            // 而一个周期只花掉 timeSpend 的 time，所以一个周期分到的增产进度是
+            // extraSpeed × timeSpend / speedOverride。代进原版自己的两个定义
+            // （extraSpeed = speed × m × 10，extraTimeSpend = timeSpend × 10）正好是
+            // **每周期 m 份额外产出**，m 就是 incTableMilli —— 也就是增产剂标称的那个百分比。
+            //
+            // **直接推到门槛是错的，而且错得不小：**那样每个周期都出一份额外产出，
+            // 是原版同配方同喷涂下的 4 倍（离线复现：1.00 对 0.25）。
+            if (component.extraSpeed > 0 && component.speedOverride > 0)
+            {
+                long share = (long)component.extraSpeed * data.timeSpend / component.speedOverride;
+
+                long now = component.extraTime + share;
+
+                // 夹住：喷涂档位在两次调用之间变了的话，倒回的量和加上的量会对不齐，
+                // 夹一下就不会越滚越远（上界是门槛，多出来的那一份本来也要被结算掉）
+                if (now > data.extraTimeSpend) now = data.extraTimeSpend;
+
+                component.extraTime = (int)now;
+            }
+
+            ReportOnce(factory, component.entityId, true, before);
+        }
+
+        /// <summary>
+        /// 把增产计时器倒回「真实进度」。
+        ///
+        /// <b>原版在每次调用的底部（IL 0586）无条件加一个 <c>extraSpeed</c></b>，
+        /// 那一笔是给「下一次调用」用的，不是这一个周期该得的。两条钩子都要先把它减回去，
+        /// 否则 <see cref="Release"/> 看到的是「进度 + 一整个 extraSpeed」，
+        /// 当场就越过门槛——离线复现里比例会是 1.00 而不是原版的 0.25。
+        ///
+        /// 没有在制周期（<c>replicating == false</c>）时没有进度可留，压到负数即可，
+        /// 那正是 <see cref="MegaLightPatches.Suppress"/> 对这条线的做法。
+        /// </summary>
+        private static void RewindExtra(ref AssemblerComponent component)
+        {
+            if (component.replicating && component.extraSpeed > 0)
+                component.extraTime -= component.extraSpeed;
+            else
+                component.extraTime = -component.extraSpeed - 1;
+        }
+
+        /// <summary>
+        /// 这一 tick 轮不到它：压住原版紧随其后的那次调用。
+        ///
+        /// <c>time</c> 的压法和 <see cref="MegaLightPatches.Suppress"/> 一样——预置成
+        /// 「加完也够不着门槛」。<c>extraTime</c> 则**不能清零**：清了的话增产进度永远
+        /// 攒不到门槛，喷了增产剂等于白喷。见 <see cref="RewindExtra"/>。
+        /// </summary>
+        internal static void Hold(ref AssemblerComponent component)
+        {
+            component.time = -component.speedOverride - 1;
+
+            RewindExtra(ref component);
+        }
+
+        /// <summary>
+        /// 每种建筑各报一次「它到底放行了没有」。
+        ///
+        /// <para><b>状态行回答「接上了没有」，事件行回答「它决定了什么」，一个替不了另一个</b>
+        /// ——本仓库为这条付过七次账。<see cref="Collect"/> 那行只说明配置读到了，
+        /// 说明不了运行时有没有真的放出周期；而这一族建筑上一版正是「每一行日志都正常、
+        /// 一件产物都没有」。</para>
+        ///
+        /// <b>一次 = 每种建筑一次，不是每局一次。</b> 分频的建筑有四种，只报第一种的话
+        /// 剩下三种是好是坏都看不出来（<c>MegaStationPatches</c> 的储物格转储栽过同一条）。
+        /// 组装机 tick 跑在 <c>_assembler_parallel</c> 上，所以用 <c>ConcurrentDictionary</c> 领号。
+        /// </summary>
+        private static void ReportOnce(PlanetFactory factory, int entityId, bool released, int timeBefore)
+        {
+            EntityData[] pool = factory?.entityPool;
+
+            if (pool == null || entityId <= 0 || entityId >= pool.Length) return;
+
+            int protoId = pool[entityId].protoId;
+
+            if (!_reported.TryAdd((protoId, released), 0)) return;
+
+            string name = LDB.items.Select(protoId)?.name ?? protoId.ToString();
+
+            if (released)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑逐台节流·放行：{name} 第一次放出一个周期（放行前 time = {timeBefore}）。"
+                    + "原版是「上一次攒、这一次结」，而分频会让相邻那一次变成压制 tick —— "
+                    + "不显式放行的话攒满的周期每次都被抹掉，表现为「料喂进去了、一件产物都没有」。");
+
+                return;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑逐台节流·空放：{name} 轮到它了，但机器里没有待结算的周期"
+                + "（replicating = false）。**这多半是正常的**：刚建好、刚换配方、"
+                + "或者原料不够扣不出一整份，都会是这一行。原料齐了之后应当出现「第一次放出一个周期」。");
+        }
+
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int, bool), byte> _reported =
+            new System.Collections.Concurrent.ConcurrentDictionary<(int, bool), byte>();
     }
 }

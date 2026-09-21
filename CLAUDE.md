@@ -170,6 +170,9 @@ dotnet build ProjectEden.Preloader/ProjectEden.Preloader.csproj -p:DeployPreload
 
 ```bash
 powershell -ExecutionPolicy Bypass -File tools\verify_harmony.ps1   # 三类会让 PatchAll 抛异常的注解错误
+python tools\check_slots.py         # 物品格位 / 配方格位 / 建造栏槽位 / 模型 ID 的占用冲突
+python tools\check_guides.py        # 两份特性指南的 ##/### 条数与目录锚点是否对得上
+python tools\sim_throttle.py        # 离线复现巨型建筑分频节流的时序（见 MegaThrottle 那一节）
 ```
 
 **Run `verify_harmony.ps1` after adding or editing any patch class.** It catches the three mistakes that throw out of `PatchAll` — a `TargetMethods` selector sharing a class with individual annotations, a bare-name patch on an overloaded game method, and **a prefix/postfix parameter name the target does not declare**. All three are invisible to the compiler and none of them fails as "this patch did nothing".
@@ -294,7 +297,7 @@ have the same shape and this file already relies on both.
 
 ### Registration — `src/MegaBuildingRegistry.cs`
 
-`PreAddDataAction` clones vanilla ModelProto 49 (物流运输站 — picked because it carries `slotPoses`, without which belts cannot attach), tints its materials, overrides `prefabDesc` into assembler + station, and registers item/model/recipe via `LDBTool.PreAddProto`.
+`PreAddDataAction` clones vanilla ModelProto 49 (物流运输站 — picked because it carries belt ports — `PrefabDesc.portPoses`, **not** `slotPoses`, which is the inserter array; see the exchanger section), tints its materials, overrides `prefabDesc` into assembler + station, and registers item/model/recipe via `LDBTool.PreAddProto`.
 
 `PostAddDataAction` re-runs the static caches the new protos invalidate. **`ProtoPreload()` is the critical one**: `ItemProto.Preload(index)` loads `_iconSprite`, links `prefabDesc` from the ModelProto and rebuilds the item↔recipe association. Skip it and you get a blank icon, `-` for 制造速度 and 制造于, and an empty replicator entry.
 
@@ -355,6 +358,21 @@ nothing.
 `UIAssemblerWindow.SyncServingStorage` loops `served.Length` via `ldlen` with no cap, unlike the product side, which
 vanilla fully unrolled at 2 (see `MultiProductUIPatches`).
 
+**And `Suppress` is only safe when suppression is RARE — `MegaThrottle`'s tick divider made it a
+zero-output bug.** `AssemblerComponent.InternalUpdate` is a two-stage pipeline: **the settle at
+IL 0101 cashes in the `time` that the PREVIOUS call accumulated at IL 056F.** So "filled" and
+"settled" always land on adjacent calls. The greenhouse gets away with wiping `time` because a
+sunset is minutes long — one pending cycle is lost at the boundary and nobody notices. A
+`tickDivider` building is the opposite: **the tick after every fill is a suppressed tick**, so the
+pending cycle is destroyed every single time. Net effect: the first tick deducts one full set of
+inputs and sets `replicating = true`, and from then on nothing ever settles. Offline replay over
+7000 ticks at divider 70: **0 cycles, 1 batch of inputs consumed** — exactly the shipped symptom
+(「给了原料没办法产出产物」), on all four antimatter buildings.
+
+The fix is that **suppression needs a matching release**: see `MegaThrottle.Hold` / `Release` below.
+The general rule: *a "stop the machine" primitive is not a "slow the machine down" primitive*, and
+the difference only shows up when the two alternate at tick granularity.
+
 `lightDependent` is a per-**building** flag in `megabuildings.json`, collected into `MegaLightPatches._protoIds` at
 registration and matched against `EntityData.protoId` on the tick path. The building stops at night whatever recipe it
 is running.
@@ -373,6 +391,53 @@ types 9–14**. Without that restriction the five buildings holding vanilla type
 that is overwriting working vanilla copy, not filling in a gap. `MegaBuildingEntry.machineTypeName` supplies the item
 tooltip's 类型 row, since returning the building's own name there reads oddly.
 
+
+### A mega building that is deliberately slow — `src/Patches/MegaAssembler/MegaThrottle.cs`
+
+The four antimatter buildings (视界蒸发炉 / 磁分离塔 / 对产生室 / 彭宁阱复合室, `ERecipeType` 19–22)
+are mega buildings that must *not* run at 10000×. `speed` cannot be lowered — `MegaTick` identifies a
+mega building by `speed >= megaSpeedThreshold` and one that drops below is never picked up again — and
+lowering `cyclesPerTick` bottoms out at 1, which at `speedOverride = 1e8` is still 60 crafts/s. So the
+only lever is **skipping ticks** (`tickDivider`), phase-offset by `entityId` the way vanilla staggers
+station drone dispatch.
+
+**Hold and Release are a pair, and shipping only Hold means zero output.** The reason is the
+settle/fill pipeline recorded under `MegaLightPatches.Suppress` above. `Release` runs on the assigned
+tick and forces the pending cycle to cash in:
+
+- **The guard is `replicating`, and that is not a proxy — it is the fact itself.** Vanilla sets it
+  true at IL 054E, immediately after the sufficiency check and the deduction, and false at IL 0127
+  when the products are emitted. So `replicating == true` ⟺ *one full set of inputs has been paid for
+  and no product has been emitted for it*. Forcing `time = timeSpend` under that guard can only cash a
+  cycle that was already paid for; **matter creation is structurally impossible**. Without the guard it
+  would be free production, because IL 0101 does *not* check `replicating`.
+- **Offline replay before shipping**, the repo's rule and it paid: 7000 ticks at divider 70 gives
+  **100 cycles** (= ticks/divider) for recipe lengths 8/10/35/60 s, with consumption = cycles + 1 (the
+  one batch always in flight — vanilla's own pipeline shape, not a leak). That replay is
+  **`tools/sim_throttle.py`**, kept in the repo so the numbers above stay checkable: it models
+  `InternalUpdate` instruction by instruction (offsets in the comments) plus the two hooks, and it
+  still reproduces the old zero-output behaviour on demand. **Change it before changing the C#** —
+  when a transform grows a new case, grow its checker first.
+
+**The proliferator half was wrong on the first pass and only the replay caught it.** Pushing
+`extraTime` straight to `extraTimeSpend` on the release tick looks obviously right and yields **one
+extra batch per cycle** — measured **1.00 against vanilla's 0.25**, a 4× buff. The correct per-cycle
+accrual is derived, not picked: vanilla adds `speedOverride` to `time` and `extraSpeed` to `extraTime`
+in the *same* statement (IL 056F/0586), and one cycle only spends `timeSpend` of `time`, so one cycle
+is worth `extraSpeed × timeSpend / speedOverride` of extra progress. Substituting vanilla's own
+definitions (`extraSpeed = speed × incTableMilli × 10`, `extraTimeSpend = timeSpend × 10`) collapses
+that to **`incTableMilli` extra batches per cycle** — i.e. exactly the percentage printed on the
+proliferator. Replay: **0.24 against 0.2503.**
+
+**Both hooks must first rewind `extraTime` by `extraSpeed`.** IL 0586 adds it unconditionally at the
+bottom of every call, for the *next* call's benefit; leaving that in place makes `Release` see
+"progress + one whole `extraSpeed`" and cross the threshold immediately — that is where the 1.00 came
+from. And `Hold` must **not** zero `extraTime` (which is what `Suppress` does): at one hold per tick,
+zeroing means the extra timer never reaches its threshold and spraying these buildings is worthless.
+
+**The reference-rate panels need the divider too**, for the same reason recorded under
+*The reference-rate panels quote a number the engine forbids* — otherwise they quote the un-throttled
+rate, which is 70× the truth here.
 
 ### Stateful production — `src/Patches/Catalyst/`
 
@@ -1096,6 +1161,8 @@ of magnitude below 氨, already the worst in `combustibles.json`; and its Carnot
 ### Logistics — `src/Patches/Station/`
 
 - `StationCapacityPatches` — slot capacity/count and max charging power on prefabDesc + a **one-time bootstrap** for existing stations. **Neither value may be forced per tick**: `storage[].max` is what the station panel's per-slot capacity box writes, and `workEnergyPerTick` is what its charge slider writes, so pushing either back every tick makes the player's edit snap back the instant they let go. The same field-level mistake was made twice here — the charge slider first, then `max` — so the rule is now stated once for both: **the configured number is the default, not a lock.** New stations get it from `prefabDesc`; existing ones are raised once, only if still sitting at the vanilla value recorded before `prefabDesc` was edited, and only once per station (tracked in a `ConcurrentDictionary` because that tick is parallel across planets, and cleared on `IntoOtherSave` because station ids are reused). Also hosts `StationsConfig`. Charging power is a three-hop chain: `PrefabDesc.workEnergyPerTick` → `PowerConsumerComponent.workEnergyPerTick` (**saved**) → `SetPCState` scales it by `1.05 - energy/energyMax` into `requiredEnergy` → `StationComponent.energyPerTick`. Only the middle hop needs fixing at runtime, and that fix-up must be a **one-time bootstrap, not a per-tick force** — the station panel's 最大充能功率 slider (`UIStationWindow.OnMaxChargePowerSliderValueChange`) writes the very same field, so overwriting it every tick makes the slider snap back the instant you let go. The patch therefore only raises stations still sitting at the vanilla value it recorded before editing `prefabDesc`. That slider's range is derived from the prefab too: min `prefabDesc/2`, max `prefabDesc×5`, value `= 50000 × slider`.
+
+  **`energyMax` sits right beside it and takes the opposite treatment, which is the point worth keeping.** `stations.json`'s `stationEnergy` (renamed from `chargePower` in 1.12.4, and now denominated in **watts and joules** rather than per-tick — the `/60` belongs in code, as `machines.json`'s `workEnergyWatt` already had it) carries both knobs per station. The capacity one is `PrefabDesc.stationMaxEnergyAcc` → `StationComponent.energyMax` (**saved**, trap 1) — but enumerating every access shows **exactly three writers in the whole assembly: `Init`, `Reset`, `Import`**, and every other site is an `ldfld`. **No UI can write it**, so the "configured number is the default, not a lock" rule does not apply and the fix-up **aligns, up or down**; raise-only would make the config value un-lowerable, the `droneCarries` mistake one door over. Charging power keeps the one-time raise, because its slider does exist. **So "which of the two rules applies" is answered by enumerating writers, not by which field it sits next to.** Two details the alignment needs: clamp `station.energy` down with it (`SetPCState` computes `1.05 - energy/energyMax`, and an out-of-range energy yields a negative demand — the station then never charges again), and the raise branch must test `current != target` as well as `current <= vanilla`, because when the two coincide it would "change" an already-correct station every pass, set `touched`, and **the planet would never settle** — bringing back the 0.5 ms/frame full scan that the `Settled` ledger exists to stop.
 - `StationExpandPatches` — 30 slots. Vanilla unrolls `AddItem` and the four supply/demand queries over `storage[0..5]`, so **beyond 6 slots items vanish on delivery**; all five are replaced with full scans. Adds paging + a scrollbar to `UIStationWindow` (widgets rebound by index, layout untouched), resizes `UIEntityBriefInfo.icons` in `_OnCreate`, and grows existing stations' arrays on `GameData.Import`.
 
   **`UIStationStorage` widgets are SHARED across every station the player opens, and vanilla only
@@ -1429,13 +1496,13 @@ Units are metres: `OnNodeAdded`/`OnConsumerAdded` project positions onto a spher
 
 ### Procedural building models — `src/Model/`
 
-**The five mega buildings were one model in five colours.** `megabuildings.json`'s `copyFromModelId` is a **single global setting** (49, 物流运输站 — picked because it carries `slotPoses`), so all five cloned the same ModelProto and were distinguished only by `tintR/G/B`. Tinting cannot change a silhouette. `MeshKit` + `MegaBuildingMeshes` generate each building's geometry in C# instead — no Unity editor, no AssetBundle, and the geometry is **wholly original**, which matters because the art-asset licence question is still open (see `部署.md`).
+**The five mega buildings were one model in five colours.** `megabuildings.json`'s `copyFromModelId` is a **single global setting** (49, 物流运输站 — picked because it carries belt ports, i.e. `portPoses`), so all five cloned the same ModelProto and were distinguished only by `tintR/G/B`. Tinting cannot change a silhouette. `MeshKit` + `MegaBuildingMeshes` generate each building's geometry in C# instead — no Unity editor, no AssetBundle, and the geometry is **wholly original**, which matters because the art-asset licence question is still open (see `部署.md`).
 
 **Why this is possible at all: the thing actually drawn in-world is `PrefabDesc.lodMeshes`.** `ObjectRenderer.Init` reads `lodMeshes[i]` *and* `lodVertas[i]` and hands both to `BatchRenderer(Mesh, Material[], …, VertaBuffer, …)`. The Mesh is the geometry; the **VertaBuffer is vertex-animation data** — its only use is `SetToAnimMaterial`, and the constructor null-checks it (IL 0139 and 01EE). So a static building needs nothing but a Mesh.
 
 **Do not try to synthesise a VertaBuffer.** `ReadPrefab` builds `lodVertas` by `VertaBuffer.LoadFromFile(LODModelDesc.lodVertaPaths[i])` — a **pre-baked file** whose vertex count matches the vanilla mesh. Once the geometry is replaced that data is meaningless, so the **elements** are nulled. Nulling the whole array instead would crash: `ObjectRenderer.Init` indexes it.
 
-**Only the mesh is swapped; everything else stays vanilla.** Footprint, colliders, belt attachment points (`SlotConfig.slotPoses` → `PrefabDesc.slotPoses`) and LOD distances all come from the vanilla prefab via `ReadPrefab`, and are already proven to work. Building a prefab from scratch would put all five back in play at once; this way the only surface that can break is the geometry itself. `mesh` and `meshes` are swapped alongside `lodMeshes` because build previews, blueprints and the dismantle highlight read those instead.
+**Only the mesh is swapped; everything else stays vanilla.** Footprint, colliders, belt attachment points (`SlotConfig.slotPoses` → `PrefabDesc.**portPoses**`; the names are swapped, see the exchanger section) and LOD distances all come from the vanilla prefab via `ReadPrefab`, and are already proven to work. Building a prefab from scratch would put all five back in play at once; this way the only surface that can break is the geometry itself. `mesh` and `meshes` are swapped alongside `lodMeshes` because build previews, blueprints and the dismantle highlight read those instead.
 
 **Replacing array elements is safe, and that is worth checking rather than assuming.** `ReadPrefab` does `newarr UnityEngine.Mesh` for both `meshes` and `lodMeshes` (IL 00DA, 0940, 0D53), so every `new PrefabDesc(…)` owns its arrays — writing an element cannot reach the vanilla building. The **Mesh objects inside are shared**, so they must be replaced, never mutated. This is the same distinction the existing tint code relies on when it does `material = new Material(material)`: the array is ours, the objects in it are not. Get it backwards and you retexture 物流运输站 for the whole save.
 
@@ -2203,6 +2270,144 @@ Four windows draw a grid addressed as `page × 1000 + row × 100 + col`, and **e
 
 **Do not fight a Unity widget for ownership of a value.** The child-row scrollbar was a `UnityEngine.UI.Scrollbar` whose `value` was rewritten every frame from `_page`; its internal drag/click state machine and that write fought, and the symptom was that it would page back but not forward. It is now two plain `Image`s with the handle positioned from `_page` and all input polled directly, so `_page` is the single source of truth. Screen-to-rect conversion uses the game's own **`UIRoot.ScreenPointIntoRect`** — it goes through `overlayCanvas.worldCamera`, and hand-rolled `RectTransformUtility` calls silently measure nothing because `GetComponentInParent<Canvas>()` can return a nested canvas whose `worldCamera` is null.
 
+### The exchanger's fifth prefab field — `MegaExchangerDefaultPatches` + `ApplyExchangers`
+
+Reported as 「奇点储能厂用传送带导入电浆储能柜，无法进行充电」. **A field that was never
+assigned, and it is the `ApplyGenerator` lesson word for word.**
+
+`PowerSystem.NewExchangerComponent` reads exactly **five** `PrefabDesc` fields — enumerated, not
+recalled: `subId` @0080, `exchangeEnergyPerTick` @0097, `maxExcEnergy` @00C1, `emptyId` @00D8,
+`fullId` @00EF. `MegaBuildingRegistry.ApplyExchangers` set three of them and **never touched
+`maxExcEnergy`**, so it came from the cloned 物流运输站, which is not an exchanger.
+
+**What that field means is read out of the IL rather than inferred from its name.**
+`PowerExchangerComponent.InputUpdate` @0023 is `if (thisTick < maxPoolEnergy − currPoolEnergy)
+accumulate only`, and @0055 is `currPoolEnergy −= maxPoolEnergy` paired with `emptyCount−−,
+fullCount++`. So it is **the energy needed to fill one accumulator**, and the correct value is that
+accumulator's own `maxAcuEnergy`. (Empty and full variants share one `PrefabDesc` — recorded under
+*Cloned buildings* — so reading it off the **empty** id is the same number.)
+
+**The symptom depends on which way it is wrong, and only one direction matches the report.** Too
+large → the pool never fills → vaults go in and none ever comes out, which is exactly 「就是不充电」.
+Zero would have been the opposite (a free conversion every tick), so *the report itself is evidence
+about the inherited value* — worth noting, because the field's real value lives in
+`resources.assets` and cannot be read offline.
+
+**Three consequences, all of which had to be handled together:**
+
+- **`maxPoolEnergy` is saved** (`Export` @009A / `Import` @00AE) and `Import` does **not** re-derive
+  it from the proto — unlike `StorageComponent.Import`, which is this repo's standing
+  counter-example to trap 1. So already-built plants do **not** self-heal and need a runtime repair
+  pass; it hangs off `GameData.Import`.
+- **The tier switch has to carry it.** 奇点储能厂 serves two vault tiers whose capacities differ by
+  2×, and the switch previously rewrote `emptyId`/`fullId` only. Same shape as the piler's four
+  `4`s: half the state moved and nothing errored.
+- **`maxCount` is a red herring** — enumerated, it has **zero accesses** in the whole assembly.
+  Checking it cost one script and removed a plausible suspect.
+
+**That was one half. The half the player actually hit is the belt ports, and the diagnostic built to
+catch it measured the wrong field.**
+
+`PowerExchangerComponent` has only `belt0..belt3`, and **`PowerSystem.SetExchangerBelt`'s first two
+instructions are `if (slot < 0) return; if (slot > 3) return;`** (IL 0000–0008) — so a belt on the
+fifth port or beyond is discarded before `AlterBelt` is even reached. `slot` *is* the index into the
+building's belt-port array (`BuildTool.GetLocalPorts` @0089 returns exactly that array, and
+`ReadObjectConn` indexes `entityConnPool[objId * 16 + slot]` with the same number). The mega chassis
+is cloned from 物流运输站, which carries far more than four ports. Shipped symptom: the belt connects
+on screen, `belt0..3` stay 0, nothing errors, and the plant never charges.
+
+**The field names are inverted between the two types, and that is what made the 1.12.4 diagnostic
+useless.** `PrefabDesc.ReadPrefab` @11AD writes `SlotConfig.slotPoses` into **`PrefabDesc.portPoses`**
+(the belt ports) and @1211 writes `SlotConfig.insertPoses` into **`PrefabDesc.slotPoses`** (the
+*inserter* poses). The dump read `slotPoses`, measured **0**, and its "WARN if > 4" check therefore
+could never fire — **a measurement that cannot vary with the thing being measured is not a
+measurement**, the third time this file records that shape.
+
+**The fix is a remap, not a trim, and the safety argument is read out of the IL rather than assumed.**
+A prefix on `SetExchangerBelt` moves a slot ≥ 4 onto a free component slot. The component slot index
+carries no geometry — `InsertItemToBelt` / `PickItemFromBelt` take a `beltId` and `FindTheNextSlot`
+just rotates through the four. Decisively, **`PowerSystem.DisconnectToExchanger` (IL 0029/0051/0079/
+00A1) clears by `beltId`, comparing it against all four slots**, not by port index — so whichever slot
+a belt lands in, removal still finds it. Trimming `portPoses` to 4 would also work and was rejected:
+it takes effect immediately on already-built plants, silently invalidating belts the player has
+already laid.
+
+**And the remap alone cannot rescue an existing save, which is trap 1 again.** `belt0..3` are
+per-component and **saved**, while `SetExchangerBelt` runs only on entity creation and on belt
+connect/disconnect; `PowerSystem.Import` reads the stored 0 straight back and never re-derives. So
+`RescueBelts` re-reads `entityConnPool` at load and fills the four slots from whatever is actually
+connected.
+
+**The dump prints every gate in the chain, not the suspected one** — mode, `networkId`, both item
+ids with counts, `maxPoolEnergy`/`currPoolEnergy`, all four belts with their directions, and the
+chassis port count. Five stages all present as "the belt delivered and nothing charges", which is
+the courier-chain lesson: *state dump first, hypothesis second.*
+
+**But the dump ran only at `GameData.Import`, so it could not answer the question it was built for.**
+It reported `belt0..3 = 0/0/0/0` — which is equally consistent with "the belts are on dead ports" and
+with "the player had not laid any belts at the moment of that load". A load-time dump is a *status*
+line; what was missing was the *event* line, and on top of that the feature had **no startup status
+line at all**, so "the patch is not wired up" and "nothing happened this session" were
+indistinguishable. `MegaExchangerDefaultPatches.Report()` (registered after `PatchAll`, read out of
+`Harmony.GetAllPatchedMethods()`) now answers the first, and the remap logs each move. **Seventh time
+this file records it: the status line answers "is it wired up", the event line answers "what did it
+decide", and neither substitutes for the other.**
+
+**Note `PrefabDesc.slotPoses` being 0 on this chassis is a real and separate fact** — the mega
+buildings genuinely have no *inserter* attachment poses. It is simply not the number that governs
+belts, which is why reading it produced a green-looking diagnostic over a broken feature.
+
+### The reference-rate panels quote a number the engine forbids — `src/Patches/UI/ReferenceRatePatches.cs`
+
+Reported as 「生产和消耗对账对不上」 with a screenshot: 铁矿 produced **600 k/min**, consumed
+**216 k/min**; 铁块 produced 216 k/min with a 参考速率 of **600 k/min**. **Every number was exact and
+nothing was lost** — one 小型速采机 is `oresPerMinute: 600000` and one 冶铸熔炉 is 60 cycles/tick ×
+3600 = 216,000/min, with the 384 k/min difference sitting in the panel's own 仓储数量 column.
+
+**What made it read as a bug is that both 参考速率 cells said 600 k, so the pair looked like it should
+balance.** One of them is real (the miner's) and one is fiction. `UIReferenceSpeedTip
+.AddEntryDataWithFactory` @0191 is
+`3600 × AssemblerComponent.speed / recipeExecuteData.timeSpend` — a formula that knows neither the
+one-cycle-per-tick ceiling nor the output gate above. At `speed = 1e8` it reports **167× the truth**.
+
+**The fix is a clamp, and it is unit-free because vanilla's own expression is already in the right
+units**: `speed / timeSpend` *is* "how many cycles one tick's `time` increment covers", so
+`min(rate, cap × 3600)` needs no new conversion and is **inert on vanilla machines**, which cannot
+fill even one cycle per tick.
+
+**Where to clamp is the whole design, and the obvious point is wrong.** After the `div`, vanilla folds
+in the proliferator: `加速模式` does `rate *= accMulti` (@01FD) while `增产模式` does not. Acc buys a
+mega building **nothing** (`speedOverride` is already orders above `timeSpend`), so clamping at the
+`div` would be overridden by up to ×3.5, and clamping only in the acc branch would miss the other.
+The clamp therefore goes **immediately before `rate × productCounts[j]`**, where the value is final in
+both modes; `min` is idempotent, so patching every such use costs nothing.
+
+**Five sites in two methods, and the count was measured before the transpiler was written** — the
+repo's rule, and it mattered: enumerating `AssemblerComponent.speed` / `LabComponent.speed` reads
+across the assembly gives 参考速率 3 (assembler consume / assembler produce / lab) and 理论产能 2
+(assembler / lab), but those 5 sites hold **9** `counts` multiplications, because **the lab site is
+used by both the consume and the produce side in each panel**. Patching "the first use" would have
+made one panel disagree with itself. A PowerShell simulation implementing the transpiler's exact rule
+— including its "each site owns the region up to the next speed site" bound — reported 3/4 and 2/4
+offline; the patch asserts both and **applies nothing at all on a mismatch**, because a half-applied
+display fix is harder to read than the original lie.
+
+Three smaller things the sites forced:
+
+- **All five component locals are `AssemblerComponent&` / `LabComponent&`** (checked, not assumed), so
+  cloning the `ldloc` in front of `ldfld speed` yields a ready-made `ref` argument and no `ldloca` is
+  needed. Had any been by value the emit would have had to differ per site.
+- **Two of the five copy the per-minute value into a second local before folding in the proliferator**
+  (`stloc X ; ldloc X ; stloc Y` — both `ProductionExtraInfoCalculator` sites), so the transpiler
+  tracks that hop; anchoring on `X` would have found no uses there.
+- **`PlanetFactory` sits at a different argument index in each method** (both are instance methods:
+  `ldarg.1` vs `ldarg.2`), so it is located by scanning `original.GetParameters()` — the same thing
+  `MinerProductStat_Transpiler` already does.
+
+**Labs are clamped at 1 cycle/tick unconditionally**, which is the engine's own limit rather than a
+mod-specific number: `GameLogic` has `_lab_produce_parallel` and no multi-cycle path, so a lab is
+3600 crafts/min however high `lab.json`'s `assembleSpeed` goes.
+
 ### More than two products — `src/Patches/UI/MultiProductUIPatches.cs`
 
 **Vanilla's product UI is two unrolled widget sets, not a loop, and this repo has ten recipes that need more.** `UIAssemblerWindow` carries `productIcon0/1`, `productCountText0/1`, `productProgress0/1`, `extraProductProgress0/1`, `productButton0/1`; `UIReplicatorWindow`'s crafting tree carries `treeMainIcon0/1` and `treeMainCountText0/1`. Nine `ores.json` recipes have three products and 铬块 · 烃热还原 has four, so the third one has no widget to be drawn into.
@@ -2293,7 +2498,7 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 `planet.json` (bigger planets: the master switch — **on by default since 1.12.1** — the radius
 multiplier, and the `probe` diagnostic; see *Bigger planets*) is the twenty-third.
 
-The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, charging power, carry capacity, stacking, gas collector, `localDispatchPerTick` — how many planetary drones one station may launch per tick, see *Game internals: planetary drone dispatch* — and `inventoryStackSize`, the one `ItemProto.StackSize` shared by the inventory, chests, the delivery package and the mecha's ammo/fuel slots, see trap 4c), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
+The twenty-two configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, `stationEnergy` — per-station charging power in **watts** and energy capacity in **joules**; 2103 / 2104 / 6531 all ship at 5 GW / 150 GJ — carry capacity, stacking, gas collector, `localDispatchPerTick` — how many planetary drones one station may launch per tick, see *Game internals: planetary drone dispatch* — and `inventoryStackSize`, the one `ItemProto.StackSize` shared by the inventory, chests, the delivery package and the mecha's ammo/fuel slots, see trap 4c), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
@@ -3431,6 +3636,28 @@ just the unrolled form of the multi-product one):
 
 **This is NOT the lab's formula** (`10 × ceil(speedOverride/10000)`) — that one belongs to
 `LabComponent`, and using it here would be wrong in both directions.
+
+**That table is the real ceiling for most mega buildings, and this file spent a long time implying
+`cyclesPerTick` was.** The gate is re-read and complete: single-product at IL 0138–0184, multi-product
+at 01D1–02F5, **the same three tiers in both**, applied per product index. At `cyclesPerTick = 60` the
+effective cap is therefore `min(60, gate)`:
+
+| `recipeType` | cap | crafts/min | who |
+|---|---:|---:|---|
+| 1 `Smelt` | `100 / count` | **216,000** at count 1 | 冶铸熔炉 — the only one that reaches 60 |
+| 4 `Assemble` | **10** | 36,000 | 天工装配厂 |
+| everything else (2/3/5 **and every custom type 9–17**) | **20** | 72,000 | the other eight mega buildings |
+
+**Two independent measurements already in this file fit that model quantitatively, which is what
+makes it more than a reading of the IL.** The `cyclesPerTick` note records 21,423 settled cycles per
+tick across 1079 mega buildings — a mean of **19.85**, hugging 20 — and 60 → 30 dropping the total to
+14,765. Solving `S + O = 21423`, `S/2 + O = 14765` gives `S = 13316` (≈222 buildings pinned at 60, i.e.
+Smelt) and `O = 8107` (≈405 pinned at 20). *The bimodal distribution that note describes is those two
+tiers*, not "starved vs. full".
+
+**So "every mega building does 216,000 crafts/min" is false and was stated in both feature guides**
+(and in a reply to the owner) before this was read. The greenhouse's documented `14400 木材/秒` was
+wrong by 3× for the same reason. Corrected in 1.12.4.
 
 ### The three optimisations, and which one carries risk
 

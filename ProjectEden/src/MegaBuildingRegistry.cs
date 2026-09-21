@@ -19,7 +19,7 @@ using xiaoye97;
 namespace ProjectEden
 {
     /// <summary>
-    /// 注册全部巨型建筑：克隆物流运输站的模型（带 slotPoses，传送带才能直连），
+    /// 注册全部巨型建筑：克隆物流运输站的模型（带传送带接口 portPoses，带子才能直连；注意 PrefabDesc.slotPoses 是分拣器口，名字和 SlotConfig 里是反的），
     /// 把 assemblerSpeed 提到阈值以上，各自挂一份无前置科技的配方，
     /// 并统一放进 CommonAPI 注册的"巨型建筑"分页。数值全部来自 data/megabuildings.json。
     /// </summary>
@@ -726,9 +726,36 @@ namespace ProjectEden
                 desc.fullId = fullId;
                 desc.exchangeEnergyPerTick = exc.energyPerTick;
 
+                // **第五个字段，之前一直没设。**
+                // PowerSystem.NewExchangerComponent 只从 PrefabDesc 取五样：
+                // subId / exchangeEnergyPerTick / maxExcEnergy / emptyId / fullId。
+                // 上面设了四样里的三样，maxExcEnergy 一次都没设过，于是它继承自被克隆的
+                // 物流运输站——而那台不是枢纽。这个字段的含义由 InputUpdate @0023/@0055 钉死：
+                // 「攒够多少焦耳才换出一个满柜」，所以它必须等于这一档柜子自己的容量。
+                // 继承来的值偏大 = 永远攒不够 = 玩家报的「皮带送进去了就是不充电」。
+                // 这正是 ApplyGenerator 记过的那条：逐字段复制，漏一个就静默失效。
+                long vaultEnergy = Patches.MegaExchangerDefaultPatches.VaultEnergy(emptyId);
+
+                if (vaultEnergy > 0L)
+                {
+                    long beforeExc = desc.maxExcEnergy;
+
+                    desc.maxExcEnergy = vaultEnergy;
+
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"「{entry.displayName}」单柜能量：{beforeExc / 1e9:0.###} GJ → "
+                        + $"{vaultEnergy / 1e9:0.###} GJ（取自「{exc.vaultMachineKey}」自己的容量）");
+                }
+                else
+                {
+                    ProjectEdenPlugin.Log.LogError(
+                        $"「{entry.displayName}」：读不到「{exc.vaultMachineKey}」的 maxAcuEnergy，"
+                        + "单柜能量没设成——这台枢纽会按继承自物流运输站的值攒电，很可能永远充不满一个柜子");
+                }
+
                 // 默认那一对排在最前，其余的登记给切档用
                 Patches.MegaExchangerDefaultPatches.RegisterPair(
-                    exc.energyPerTick, emptyId, fullId, exc.vaultMachineKey);
+                    exc.energyPerTick, emptyId, fullId, exc.vaultMachineKey, vaultEnergy);
 
                 if (exc.alsoServes != null)
                     foreach (string key in exc.alsoServes)
@@ -738,8 +765,11 @@ namespace ProjectEden
 
                         if (e2 > 0 && f2 > 0)
                         {
+                            // 每一档各有各的单柜能量——超载柜的容量是等离子柜的两倍，
+                            // 切档时 maxPoolEnergy 要跟着换，否则换完就再也充不满
                             Patches.MegaExchangerDefaultPatches.RegisterPair(
-                                exc.energyPerTick, e2, f2, key);
+                                exc.energyPerTick, e2, f2, key,
+                                Patches.MegaExchangerDefaultPatches.VaultEnergy(e2));
 
                             continue;
                         }

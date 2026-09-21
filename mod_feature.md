@@ -107,7 +107,34 @@ raising speed buys nothing at all. So the mega buildings use multi-cycle settlem
 own settlement logic several times over. Every pass is complete vanilla logic, so **nothing is conjured out of
 nothing** — they still stall when material runs out.
 
-**Short on power, they slow down linearly with the supply ratio.** 50% supply is 1800 cycles/second, 25% is 900 —
+**But the cycle count is not free to set: vanilla has a second gate on output, in three tiers by recipe type.** It
+lives in `AssemblerComponent.InternalUpdate` and exists to stop a machine overflowing its output slot; a machine that
+settles once per tick can never reach it, and one that settles dozens of times per tick hits it immediately:
+
+| Recipe type | Vanilla's refusal test | Max settled per tick | Crafts per minute |
+|---|---|---:|---:|
+| **Smelt** (Iron Ingot, Copper Ingot, High-Purity Silicon …) | `produced + count > 100` | `100 ÷ count` | **216,000** (at 1 per craft) |
+| **Assemble** (the Celestial Assembler family) | `produced > count × 9` | **10** | **36,000** |
+| **Everything else** (chemical, refine, and every recipe type this mod adds) | `produced > count × 19` | **20** | **72,000** |
+
+So the 60 that `cyclesPerTick` asks for is **reachable only by Smelt recipes**; every other type is stopped by
+vanilla's own gate. This is not a limit this mod imposes, and raising `cyclesPerTick` does not move it.
+
+> This came out of one player asking why production and consumption did not reconcile, and it agrees with a number
+> already measured in this repo: on a planet with 1079 mega buildings, "21,423 cycles actually settled per tick" —
+> an **average of 19.85**, hugging 20 rather than 60. Halving `cyclesPerTick` from 60 to 30 dropped the total to
+> 14,765, which is exactly "the Smelt group falls 60 → 30 while the rest do not move".
+
+**The analysis panel's "reference rate" and "theoretical capacity" used to quote a number that cannot be reached;
+since 1.12.4 they are clamped to the real ceiling.** Vanilla computes those two columns as
+`3600 × speed ÷ recipe time`, which looks only at speed — it knows neither that the engine settles one cycle per
+tick nor that the gate above exists. So a Smelting Forge was quoted at 600,000/min when it actually does 216,000.
+**That is exactly where "produces 600k, consumes 216k, the books don't balance" comes from**: a Mini Speed Miner is
+precisely 600,000 ore/min, so the two 600k figures look like they should cancel — except one is real and the other
+is fiction. The true ratio is **2.78 Smelting Forges per miner**; the surplus goes into storage, and the panel's
+own "storage" column is what shows it climbing.
+
+**Short on power, they slow down linearly with the supply ratio.** 50% supply is half the ceiling, 25% a quarter —
 the same terms a 1x vanilla machine is on.
 
 > **Why this needed doing at all.** Vanilla machines are already linear: `time += (int)(power × speedOverride)`, so
@@ -126,7 +153,8 @@ the same terms a 1x vanilla machine is on.
 
 ### How to feed them (important)
 
-At full speed a mega building eats **3600 recipes' worth of input per second**. The two feed paths differ wildly in
+At full speed a mega building eats **as many recipes' worth of input per second as its ceiling allows** (3600/s for
+Smelt, 600 for Assemble, 1200 for everything else — see the output-gate table above). The two feed paths differ wildly in
 what they can actually deliver:
 
 | Path | Delivered per tick | Enough? |
@@ -258,11 +286,23 @@ Both share the same speed-up logic as the advanced mining machine:
 
 - **30 storage slots** (vanilla 4 / 5), with paging and a scrollbar added to the panel
 - **10,000,000 per slot**
-- **Interstellar station max charging power 30 GW** (vanilla 0.06 GW)
+- **All three stations unified: max charging power 5 GW** (vanilla 0.06 GW) **and max energy capacity 150 GJ**
+
+> "All three" means the Planetary Logistics Station, the Interstellar Logistics Station and the Integrated Logistics
+> Hub. Before 1.12.4 only the interstellar one had been retuned (30 GW) while the other two kept vanilla's value, and
+> energy capacity had never been touched at all. 150 GJ against 5 GW is thirty seconds to fill the buffer, and one
+> warp jump costs a flat 100 MJ — so a full tank is 1500 jumps.
 
 > The charging slider's range on the panel is derived from that value: minimum half of it, maximum five times it, so
-> it now drags between **15 and 150 GW** — and the setting sticks. The mod raises a station only once, on load, and
-> only if it is still sitting at vanilla's value; after that it never interferes.
+> it now drags between **2.5 and 25 GW** — and the setting sticks. The mod raises a station only once, on load, and
+> only if it is still sitting at vanilla's value; after that it never interferes. **The cost is that this cuts both
+> ways**: stations already raised to 30 GW under 1.12.3 are *not* brought back down to 5 GW — their current value is
+> above vanilla's, which is indistinguishable in the data from a value the player dragged there, so they are left
+> alone. Newly built stations are 5 GW outright, and an old one catches up the moment you touch its slider.
+>
+> Energy capacity is not covered by that rule: the field has exactly three writers in the whole game — init, reset
+> and load — and **no UI can change it**, so it is simply aligned, and raising or lowering the config takes effect
+> immediately.
 
 > **Supply/demand pairing can be up to 2 seconds stale, and that is a stated trade.** Vanilla rebuilds the whole
 > planet's logistics pairing **immediately** every time a building is placed, a slot is changed or a station is
@@ -1315,7 +1355,7 @@ Puts **all three kinds of logistics drone** into one building:
 | Location | Right next to the two logistics stations in the build bar |
 | Berths | **200 Logistics Drones + 50 Logistics Vessels + 20 Logistics Bots** |
 | Automation | The bots resupply and recover from the mecha based on what the hub holds — no manual request list needed |
-| Storage / slots / charging | Same as this mod's enlarged logistics stations (30 slots × 10,000,000, 30 GW) |
+| Storage / slots / charging | Same as this mod's enlarged logistics stations (30 slots × 10,000,000, 5 GW charging / 150 GJ buffer) |
 
 Vanilla's planetary station has only drones; the interstellar station has both but a small hangar. This one enlarges
 the berths as well, so one hub does the work of several.
@@ -2677,8 +2717,9 @@ running**:
 
 A mega building's `speed` is 100,000,000 (10000x), far above any recipe's `timeSpend`, so **slowing it down does
 nothing at all until it drops below `timeSpend`**. What actually decides throughput is how many recipe cycles settle
-per tick (60 by default, i.e. 3600 cycles/s), so that is the number scaled by sunlight: strength 1.0 gives 60 cycles,
-0.5 gives 30, 0 gives none.
+per tick (60 is what the config asks for, but the Biodome falls in vanilla's "everything else" output tier, so its
+real ceiling is 20 per tick), so that is the number scaled by sunlight: strength 1.0 gives the full ceiling, 0.5
+gives half, 0 gives none.
 
 Slowing it down would also have a worse side effect: a mega building is recognised by `speed >= threshold`, so pushing
 the speed under that threshold means the building is never picked up again on the next tick — permanently dead.
@@ -2725,8 +2766,8 @@ Following the standard in section XII, item by item:
 
 ### One balance note
 
-Zero inputs at 60 cycles per tick is **14,400 Logs/s + 14,400 Plant Fuel/s** in full sunlight. That is the same order
-as the other mega buildings (they also run 3600 cycles/s), but all of those consume inputs and this one does not;
+Zero inputs at 20 cycles per tick (vanilla's "everything else" output tier) is **4,800 Logs/s + 4,800 Plant Fuel/s**
+in full sunlight. That is the same order as the other mega buildings, but all of those consume inputs and this one does not;
 averaged over a day/night cycle it comes to roughly half. If that is too much, lower `cyclesPerTick` in
 `megabuildings.json` (global) or cut the product counts on that recipe in `ores.json` — both are data, no code change
 needed. To drop the light constraint entirely, set the Biodome's `lightDependent` to `false` in
@@ -4409,6 +4450,13 @@ vaults are still inside, and says why — switching would strand them.
 > mecha reactor; at 333× that is unlimited range. Capacity and "may it fuel the mecha" are two separate
 > axes, and the second one is switched off here.
 
+**Any belt port works, but only four belts are live at once.** A mega building's chassis carries a
+dozen-odd belt ports while vanilla's exchanger component has only four belt slots —
+`PowerSystem.SetExchangerBelt` opens with `if (slot < 0 || slot > 3) return;`. So before 1.12.5 a belt
+docked at the fifth port or beyond **looked perfectly connected and silently did nothing**, which
+presented as "the vaults go in and it just will not charge". It is now moved onto a free slot
+automatically; once all four are taken a fifth belt still will not attach, and the log says so plainly.
+
 ## XXXV. The logic frame on a big factory: three optimisations that cost no output
 
 A planet packed with mega buildings stalls the logic frame, and that is a CPU matter with nothing
@@ -4483,7 +4531,15 @@ never picked up again (the same constraint the greenhouse's sunlight lives under
 
 The cost is stated rather than hidden: **the assembler panel's "Production Speed" row still reads
 10000×** on these four. That row reads `speed`, and `speed` is never touched. The panel and the real
-throughput disagree here; that is known and there is no lever that fixes it.
+throughput disagree here; that is known and there is no lever that fixes it. (The analysis panel's
+"reference rate" / "theoretical output" columns are a different matter — since 1.12.6 those two are
+divided down by the tick divider.)
+
+**Proliferator works on these four, at exactly the same ratio as anywhere else.** The throttle sets
+*how often a cycle settles*, not how much extra a cycle earns — spraying Mk.III yields 0.25 extra
+batches per cycle here just as it does on an un-throttled mega building. Acceleration mode remains
+pointless: `speed` is already two orders of magnitude above any recipe's time, so there is nothing
+left to accelerate.
 
 ### The energy account: only a black hole system breaks even
 
@@ -4648,7 +4704,7 @@ already decides each planet's radius, and two things writing the same number onl
 | `megabuildings.json` | The sixteen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
-| `stations.json` | Station slot count and capacity, charging power, carry capacity, stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
+| `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), carry capacity, stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
 | `perfprobe.json` | Developer switch: prints per-task CPU cost into the log, so nobody has to copy ten milliseconds figures out of Statistics → Performance by hand. **Off by default, and it costs real time when on** |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes, plus `vanillaEdits`: **edit a vanilla recipe's ingredient list in place** (currently one entry: the Hydrogen Fuel Rod's hydrogen ×10 → ×56) |
