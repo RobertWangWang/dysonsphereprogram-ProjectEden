@@ -11,6 +11,10 @@
   "//existing": "**已建成的传送带把速度烤进了存档**（BeltComponent.speed 和 CargoPath.chunks 都是持久化的），光改 prefabDesc 只对新建的生效，所以读档时会逐条改过来。注意**不能直接调原版的 CargoTraffic.UpgradeBeltComponent**——它在同一个函数里前面判了 planet.physics 的空、五条指令之后又直接解引用，遍历未加载的星球必然空引用崩溃（实测过）。这里只抄它的数据部分：BeltComponent.speed + CargoPath.InsertChunk（**货物真正按 chunks 里的值走**，漏了这步就是「数字变了货没变快」）+ 环形路径的 SyncBuckleSpeed。",
 
   "enabled": true,
+  "//probe": "传送带流量探针，默认关。开了之后每隔 probeSeconds 秒报一次脚下这颗星球最忙的几条带子：两份速度（CargoPath.chunks 与 BeltComponent.speed，**货物按前者走**）、占用率、平均集装层数、实测格/秒与件/秒，并指出卡在哪一段。\n\n**「不达标」有四个长得一样的成因，在游戏里长得一模一样**：① 带子没提速——两份速度不一致，而货物按 chunks 那一份走；② 带子没喂满——占用率低，瓶颈在上游不在带子；③ 集装没堆起来——平均层数接近 1，那 120 格/秒就只有 120 件/秒；④ 喂料口本来就喂不满——原版每个投放口一个 tick 最多放一堆（TryInsertItemAtHeadAndFillBlank 先 TestBlankAtHead 找空位，一次一堆），也就是 60 格/秒，**正好是 120 格/秒带子的一半**，所以单一货源喂极速带天生只能跑到一半，要多个投放点。\n\n量的是恒等式而不是计数器：一堆货占 kCargoLength = 10 个缓冲单位、一 tick 前进 speed 个单位、60 tick/秒，所以流量 = 速度 × 6 × 占用率（格/秒），一次快照就够——tick 路径上不许挂计数器。",
+  "throughputProbe": false,
+  "probeSeconds": 10,
+
 
   "//belts": "按物品 ID 逐条配。2001 低速 / 2002 高速 / 2003 极速。保持原版 1:2:5 的档次比例整体放大 4 倍，最高档 120/秒。",
   "belts": [

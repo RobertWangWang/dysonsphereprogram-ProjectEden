@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -56,6 +58,7 @@ namespace ProjectEden.Patches
             ProductMap.Clear();
 
             ApplyStationCapacity();
+            ApplyMinerPeriod();
             ReportSmallMinerConfig();
 
             if (Config?.productMap == null || !Config.remapProduct) return;
@@ -198,6 +201,153 @@ namespace ProjectEden.Patches
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"大型采矿机工作功率：{beforeEnergy * 60 / 1000000.0:0.##} MW → {Config.workEnergyPerTick * 60 / 1000000.0:0.##} MW");
+        }
+
+        // ── 采矿周期：产量上限的唯一杠杆 ──────────────────────
+
+        /// <summary>解析好的 period 目标值。0 = 不改。只算一次。</summary>
+        private static int _minerPeriod = -2;
+
+        /// <summary>
+        /// 采矿机能有多快，<b>只由 period 决定</b>，这是枚举出来的而不是推断的。
+        ///
+        /// 原版 <c>MinerComponent.InternalUpdate</c> 的产出是一句整除
+        /// （@017A / @04E5：<c>件数 = time / period</c>），而 <c>time</c> 是 Int32、
+        /// 每 tick 的累加量被 <see cref="AdvancedMinerConfig.maxTimeIncrementPerTick"/>
+        /// 压在 20 亿以内。所以
+        ///
+        /// <code>每 tick 产量 = 累加量 / period ≤ maxTimeIncrementPerTick / period</code>
+        ///
+        /// 分子已经顶满（<c>maxOutMinerSpeed</c> 就是干这个的），<b>剩下的唯一变量是分母</b>。
+        /// 实测：抽水站 period=720000 → 上限 178,957/秒，而它当前就跑在 166,667/秒——
+        /// 也就是说本 mod 的采矿机早就贴着天花板了，再怎么调 speed 都动不了。
+        ///
+        /// <b>目标值跟轨道采集器共用同一个锚。</b> 采集器的速率被
+        /// <c>GasCollectorPatches</c> 夹在「一 tick 填满一个储物格」
+        /// （<c>collectorMaxPerTick</c>，没配就退回 <c>slotCapacity</c>），
+        /// 实测日志里是 1000 万/tick = 6 亿/秒。把同一个数当成采矿机的每 tick 目标产量倒推
+        /// period，两边就<b>按构造相等</b>，而不是各填一个凑出来的数。
+        ///
+        /// <b>三个前提都已核对过，不是猜的：</b>
+        /// <list type="bullet">
+        /// <item><c>period</c> 全程<b>只有三处写</b>——<c>Import</c>、<c>SetEmpty</c>、
+        /// <c>FactorySystem.NewMinerComponent</c>（后者取自 <c>PrefabDesc.minerPeriod</c>）。
+        /// <b>没有任何 UI 能写它</b>，所以按 <c>energyMax</c> 那条规矩，运行时可以双向对齐，
+        /// 不像 <c>storage[].max</c> 那样「配置值只是默认值」。</item>
+        /// <item>它<b>进存档</b>（<c>Export</c> @005D / <c>Import</c> @0073）且 <c>Import</c>
+        /// <b>不</b>从 proto 重新推导，所以已建成的采矿机必须在运行时补齐——陷阱 1。</item>
+        /// <item>余下 13 处读它的地方全是显示与统计（参考速率、理论产能、星球/恒星面板、
+        /// 采矿机面板、两个采集器面板），它们的算式里 period 同样在分母上，
+        /// 所以面板会跟着一起变大——那是<b>对齐</b>，不是被改坏。</item>
+        /// </list>
+        /// </summary>
+        private static int ResolveMinerPeriod()
+        {
+            if (_minerPeriod != -2) return _minerPeriod;
+
+            _minerPeriod = 0;
+
+            int configured = Config?.minerPeriod ?? 0;
+
+            if (configured == 0)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "采矿周期：保持原版（advancedminer.json 的 minerPeriod = 0）。"
+                    + "采矿机产量因此仍被 period 卡在原版刻度上。");
+
+                return _minerPeriod;
+            }
+
+            if (configured > 0)
+            {
+                _minerPeriod = configured;
+
+                ProjectEdenPlugin.Log.LogInfo($"采矿周期：按配置写死 period = {configured}");
+
+                return _minerPeriod;
+            }
+
+            // configured < 0：跟随轨道采集器
+            StationsConfig stations = ProjectEdenPlugin.StationsConfig;
+
+            float perTick = stations == null
+                ? 0f
+                : stations.collectorMaxPerTick > 0
+                    ? stations.collectorMaxPerTick
+                    : stations.slotCapacity;
+
+            float budget = Config?.maxTimeIncrementPerTick ?? 0f;
+
+            if (perTick <= 0f || budget <= 0f)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"采矿周期：想跟随轨道采集器，但推不出来（采集器每 tick 上限 {perTick}、"
+                    + $"time 预算 {budget}），保持原版。");
+
+                return _minerPeriod;
+            }
+
+            // period = ceil(每 tick 的 time 预算 / 想要的每 tick 产量)
+            var period = (int)Math.Ceiling(budget / perTick);
+
+            if (period < 1) period = 1;
+
+            _minerPeriod = period;
+
+            ProjectEdenPlugin.Log.LogWarning(
+                $"采矿周期：跟随轨道采集器 → period = {period}。"
+                + $"推导是「每 tick 的 time 预算 {budget:N0} ÷ 目标每 tick 产量 {perTick:N0}」，"
+                + $"而那个目标就是采集器自己被夹住的那个数（stations.json 的 "
+                + $"{(stations.collectorMaxPerTick > 0 ? "collectorMaxPerTick" : "slotCapacity")}）。"
+                + $"折合 **{perTick * 60f:N0}/秒**——和采集器按构造相等。");
+
+            return _minerPeriod;
+        }
+
+        /// <summary>
+        /// 写 <c>PrefabDesc.minerPeriod</c>，<b>只对之后新建的生效</b>；
+        /// 已建成的由 <see cref="MinerComponent_InternalUpdate_Prefix"/> 每 tick 对齐。
+        ///
+        /// 覆盖面跟着 <see cref="IsBoosted"/> 走：大型采矿机必改，抽水站与原油萃取站
+        /// 跟随各自的 <c>boostWaterPumps</c> / <c>boostOilExtractors</c> 开关。
+        /// 把采矿机提上去却把抽水站留在原版刻度，是那种「两个数不一致但都没报错」的配置陷阱。
+        /// </summary>
+        private static void ApplyMinerPeriod()
+        {
+            int period = ResolveMinerPeriod();
+
+            if (period <= 0) return;
+
+            var changed = 0;
+
+            foreach (ItemProto item in LDB.items.dataArray)
+            {
+                if (item == null) continue;
+
+                ModelProto model = LDB.models.Select(item.ModelIndex);
+                PrefabDesc desc = model?.prefabDesc;
+
+                if (desc == null || desc.minerPeriod <= 0) continue;
+
+                // 判定用 prefabDesc 自己的字段，不写死 proto 号——第三方 mod 加的采矿设备一并覆盖
+                bool wanted = item.ID == Config.minerItemId
+                              || (Config.boostWaterPumps && desc.minerType == EMinerType.Water)
+                              || (Config.boostOilExtractors && desc.minerType == EMinerType.Oil);
+
+                if (!wanted || desc.minerPeriod == period) continue;
+
+                int before = desc.minerPeriod;
+
+                desc.minerPeriod = period;
+                changed++;
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"{item.name} 采矿周期：{before} → {period}（产量上限 ×{(double)before / period:N0}）");
+            }
+
+            if (changed == 0)
+                ProjectEdenPlugin.Log.LogWarning(
+                    "采矿周期：一台采矿设备都没匹配上（prefabDesc.minerPeriod > 0），产量上限没变。");
         }
 
         // ── 需求 3：缓存上限 ────────────────────────────────────
@@ -388,6 +538,14 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // 已建成的采矿机补齐采矿周期（陷阱 1：period 进存档，Import 不从 proto 重推）。
+            // **这里可以双向对齐而不是只抬高**：枚举过全程写 period 的只有 Import /
+            // SetEmpty / NewMinerComponent 三处，没有任何 UI 能写它——和 energyMax 同一条判据。
+            // 一次 int 比较，不相等才写，所以稳态下这一行是纯读。
+            int period = ResolveMinerPeriod();
+
+            if (period > 0 && __instance.period != period) __instance.period = period;
+
             // 矿物利用满级不只是采矿更快，消耗也降到最低。两者出自同一系列科技，
             // 只给速度不给消耗，等于矿脉被更快地挖空。
             float fullCost = FullMiningCostRate();
@@ -449,7 +607,11 @@ namespace ProjectEden.Patches
         // 各算各的、各打各的日志（实测刷了三十多行）。计算本身是幂等的，重算无害，
         // 真正要去重的是日志。用 Interlocked 抢占，并且<b>先抢占再拼字符串</b>——
         // 否则每帧都会在 tick 路径上分配一个插值字符串。
-        private static int _logCeiling, _logMinerSpeed, _logCostRate, _logSpeedScale;
+        private static int _logMinerSpeed, _logCostRate, _logSpeedScale;
+
+        /// <summary>产量上限已经报过的建筑种类。并行 tick 路径，所以用并发字典。</summary>
+        private static readonly ConcurrentDictionary<string, byte> _ceilingReported =
+            new ConcurrentDictionary<string, byte>();
 
         private static bool ClaimLog(ref int flag) => Interlocked.Exchange(ref flag, 1) == 0;
 
@@ -473,12 +635,16 @@ namespace ProjectEden.Patches
             double itemsPerTick = limited / miner.period;
             double ceilingPerTick = (double)int.MaxValue / miner.period;
 
-            if (!ClaimLog(ref _logCeiling)) return;
-
             // 抽水站也走 MinerComponent，它的 veinCount 是 0，别让日志看着像采矿机坏了
             string what = miner.type == EMinerType.Water ? "抽水站"
                         : miner.type == EMinerType.Oil ? "原油萃取站"
                         : "大型采矿机";
+
+            // **按建筑种类各报一次，不是整局只报一次。** 原来是一个全局 bool，
+            // 于是三种设备里只有最先 tick 的那一种留下记录——而「另外两种是多少」
+            // 恰恰是调 period 时最需要看的数。本仓库为这条形状付过账（见 CLAUDE.md
+            // 的 MegaStationPatches 储物格转储）。这条 tick 路径是并行的，所以用并发字典。
+            if (!_ceilingReported.TryAdd(what, 0)) return;
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"{what}产量：period={miner.period}，速率因子 {MiningMultiplier(ref miner, factory):0.###}，" +

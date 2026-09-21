@@ -174,12 +174,24 @@ namespace ProjectEden.Patches
         /// <summary>
         /// 供 IL 调用：把原版算出的堆叠层数抬到集装科技等级。
         /// 紧跟在计算之后、原版钳制之前，所以最终仍会被 [1, 集装等级] 夹住。
+        ///
+        /// <b>它同时要封顶，而不是只抬高。</b> 原版算的是
+        /// <c>(36000000 / period × miningSpeed) / 1800 + 1</c>——<c>period</c> 在<b>分母</b>上，
+        /// 所以把采矿周期调小（见 <c>AdvancedMinerPatches.ResolveMinerPeriod</c>）会让这个数
+        /// 成比例地涨。而它最终写进 <c>Cargo.stack</c>，preloader 把那个字段加宽到了 Int16，
+        /// 上限是 <see cref="AbsoluteMax"/>（8191，卡在增产点数上）。
+        /// 只抬不封的话，period 一小就会算出两万多层，Int16 回绕成负数——
+        /// 正是本仓库记过的「自动集装机吃货、面板显示负数」那一类，而且一个字都不报。
+        ///
+        /// 封顶在这里而不是在调用点：这是<b>唯一</b>的出口，逐个调用点加夹子必然漏一个。
         /// </summary>
         internal static int RaiseStack(int current)
         {
             int max = GetMaxPilerStack();
+            int value = current < max ? max : current;
+            int ceiling = AbsoluteMax;
 
-            return current < max ? max : current;
+            return value > ceiling ? ceiling : value;
         }
 
         // ── 一、科技解锁值 ──────────────────────────────────────

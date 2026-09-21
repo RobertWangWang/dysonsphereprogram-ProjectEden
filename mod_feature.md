@@ -193,6 +193,45 @@ mega building's products, and the sky would be just as busy.
 
 ## II. Advanced Mining Machine
 
+### Output ceiling: brought level with the orbital collector
+
+**How fast a mining machine can go is decided by its mining *period*, not by its mining speed.**
+
+Vanilla's output is one integer division: `count = time / period`. Every tick it adds
+`speed × mining rate × vein count` to `time`, and `time` is a 32-bit integer, so that increment
+has to stay under two billion. Which means:
+
+```
+output per tick = increment ÷ period ≤ 2,000,000,000 ÷ period
+```
+
+This mod already maxes out the numerator — that is exactly what "always works at fully researched
+tech" does. Measured: a Water Pump at `period = 720000` runs at **166,667/s** against its own
+theoretical ceiling of **178,957/s** — 7% of headroom left. **No amount of mining speed moves that
+number**; the only remaining lever is the denominator.
+
+Meanwhile the orbital collector's rate is clamped at "fill one storage slot in one tick", measured
+at **600,000,000/s**. The two were a factor of 3600 apart.
+
+The mining period is now **derived from the collector's own number**:
+`period = 2,000,000,000 ÷ 10,000,000 = 200`, which puts the miner at **600,000,000/s** too. The two
+are not two hand-picked numbers that happen to agree — they share one anchor and are equal by
+construction. Water pumps and oil extractors follow their own switches, because raising the miner
+while leaving the pump on the vanilla scale is the kind of mismatch that never reports an error.
+
+> **On both sides this number means "output is no longer the bottleneck", not that six hundred
+> million items really move each second.** One tick fills the internal buffer and the logistics
+> slot, after which the limit is how fast the network drains it — which is exactly what the
+> collector already does today. To go back to the vanilla scale, set `minerPeriod` to `0` in
+> `advancedminer.json`.
+
+**One knock-on change.** Vanilla's belt-output stack size is
+`(36000000 / period × mining rate) / 1800 + 1`, and `period` sits in that denominator too, so a
+small period computes twenty-thousand-odd layers while the widened `Cargo.stack` tops out at 8191.
+That value therefore went from "raise it" to "raise it **and** cap it" — without the cap the Int16
+wraps negative, which is the "the piler eats items and shows negative numbers" failure recorded
+elsewhere in this document, and it reports nothing at all.
+
 ### Ore is smelted on the spot
 
 | Ore mined | Actual output |

@@ -83,6 +83,18 @@ namespace ProjectEden.Utils
         public float maxTimeIncrementPerTick;
 
         /// <summary>
+        /// <c>PrefabDesc.minerPeriod</c> → <c>MinerComponent.period</c>，也就是
+        /// <b>「攒够多少 time 算一件产物」</b>。产量 = 每 tick 累加量 ÷ period，
+        /// 而累加量被 <see cref="maxTimeIncrementPerTick"/> 压在 Int32 以内，
+        /// <b>所以 period 是采矿机产量上限的唯一杠杆</b>。
+        ///
+        /// <c>-1</c> = 跟随轨道采集器（按 <c>stations.json</c> 的每 tick 采集上限倒推，
+        /// 见 <c>AdvancedMinerPatches.ResolveMinerPeriod</c>）；<c>0</c> = 保持原版；
+        /// 正数 = 显式指定。
+        /// </summary>
+        public int minerPeriod;
+
+        /// <summary>
         /// 是否取消大型采矿机的建造间距限制。原版在 CheckBuildConditions 里按
         /// 25 米（对采矿机）/ 15 米（对其他建筑）判定，超出会给出 TowerTooClose /
         /// MK2MinerTooClose。注意原版<b>本来就允许</b>两台采矿机重叠，这里放开的是

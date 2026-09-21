@@ -197,6 +197,16 @@ namespace ProjectEden.Patches
         public bool enabled;
 
         public BeltEntry[] belts;
+
+        /// <summary>
+        /// 传送带流量探针，默认关。见 <see cref="BeltThroughputProbe"/>：
+        /// 它每隔几秒报一次脚下这颗星球最忙的几条带子，把「带子没提速」「带子没喂满」
+        /// 「集装没生效」「喂料口本来就喂不满」这四个长得一样的成因分开。
+        /// </summary>
+        public bool throughputProbe;
+
+        /// <summary>探针的报告间隔（秒）。小于 2 视为 10。</summary>
+        public int probeSeconds;
     }
 
     /// <summary>一档传送带。</summary>

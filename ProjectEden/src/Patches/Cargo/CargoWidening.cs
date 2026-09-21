@@ -212,12 +212,18 @@ namespace ProjectEden.Patches
         // 在运行时抛 MissingMethodException，而我们改不了别人的 mod。
         // 品质改走线程静态侧信道，签名一个都不动。详见 物品品质.md。
 
+        private delegate int QueryAtWide(CargoPath path, int index, out short stack, out short inc);
+
+        private delegate int QueryAtByte(CargoPath path, int index, out byte stack, out byte inc);
+
         private static readonly InsertHeadWide _insertWide;
         private static readonly InsertHeadByte _insertByte;
         private static readonly PickRearPathWide _pickPathWide;
         private static readonly PickRearPathByte _pickPathByte;
         private static readonly PickRearTrafficWide _pickTrafficWide;
         private static readonly PickRearTrafficByte _pickTrafficByte;
+        private static readonly QueryAtWide _queryWide;
+        private static readonly QueryAtByte _queryByte;
 
         static CargoWidening()
         {
@@ -228,18 +234,58 @@ namespace ProjectEden.Patches
                     _insertWide = Bind<InsertHeadWide>(typeof(CargoPath), "TryInsertItemAtHeadAndFillBlank");
                     _pickPathWide = Bind<PickRearPathWide>(typeof(CargoPath), "TryPickItemAtRear");
                     _pickTrafficWide = Bind<PickRearTrafficWide>(typeof(CargoTraffic), "TryPickItemAtRear");
+                    _queryWide = Bind<QueryAtWide>(typeof(CargoPath), "QueryItemAtIndex");
                 }
                 else
                 {
                     _insertByte = Bind<InsertHeadByte>(typeof(CargoPath), "TryInsertItemAtHeadAndFillBlank");
                     _pickPathByte = Bind<PickRearPathByte>(typeof(CargoPath), "TryPickItemAtRear");
                     _pickTrafficByte = Bind<PickRearTrafficByte>(typeof(CargoTraffic), "TryPickItemAtRear");
+                    _queryByte = Bind<QueryAtByte>(typeof(CargoPath), "QueryItemAtIndex");
                 }
             }
             catch (Exception e)
             {
                 ProjectEdenPlugin.Log.LogError($"传送带 API 绑定失败，巨型建筑的传送带收发会停摆：{e.Message}");
             }
+        }
+
+        /// <summary>
+        /// 读传送带上某一格的货：返回物品号，<paramref name="stack"/> 是层数。
+        ///
+        /// **走原版自己的解码，不自己拆 buffer。** 货物号是编在 <c>CargoPath.buffer</c> 里的
+        /// （标记 246~255 表示「离货头第几格」，标记 250 之后那几个字节才是号，而且每个字节
+        /// 都是「值 + 1」），那是引擎的私有格式，抄一份就多一份会悄悄和它走散的东西。
+        /// 而这个方法的 <c>out byte</c> 被 preloader 加宽成了 <c>out short</c>，所以只能
+        /// 运行时按实际签名绑——和上面那三对是同一个理由。
+        /// </summary>
+        internal static int QueryAt(CargoPath path, int index, out int stack, out int inc)
+        {
+            stack = 0;
+            inc = 0;
+
+            if (path == null) return 0;
+
+            if (IsActive)
+            {
+                if (_queryWide == null) return 0;
+
+                int id = _queryWide(path, index, out short s, out short i);
+
+                stack = s;
+                inc = i;
+
+                return id;
+            }
+
+            if (_queryByte == null) return 0;
+
+            int idB = _queryByte(path, index, out byte sb, out byte ib);
+
+            stack = sb;
+            inc = ib;
+
+            return idB;
         }
 
         private static T Bind<T>(Type owner, string name) where T : Delegate
