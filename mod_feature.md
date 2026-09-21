@@ -117,8 +117,33 @@ settles once per tick can never reach it, and one that settles dozens of times p
 | **Assemble** (the Celestial Assembler family) | `produced > count × 9` | **10** | **36,000** |
 | **Everything else** (chemical, refine, and every recipe type this mod adds) | `produced > count × 19` | **20** | **72,000** |
 
-So the 60 that `cyclesPerTick` asks for is **reachable only by Smelt recipes**; every other type is stopped by
-vanilla's own gate. This is not a limit this mod imposes, and raising `cyclesPerTick` does not move it.
+So the 60 that `cyclesPerTick` asks for **used to be reachable only by Smelt recipes**; every other type was
+stopped by vanilla's own gate, and raising `cyclesPerTick` did not move it one step.
+
+**Since 1.12.8 the gate is lifted.** The two multiplicative tiers are raised to `cyclesPerTick` **for mega
+buildings**; ordinary assemblers keep vanilla's values:
+
+| Recipe type | Was | Now | Speed-up |
+|---|---:|---:|---:|
+| Assemble (Celestial Assembly Works, Forging Works) | 36,000/min | **216,000/min** | **6x** |
+| Everything else (chemical, refine, every type this mod adds) | 72,000/min | **216,000/min** | **3x** |
+| Smelt (Smelting Forge) | 216,000/min | unchanged | — |
+
+Smelt is **deliberately left alone**: its gate is additive, capping at `100 ÷ count`, which at the common
+1-per-craft is 100 — already above 60. That building was never gate-bound in the first place; it was bound by
+`cyclesPerTick`, so rewriting it would buy nothing.
+
+> **The discriminator is "speed >= the mega threshold"**, the same one the engine-side code uses to recognise a
+> mega building, so not one byte of any ordinary assembler in your save is affected.
+> The sites were counted offline first: across the whole method the constants 9 / 19 / 100 occur 9 times, and
+> classified by instruction shape that is exactly 7 multiplicative gates + 2 Smelt additive gates + **0 other
+> uses**. If the count ever disagrees, nothing is rewritten at all.
+
+**The cost is back-pressure, and it is worth knowing where it moves to.** This gate doubles as the output
+buffer's back-pressure — "gate 20" means "stop once the product buffer holds 20 times one craft's output".
+Raising it to 60 means that buffer runs three times deeper, and downstream of it are the logistics slot and how
+fast the network drains it. So what this lifts is "the machine computes slowly"; what surfaces next is "the
+goods cannot leave".
 
 > This came out of one player asking why production and consumption did not reconcile, and it agrees with a number
 > already measured in this repo: on a planet with 1079 mega buildings, "21,423 cycles actually settled per tick" —
@@ -2351,7 +2376,7 @@ overlap, that's a bug" look identical.
 | `instantBuild` | **Instant build.** A prebuild is finished the moment it is placed, without waiting for construction drones. **Materials are still charged** (taken from the mecha inventory); anything you cannot afford is left for the drones — it saves time, not materials |
 | `instantBuildPerTick` | How many to finish per settlement pass, 0 for the default of 100. Finishing an entire large blueprint at once costs a frame; spread over a few, it is invisible |
 | `noConditionBuild` | **Build without condition.** Every build rejection is allowed through, and the cover/rebuild flags are cleared with it |
-| `noCollision` | **No build collision.** Buildings can overlap freely; belt connection and mecha collision are unaffected |
+| `noCollision` | **No build collision.** Buildings can overlap freely; belt connection and mecha collision are unaffected. **Overlapping buildings in a blueprint now paste in full** — vanilla switches off any duplicate preview within 0.5 m (so only one gets built); with this on they are restored |
 | `noCollisionPhysics` | Additionally switches off the planetary collider pool so the mecha can walk through buildings. **Overlapping does not need it**, and it blinds the build tools' cursor picking |
 | `powerNoSpacing` | **No spacing limit on power buildings.** Wind turbines, solar panels, thermal plants and geothermal plants can all be placed flush |
 | `waterPumpAnywhere` | **Pump anywhere.** Water pumps can be built on land |
@@ -4743,7 +4768,7 @@ already decides each planet's radius, and two things writing the same number onl
 | `megabuildings.json` | The sixteen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
-| `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), carry capacity, stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
+| `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), carry capacity (drone / vessel / **courier** configured separately), **base-speed multipliers for both craft** (`droneSpeedMultiplier` / `courierSpeedMultiplier`, applied to the base value, leaving the tech multiplier alone), stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
 | `perfprobe.json` | Developer switch: prints per-task CPU cost into the log, so nobody has to copy ten milliseconds figures out of Statistics → Performance by hand. **Off by default, and it costs real time when on** |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes, plus `vanillaEdits`: **edit a vanilla recipe's ingredient list in place** (currently one entry: the Hydrogen Fuel Rod's hydrogen ×10 → ×56) |

@@ -28,6 +28,13 @@ namespace ProjectEden.Patches
         /// </summary>
         private static int _needPostLoadRefresh = 1;
 
+        /// <summary>
+        /// 两条基础速度日志各自只报一次。<b>两个飞机各一个标志，不共用一个</b>——
+        /// 共用的话先跑的那个会把后跑的那行吃掉，而「另一架改了没有」恰恰是要看的。
+        /// Apply 跑在跨行星并行的 tick 上，所以用 Interlocked 认领。
+        /// </summary>
+        private static int _droneSpeedReported, _courierSpeedReported;
+
         /// <summary>行星内物流：运输机运载量。</summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
@@ -55,6 +62,13 @@ namespace ProjectEden.Patches
             // 配置里随便填一个都远在其上，不存在「把玩家研究出来的数值压回去」。
             Align(ref history.logisticDroneCarries, Config.droneCarries, "运输机运载量");
             Align(ref history.logisticShipCarries, Config.shipCarries, "运输船运载量");
+
+            // 配送运输机（送到机甲手上那种）的单次运载量。和上面两项同一个性质：
+            // 存在 GameHistoryData 里、由科技累加（UnlockTechFunction @0525 是读-加-写）、进存档，
+            // 所以同样用 Align 双向对齐。原版基础值是 5（ModeConfig..ctor @01A7）。
+            Align(ref history.logisticCourierCarries, Config.courierCarries, "配送运输机运载量");
+
+            ApplySpeeds(history);
 
             // **这两项必须能降，所以用 Align 而不是 Raise。**
             //
@@ -101,9 +115,78 @@ namespace ProjectEden.Patches
             _reported = true;
 
             ProjectEdenPlugin.Log.LogInfo(
-                $"物流全局值：运载量 运输机 {history.logisticDroneCarries} / 运输船 {history.logisticShipCarries}，" +
+                $"物流全局值：运载量 运输机 {history.logisticDroneCarries} / 运输船 {history.logisticShipCarries}" +
+                $" / 配送机 {history.logisticCourierCarries}，" +
+                $"速度 运输机 {history.logisticDroneSpeedModified:0.##}" +
+                $" / 配送机 {history.logisticCourierSpeedModified:0.##}（都是基础 × 科技倍率），" +
                 $"堆叠 输入 {history.inserterStackInput} / 输出 {history.inserterStackOutput}，" +
                 $"物流塔集装 {history.stationPilerLevel}");
+        }
+
+        /// <summary>
+        /// 两架飞机的基础速度。<b>为什么动基础值而不是科技那层倍率，是所有者选的</b>：
+        /// 两个字段最终都乘进 <c>…SpeedModified</c>（= 基础 × Scale），而科技只写 Scale，
+        /// 所以改基础值不和科技打架。细节和取值方式见 <see cref="ApplySpeed"/>。
+        /// </summary>
+        private static void ApplySpeeds(GameHistoryData history)
+        {
+            // 原版基础值活取自游戏模式配置——GameHistoryData.SetForNewGame 自己就是从这里取的
+            // （运输机 @01F6–0200，配送机 @0210–0276）。写死数字会在游戏更新改了它之后静默失准。
+            ModeConfig mode = Configs.freeMode;
+
+            if (mode == null) return;
+
+            ApplySpeed(ref history.logisticDroneSpeed, mode.logisticDroneSpeed,
+                Config.droneSpeedMultiplier, history.logisticDroneSpeedScale,
+                "运输机", ref _droneSpeedReported);
+
+            ApplySpeed(ref history.logisticCourierSpeed, mode.logisticCourierSpeed,
+                Config.courierSpeedMultiplier, history.logisticCourierSpeedScale,
+                "配送运输机", ref _courierSpeedReported);
+        }
+
+        /// <summary>
+        /// 一架飞机的基础速度：<b>按「原版基础值 × 倍率」写绝对值，绝不在现值上乘</b>。
+        ///
+        /// 运输机和配送运输机<b>结构完全一样</b>，所以共用这一个函数——同一段推理抄两遍，
+        /// 早晚会有一份跟不上另一份。两边都枚举过写入点：
+        ///
+        /// <list type="bullet">
+        /// <item><c>logisticDroneSpeed</c>：只有 <c>SetForNewGame</c> / <c>Import</c> 写；
+        /// 科技走 <c>UnlockTechFunction</c> @0345，写的是 <c>logisticDroneSpeedScale</c>。</item>
+        /// <item><c>logisticCourierSpeed</c>：同样只有 <c>SetForNewGame</c> / <c>Import</c> 写；
+        /// 科技走 @0512，写的是 <c>logisticCourierSpeedScale</c>。</item>
+        /// </list>
+        ///
+        /// 也就是说<b>科技从不碰基础值</b>，所以改基础值和科技不会打架。
+        /// 代价是往后每一级速度科技的收益也跟着放大了——它加成的基数变大了。
+        ///
+        /// <b>为什么算绝对值。</b> 这两个字段都<b>进存档</b>
+        /// （<c>Export</c> @0345 / @03A5）。在现值上乘一次倍率的话，第二局就是 100 倍、
+        /// 第三局 1000 倍，而且一个字都不报。算绝对值跑多少次都是同一个数。
+        /// </summary>
+        private static void ApplySpeed(ref float field, float baseSpeed, float mult, float scale,
+            string label, ref int reported)
+        {
+            // 0 或负数 = 保持原版，和其它几个旋钮一个口径
+            if (mult <= 0f || baseSpeed <= 0f) return;
+
+            float target = baseSpeed * mult;
+
+            // 浮点数不比相等：连续写同一个值时的舍入会让「变了没有」一直为真，
+            // 那条一次性日志就会变成每 tick 一行。给一个相对容差。
+            if (System.Math.Abs(field - target) <= target * 1e-6f) return;
+
+            float before = field;
+
+            field = target;
+
+            if (Interlocked.Exchange(ref reported, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"{label}基础速度：{before:0.##} → {target:0.##}（原版基础 {baseSpeed:0.##} × {mult:0.##}）。" +
+                $"实际速度还要再乘科技倍率 {scale:0.##}，也就是 {target * scale:0.##}。" +
+                "科技只写倍率那一层、不碰基础值，所以两边不会打架。");
         }
 
         /// <summary>

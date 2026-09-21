@@ -173,6 +173,7 @@ powershell -ExecutionPolicy Bypass -File tools\verify_harmony.ps1   # 三类会�
 python tools\check_slots.py         # 物品格位 / 配方格位 / 建造栏槽位 / 模型 ID 的占用冲突
 python tools\check_guides.py        # 两份特性指南的 ##/### 条数与目录锚点是否对得上
 python tools\sim_throttle.py        # 离线复现巨型建筑分频节流的时序（见 MegaThrottle 那一节）
+powershell -ExecutionPolicy Bypass -File tools\check_output_gate.ps1   # 产出闸的 7 处乘法站点还在不在（见 MegaOutputGatePatches）
 ```
 
 **Run `verify_harmony.ps1` after adding or editing any patch class.** It catches the three mistakes that throw out of `PatchAll` — a `TargetMethods` selector sharing a class with individual annotations, a bare-name patch on an overloaded game method, and **a prefix/postfix parameter name the target does not declare**. All three are invisible to the compiler and none of them fails as "this patch did nothing".
@@ -255,7 +256,28 @@ Check these first when a change "has no effect".
 
 It fails silently and totally: an empty tank pulls from each of its four belts with `TryPickItemAtRear(beltN, 0, ItemProto.fluids, …)` — that array is passed **as the filter**. Not in it → never picked up → `fluidId` stays 0 → the tank stays empty forever. Hand-insertion goes through `PlanetFactory.EntityFastFillIn` → `ItemProto.isFluid(id)`, which reads the same array. Those two are the only gates (`ItemProto` carries no fluid colour or similar field; the tank's look is generic).
 
-**There is more than one table in this family, and two of them are ours to fix.** `InitFluids` (0x08B0) and `InitTurretNeeds` (0x08AB) sit side by side in `PreloadThread` and LDBTool re-runs neither; `RefreshFluidList` and `RefreshTurretNeeds` do. Check this list before assuming a proto flag is enough.
+**There is more than one table in this family, and three of them are ours to fix.** `InitFluids` (0x08B0), `InitTurretNeeds` (0x08AB) and **`InitPowerFacilityIndices` (0x08D8)** sit within 0x30 bytes of each other in `PreloadThread` and LDBTool re-runs none of them; `RefreshFluidList`, `RefreshTurretNeeds` and `RefreshPowerStatIndices` do. Check this list before assuming a proto flag is enough.
+
+**The power one is the mildest and the most instructive, because it does not fail — it misfiles.**
+The power statistics panel does not compute its per-building rows; it looks them up:
+`ProductionStatistics.RefreshPowerConsumptionDemandsWithFactory` @0054–006D is
+`conDemands[powerConId2Index[protoId]] += requiredEnergy`, and the generation side is identical.
+Both tables are a fixed `new int[12000]`, and this repo's item ids sit at 6500-odd — **inside the
+array**, so there is no exception, just the default **0**. Index 0 is the placeholder the builder
+seeds with `Add(0)` (`powerConIndex2Id[0] = 0`, resolving to no proto), so every mod power building's
+draw pools into one nameless row. **The totals stay correct the whole time** — `totalConDemand`
+(@00A0–00B5) accumulates outside the lookup — which is why the symptom reads as "the breakdown is
+off" rather than "the panel is broken", and why nobody noticed for many versions.
+
+**The timing is the only real design question here, and it does not generalise from the other
+three.** `ProductionStatistics.Init` @0084/@0089 sizes `genCapacities` / `conDemands` / `genCount` /
+`conCount` from `powerGenIndex2Id.Length` / `powerConIndex2Id.Length`, and its callers are
+`GameStatData.Init` / `Import` — **once per game start or load**, i.e. after `PostAddDataAction`.
+So rebuilding on `PostAddDataAction` is safe (the tables grow first, the stat arrays are allocated
+against the new length afterwards) and rebuilding any *later* is a crash: a new index written into an
+old-length array. **Before re-running a preload-time builder, find what else is sized from its
+output and when that sizing happens** — "it is idempotent" says nothing about whether its consumers
+have already measured it.
 
 **LDBTool re-runs some of that family but not this one.** Its `VFPreload_Patch.VFPreloadPostPatch` calls `InitFuelNeeds`, `InitConstructableItems`, `InitItemIds`, `InitItemIndices`, `InitRecipeItems`, `InitSignalKeyIdPairs` and `IconSet.Create` after `PostAddDataAction` — but never `InitFluids`. So a mod fuel needs nothing extra (just `FuelType` + `HeatValue`, and `ItemProto.fuelNeeds` — the filter array `CargoTraffic.TryPickFuel` hands the belt — is rebuilt for you), while a mod fluid does. **Check LDBTool's post-patch list before writing your own rebuild.**
 
@@ -1292,6 +1314,30 @@ of magnitude below 氨, already the worst in `combustibles.json`; and its Carnot
 
   **This is the general shape to watch for when raising a hardcoded game constant: the same number is often used as a limit, an emitted amount, *and* a bookkeeping deduction. Partial replacement does not error — it silently creates or destroys items.** The miner's stack formula `(36000000/period*miningSpeed)/1800+1` ignores `speed` entirely, so raising the *cap* alone did nothing for water (2 < 50) — `RaiseStack` is injected after the computation and before the clamp.
 - `LogisticsGlobalPatches` — drone/vessel carry capacity and stack levels, forced at the actual read sites rather than only on `GameHistoryData`. **"Only raise" silently makes a config value un-lowerable.** These fields live in `GameHistoryData` and are therefore *saved*, so a `Raise`-style fix-up sees the already-baked higher value and skips — lowering `droneCarries` from 100000 to 10000 did nothing on an existing save. The carry pair uses `Align` (writes whenever it differs, up or down). **The stack/piler values used to stay raise-only "because there is no reason to lower them" — that is no longer true and it caused a live bug.** `InserterAbsoluteMax` is now *derived* from the belt stack level, so it moves down as well as up: a save written with 5000 kept `history.inserterStackInput` at 5000, `Raise` saw `5000 >= 1` and skipped, and `OnInserterTechChange` then pushed **5000** into every sorter while the log cheerfully reported "capped at 1 stack". The symptom was unchanged item loss with a correct-looking log. Both now align.
+
+  **1.12.8 added the courier and both base speeds, and the *speed* half is a different shape from
+  everything else in this class — it must be written as an absolute, never as a multiply.**
+  `logisticDroneSpeed` / `logisticCourierSpeed` are saved (`Export` @0345 / @03A5), so applying a
+  ×10 to the current value compounds across sessions: 100× on the second load, 1000× on the third,
+  **and nothing logs it**. Both are therefore computed as `vanilla base × multiplier`, with the base
+  read live from `Configs.freeMode` — the same source `GameHistoryData.SetForNewGame` @01F6 uses —
+  rather than hardcoding 8 and 10, which would go silently stale on a game update. That makes the
+  write idempotent at any cadence.
+
+  **Which layer to scale was decided by enumerating writers, and it is the reason this is safe.**
+  Final speed is `base × scale` (`get_logisticDroneSpeedModified`). `UnlockTechFunction` writes
+  **only** the scale (@0345 drone, @0512 courier); the base has exactly two writers, `SetForNewGame`
+  and `Import`. So moving the base cannot collide with research — at the stated cost that every
+  later speed tech now multiplies a bigger number. The same enumeration settled the carry side:
+  `logisticCourierCarries` **is** tech-accumulated (@0525, read-add-write), so it takes `Align` like
+  its two siblings, and `CourierData.itemCount` is **Int32** — checked, because this repo has been
+  bitten four times by pushing a large value into a byte-wide field.
+
+  **And "drone" is two different aircraft**, which cost a round: `droneCarries` is the planetary
+  logistics drone that moves goods between stations, `courierCarries` is the courier that delivers
+  to the mecha. A report of "carry is 20" against a configured 10000 is the tell that they are not
+  the same thing — **when a reported number cannot be produced by the config you are looking at, you
+  are looking at the wrong field**, not at a broken one.
 
 **The general rule: a value that is *computed* rather than *configured* must never be synced with raise-only logic**, because the computation can legitimately produce a smaller answer than last session's. Overriding player research is not a concern at these magnitudes — vanilla's carry techs top out in the double digits.
 - `GasCollectorPatches` — orbital collector speed. Capacity is handled by `StationCapacityPatches` (collectors are auto-included via `isCollectStation`), but their **slot count must not be raised to the station value**: `StationComponent.Init`'s collector branch lays out slots by `collectionIds.Length` capped at `stationMaxItemKinds`, so 30 slots would just add empty ones and drag the 30-slot station UI onto the collector. `OreRegistry.EnsureCollectorSlots` is the one sanctioned exception: it raises the count to the exact number of gas species a theme can hold, which is what makes an added gas collectable at all. `PrefabDesc.stationCollectSpeed` feeds a formula in `PlanetTransport.NewStationComponent` that bakes `StationComponent.collectionPerTick[]` into the save, so existing collectors need the same formula re-run at runtime. Ceilings: `UpdateCollection` does `(int)currentCollections[i]` (Int32) and `collectionPerTick` is a `float` (exact integers only below 2²⁴), hence the `collectorMaxPerTick` clamp.
@@ -3719,6 +3765,37 @@ tiers*, not "starved vs. full".
 (and in a reply to the owner) before this was read. The greenhouse's documented `14400 木材/秒` was
 wrong by 3× for the same reason. Corrected in 1.12.4.
 
+**And in 1.12.8 the gate itself was raised — `MegaOutputGatePatches`.** Asked "can the mega
+buildings go faster", the answer is that **neither existing knob is a lever**: `assemblerSpeed` is
+already orders above any `timeSpend`, and `cyclesPerTick = 60` is unreachable for **15 of the 16**
+buildings because this table pins them at 10 or 20. Only 冶铸熔炉 (Smelt) ever sees 60. So the gate
+is the only thing between 20 and 60, and it is now transpiled to `cyclesPerTick - 1` **for mega
+buildings only** (`speed >= megaSpeedThreshold`, the repo's standing discriminator) — 装配 ×6,
+其余 ×3, ordinary assemblers untouched.
+
+Four things about how it was done, each a rule this file already states:
+
+- **The sites were enumerated and classified by shape before a line was written**, and the result
+  is unusually clean: every `9`/`19`/`100` in the method is a gate — **7 multiplicative, 2 additive
+  (Smelt), 0 other uses**. The anchor is `ldelem.i4 ; ldc ; mul ; ble*`, never the constant alone.
+  `tools/check_output_gate.ps1` is that enumeration, kept so a game update is re-derived offline
+  rather than by launching; the transpiler asserts 7 and **applies nothing** on a mismatch.
+- **The Smelt tier is deliberately left alone.** Its gate is additive (`produced + counts <= 100`),
+  so the cap is `100/counts` — already above `cyclesPerTick` at the common `counts = 1`, i.e. that
+  building was never gate-bound. Rewriting it would buy nothing and cost a `counts` multiplication.
+- **Only raise, never lower.** The gate is a ceiling; throttling already has three knobs
+  (`cyclesPerTick`, the greenhouse's light scaling, `tickDivider`). Letting a ceiling double as a
+  throttle is how two mechanisms end up fighting over one number.
+- **The gate is also `produced[]`'s back-pressure**, so raising it triples that buffer's depth. The
+  next bottleneck is therefore the station slot and the drain — the same shape as the miner's
+  `period`: the limit moves from "the machine computes slowly" to "the goods cannot leave".
+
+**`PlanetCensus` was over-reporting by 3–6× the whole time**, and that is worth recording because it
+is the *fourth* instance of the same shape: it printed `cyclesPerTick × 台数` as "equivalent 1×
+assemblers" while knowing nothing about the gate. It now sums `min(cyclesPerTick, gate)` per
+building, reading the gate through **the same `Scale` the transpiler uses**, so the diagnostic and
+the behaviour cannot drift apart.
+
 ### The three optimisations, and which one carries risk
 
 | | how | risk |
@@ -4252,6 +4329,32 @@ Two things made it survive a long time and are worth copying as tells:
 - **The probe that found it printed the three gates of `CreatePrebuilds` side by side** (`bpgpuiModelId` / `condition` / `coverObjId`) rather than the one that was suspected. The standing hypothesis at the time was `ArrangeOverlapBP` zeroing `bpgpuiModelId`; the log came back `bpgpuiModelId=1, condition=TowerTooClose(8)` and killed it in one round. **Print every gate, not the one you believe in.**
 
 `CreatePrebuilds`'s skip list is worth recording in full, because the first entry was news: `if (bp.bpgpuiModelId <= 0) continue;` (IL 0030) runs **before** the condition check at IL 003B and the `coverObjId` check at IL 0196. `ArrangeOverlapBP` writes `bpgpuiModelId = -1` and `condition = BlueprintBPOverlap(51)` **as a pair**, in all four of its sites — so if that path is ever cleared, both fields have to be restored, exactly like `coverObjId`.
+
+**That path was cleared in 1.12.8 (`BlueprintOverlapPatches`), and the third field is the lesson.**
+Reported as 「建筑可以堆叠，蓝图框选也框得到，但一粘贴就只建出来一座」. The blueprint data is
+complete; what is switched off is the paste preview — `ArrangeOverlapBP` marks every preview within
+**0.5 m** of another (`sqrMagnitude < 0.25f`) and `CreatePrebuilds` drops it at that first gate. So
+**clearing `condition` alone does nothing**, which is exactly why the existing build-condition cheat
+(which clears conditions) never fixed it. The restore value is **snapshotted, not guessed**: a prefix
+on `ArrangeOverlapBP` records `bpgpuiModelId` immediately before it runs, because the only other
+writers are `.ctor`/`ResetAll` (both −1), `Clone` (verbatim copy) and the blueprint-copy tool.
+
+**And `coverbp` — the third field written at those same four sites — must be left alone, which the
+"restore the pair" habit gets backwards.** `BuildTool_BlueprintPaste.CheckBuildConditions`
+@256D–2584 reads it as an **exemption**:
+
+```
+2564: if (distance² >= threshold) goto skip;    // far enough apart, nothing to check
+256D: if (a.coverbp == b) goto skip;            // a known overlap pair — do not test them against each other
+257B: if (b.coverbp == a) goto skip;
+2589: ...otherwise run the proximity/collision test
+```
+
+So `coverbp` *is* the record of "these two are deliberately coincident". Clearing it would have the
+just-restored preview immediately re-rejected by the very next stage. **The general rule: before
+restoring every field a vanilla routine wrote, read who else reads them — some of those writes are
+the permission slip, not the lock.** Same family as the `coverObjId` split (an obstacle for a
+building, the connection itself for a belt), one level in.
 
 **A wrong diagnosis, kept because the reasoning error is the point.** The first fix blamed the collider pool: `BuildTool_Path.UpdateRaycast` genuinely does contain five `Physics.Raycast` calls, and disabling the pool genuinely does blind them, so the story was coherent — and wrong. Restoring the pool did not fix the belts. **A mechanism that *could* explain a symptom is not evidence that it *did*.** The pool split is kept anyway on its own merits (overlapping never needed it, and it blinds the build tools' raycasts), but the belt bug was `coverObjId`.
 

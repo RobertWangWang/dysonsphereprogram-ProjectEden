@@ -460,6 +460,30 @@ namespace ProjectEden.Patches
         /// <summary>星际物流运输船的单次运载量</summary>
         public int shipCarries;
 
+        /// <summary>
+        /// 配送运输机（送到机甲手上那种）的单次运载量。原版基础值 <b>5</b>
+        /// （<c>ModeConfig..ctor</c> @01A7），由科技累加。0 = 保持原版。
+        /// </summary>
+        public int courierCarries;
+
+        /// <summary>
+        /// 行星内物流运输机的<b>基础</b>速度倍率，乘在原版基础值上（原版 8，
+        /// 活取自 <c>Configs.freeMode.logisticDroneSpeed</c>）。0 或负数 = 保持原版。
+        ///
+        /// <b>它乘的是基础值，不是科技那层倍率。</b> 最终速度 = 基础 × 科技倍率，
+        /// 而科技只写倍率那一层（<c>UnlockTechFunction</c> @0345），所以两者不冲突；
+        /// 代价是往后每级速度科技的收益也跟着一起放大了。
+        /// </summary>
+        public float droneSpeedMultiplier;
+
+        /// <summary>
+        /// 配送运输机的<b>基础</b>速度倍率，乘在原版基础值上（原版 10，
+        /// 活取自 <c>Configs.freeMode.logisticCourierSpeed</c>）。0 或负数 = 保持原版。
+        /// 和 <see cref="droneSpeedMultiplier"/> 结构完全一样：科技只写
+        /// <c>logisticCourierSpeedScale</c>（<c>UnlockTechFunction</c> @0512），从不碰基础值。
+        /// </summary>
+        public float courierSpeedMultiplier;
+
         /// <summary>分拣器堆叠输入层数（解锁函数 41），原版基础值 2</summary>
         public int inserterStackInput;
 

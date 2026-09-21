@@ -146,6 +146,8 @@ namespace ProjectEden
             Patches.MegaTickProfiler.Report();
             Patches.ReferenceRatePatches.Report();
             Patches.MegaExchangerDefaultPatches.Report();
+            Patches.MegaOutputGatePatches.Report();
+            Patches.BlueprintOverlapPatches.Report();
             Patches.BeltThroughputProbe.Report();
             Patches.QualityCraftPatches.Report();
             Patches.QualityRepairPatches.Report();
@@ -251,6 +253,10 @@ namespace ProjectEden
 
             // 炮塔弹药白名单是同一族的另一张预加载期静态表，LDBTool 同样没有替我们重跑
             LDBTool.PostAddDataAction += RefreshTurretNeeds;
+
+            // 电力统计的分项下标表——同一族的第四张。**时机不能往后挪**，
+            // 理由写在 RefreshPowerStatIndices 里：统计数组按这两张表的长度定容。
+            LDBTool.PostAddDataAction += RefreshPowerStatIndices;
 
             // 燃料白名单的**核对**：撑长和重建已经在链首做过了（见那里的注释），
             // 这里再跑一遍是为了核对末态——那时候所有注册器都已经把物品塞进 LDB。
@@ -359,6 +365,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= CombustiblePowerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= RefreshFluidList;
             LDBTool.PostAddDataAction -= RefreshTurretNeeds;
+            LDBTool.PostAddDataAction -= RefreshPowerStatIndices;
             LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= MatrixLabPatches.ApplyMatrixTime;
             LDBTool.PostAddDataAction -= MatrixSurvey.OnPostAddData;
@@ -777,6 +784,100 @@ namespace ProjectEden
                     counts.Add($"{(EAmmoType)i} {needs[i].Length}");
 
             Log.LogInfo($"炮塔弹药白名单已核对：{string.Join("、", counts.ToArray())}，其中本 mod {mine} 种");
+        }
+
+        /// <summary>
+        /// 重建电力统计面板的「protoId → 分项下标」表。
+        ///
+        /// <b>这是 <c>InitFluids</c> 那一族的第四张表，症状比前三张都轻但同样静默。</b>
+        /// 电力统计的分项不是按建筑现算的，而是查表：
+        /// <c>ProductionStatistics.RefreshPowerConsumptionDemandsWithFactory</c> @0054–006D 是
+        /// <c>conDemands[powerConId2Index[protoId]] += requiredEnergy</c>，发电侧同构。
+        ///
+        /// 而 <c>ItemProto.InitPowerFacilityIndices</c> 是这两张表<b>唯一</b>的构建者，
+        /// 调用点也只有一处——<c>VFPreload/&lt;PreloadThread&gt;d__51::MoveNext</c> <b>@08D8</b>，
+        /// 而 LDBTool 挂的 <c>InvokeOnLoadWorkEnded</c> 在<b>同一个方法的 @0E11</b>。
+        /// 所以表建好时 LDB 里一个 mod proto 都还没有，LDBTool 的 post-patch 清单里也没有它，
+        /// CommonAPI 没有，profile 里其他插件都没有（逐个 DLL 搜过）。
+        ///
+        /// <b>它不崩，只是记错账。</b> 两张表都是定长 <c>new int[12000]</c>，而本 mod 的物品号在
+        /// 6500 多，落在界内——于是读到的是数组默认值 <b>0</b>，而下标 0 是构建者开头
+        /// <c>Add(0)</c> 预留的占位（<c>powerConIndex2Id[0] = 0</c>，查不到任何 proto）。
+        /// 结果是本 mod 每一座耗电/发电建筑的功率全被汇进那一行无名无图标的占位行。
+        /// <b>总量不受影响</b>：<c>totalConDemand</c>（@00A0–00B5）在查表之外无条件累加，
+        /// 所以面板的总发电/总耗电和曲线一直是准的，错的只有「按建筑分项」那张列表。
+        ///
+        /// <b>时机是这件事里唯一需要想的部分，而且不能往后挪。</b>
+        /// <c>ProductionStatistics.Init</c> @0084/@0089 用
+        /// <c>powerGenIndex2Id.Length</c> / <c>powerConIndex2Id.Length</c> 给
+        /// <c>genCapacities</c> / <c>conDemands</c> / <c>genCount</c> / <c>conCount</c> 定容，
+        /// 而它的调用点是 <c>GameStatData.Init</c> / <c>Import</c>——<b>每次开局或读档</b>，
+        /// 排在 <c>PostAddDataAction</c> 之后。所以挂在这里，表先变长、统计数组随后按新长度分配；
+        /// 挂到 <c>GameData.Import</c> 那种更晚的位置，就会拿新下标去写老长度的数组，
+        /// 直接 <c>IndexOutOfRangeException</c>。
+        ///
+        /// 重建本身是幂等的：它新建列表、新建两个 12000 数组、整份重扫 <c>dataArray</c>，
+        /// 和 <c>InitFluids</c> 同一个形状，多跑一次不花什么。
+        /// </summary>
+        private static void RefreshPowerStatIndices()
+        {
+            ItemProto.InitPowerFacilityIndices();
+
+            int[] genIndex = ItemProto.powerGenId2Index ?? new int[0];
+            int[] conIndex = ItemProto.powerConId2Index ?? new int[0];
+
+            // 核对**末态**：凡是打了 isPowerGen / isPowerConsumer 的 proto，都必须映射到一个
+            // 非 0 的下标。0 是占位行，构建者开头就 Add(0) 占掉了，所以真实建筑永远从 1 起，
+            // **任何真实建筑映射到 0 都是缺陷**——这个判据不随表长变化，也不看是谁建的表。
+            var missing = new List<string>();
+            var mine = 0;
+            var total = 0;
+
+            foreach (ItemProto item in LDB.items.dataArray)
+            {
+                PrefabDesc desc = item?.prefabDesc;
+
+                if (desc == null) continue;
+
+                bool gen = desc.isPowerGen;
+                bool con = desc.isPowerConsumer;
+
+                if (!gen && !con) continue;
+
+                total++;
+
+                // 第三方 mod 的物品号可能越过 12000；那一类读表就会越界，得单独说清楚
+                if (item.ID < 0 || (gen && item.ID >= genIndex.Length) || (con && item.ID >= conIndex.Length))
+                {
+                    missing.Add($"{item.name}({item.ID}，物品号超出表长 12000)");
+
+                    continue;
+                }
+
+                bool ok = (!gen || genIndex[item.ID] > 0) && (!con || conIndex[item.ID] > 0);
+
+                if (!ok)
+                {
+                    missing.Add($"{item.name}({item.ID})");
+
+                    continue;
+                }
+
+                if (item.ID >= ModItemIdBase) mine++;
+            }
+
+            if (missing.Count > 0)
+            {
+                Log.LogWarning(
+                    $"电力统计分项表里缺了 {missing.Count} 座：{string.Join("、", missing.ToArray())}。" +
+                    "它们的功率会被汇进第 0 行那个无名占位行——总量仍然是对的，错的是按建筑分项那张表。");
+
+                return;
+            }
+
+            Log.LogInfo(
+                $"电力统计分项表已重建并核对：{total} 座发电/耗电建筑全部有独立分项，其中本 mod {mine} 座。" +
+                "（原版只在预加载期建一次表，那时 mod 的 proto 还没进 LDB，不重建的话它们会全挤进占位行。）");
         }
 
         private static void RefreshFluidList()

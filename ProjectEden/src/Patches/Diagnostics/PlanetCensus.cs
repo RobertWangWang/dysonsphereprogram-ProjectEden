@@ -172,11 +172,16 @@ namespace ProjectEden.Patches
 
                 if (mega > 0)
                 {
-                    int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+                    // **这里曾经直接拿 cyclesPerTick 乘台数，报大了 3 到 6 倍。**
+                    // 原版 InternalUpdate 按 recipeType 还有一道产出闸（装配 10 / 其余 20 /
+                    // 冶炼约 100÷单次产量），实际上限是 min(cyclesPerTick, 闸)——
+                    // 十六座巨型建筑里只有冶铸熔炉一座真能跑到 60。
+                    // 现在逐台按它自己的配方类型算，而不是拿一个配置值乘台数。
+                    long equiv = SumMegaCycles(fs);
 
                     sb.Append("（其中巨型 ").Append(mega)
-                      .Append(" 台，每台每 tick 最多跑 ").Append(cycles)
-                      .Append(" 个周期，即相当于 ").Append(mega * cycles)
+                      .Append(" 台，按各自配方类型的产出闸逐台算，合计每 tick 最多 ").Append(equiv)
+                      .Append(" 个周期，即相当于 ").Append(equiv)
                       .Append(" 台普通装配机）");
                 }
 
@@ -365,6 +370,67 @@ namespace ProjectEden.Patches
         /// <b>不是 protoId</b>：速度阈值和 assemblerSpeed 是解耦的，调速度不影响识别，
         /// 而按 protoId 数会漏掉 GenesisBook 的那些。
         /// </summary>
+        /// <summary>
+        /// 巨型建筑每 tick 真正能结算多少个周期，<b>逐台按它自己的配方类型算</b>。
+        ///
+        /// 上限是 <c>min(cyclesPerTick, 原版产出闸)</c>，而那个闸在
+        /// <c>AssemblerComponent.InternalUpdate</c> @0138–0184 按 <c>recipeType</c> 三分：
+        /// 冶炼 <c>produced + counts &lt;= 100</c>（上限约 100 ÷ 单次产量）、
+        /// 装配 <c>produced &lt;= counts × 9</c>（10）、其余 <c>× 19</c>（20）。
+        ///
+        /// <see cref="MegaOutputGatePatches"/> 把后两档抬到了 <c>cyclesPerTick</c>，
+        /// 所以这里读的是<b>抬完之后</b>的值——两边共用 <c>Scale</c>，
+        /// 不会出现「改了闸门、普查还按老数报」那种两个数各说各话。
+        /// </summary>
+        private static long SumMegaCycles(FactorySystem fs)
+        {
+            AssemblerComponent[] pool = fs.assemblerPool;
+
+            if (pool == null) return 0;
+
+            int threshold = MegaBuildingRegistry.MegaSpeedThreshold;
+            int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+
+            if (cycles < 1) cycles = 1;
+
+            var sum = 0L;
+
+            for (var i = 1; i < fs.assemblerCursor && i < pool.Length; i++)
+            {
+                if (pool[i].id != i || pool[i].speed < threshold) continue;
+
+                RecipeExecuteData data = pool[i].recipeExecuteData;
+
+                // 没选配方的按 0 算：它这一 tick 一个周期也结算不了
+                if (data?.productCounts == null || data.productCounts.Length == 0) continue;
+
+                int counts = data.productCounts[0];
+
+                if (counts < 1) counts = 1;
+
+                int gate;
+
+                if (pool[i].recipeType == ERecipeType.Smelt)
+                {
+                    // 加法闸：produced + counts <= 100，即最多 100 ÷ counts 个周期。
+                    // 这一档 MegaOutputGatePatches 故意没动（理由见那里）。
+                    gate = 100 / counts;
+                }
+                else
+                {
+                    // 乘法闸：produced <= counts × K，即最多 K + 1 个周期。
+                    // K 取抬过之后的值，和转译器读同一个函数。
+                    int vanilla = pool[i].recipeType == ERecipeType.Assemble ? 9 : 19;
+
+                    gate = MegaOutputGatePatches.Scale(vanilla, ref pool[i]) + 1;
+                }
+
+                sum += gate < cycles ? gate : cycles;
+            }
+
+            return sum;
+        }
+
         private static int CountMega(FactorySystem fs)
         {
             AssemblerComponent[] pool = fs.assemblerPool;

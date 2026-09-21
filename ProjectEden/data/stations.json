@@ -14,6 +14,15 @@
   "droneCarries": 10000,
   "shipCarries": 1000000,
 
+  "//courierCarries": "配送运输机（从配送器/综合物流枢纽飞出来、把货送到机甲手上的那种小飞机）的单次运载量。和上面两项同一个性质——存在 GameHistoryData 里、由科技累加（UnlockTechFunction @0525 是读-加-写）、会进存档，所以同样双向对齐，调低也生效。原版基础值是 5（ModeConfig..ctor @01A7）。填 0 保持原版。\n\n注意它和 droneCarries 是两种飞机：droneCarries 管的是物流站之间搬货的行星内物流运输机，这一项管的是送到机甲手上的配送运输机。",
+  "courierCarries": 5000,
+
+  "//droneSpeedMultiplier": "行星内物流运输机的**基础**速度倍率。0 或负数 = 保持原版。\n\n**乘的是基础值，不是科技那一层。** 最终速度 = logisticDroneSpeed（基础）× logisticDroneSpeedScale（科技倍率），见 GameHistoryData.get_logisticDroneSpeedModified。枚举过两个字段的全部写入点：基础值只有 SetForNewGame 和 Import 写，**UnlockTechFunction @0345 只写倍率那一层、从不碰基础值**——所以改基础值和科技不会打架。代价要知道：往后每一级速度科技的收益也跟着一起放大了，因为它加成的基数变大了。\n\n**实现上是「原版基础 × 倍率」算绝对值，绝不在现值上乘。** 这个字段进存档（Export @0345 / Import @074F），在现值上乘的话第二局就是 100 倍、第三局 1000 倍，而且一个字都不报。原版基础值是活取 Configs.freeMode.logisticDroneSpeed（8），不写死——写死的话游戏更新改了它会静默失准。",
+  "droneSpeedMultiplier": 10,
+
+  "//courierSpeedMultiplier": "配送运输机的**基础**速度倍率，和上面那条结构完全一样（代码里是同一个函数）：最终速度 = logisticCourierSpeed（基础）× logisticCourierSpeedScale（科技倍率），而科技只写倍率那一层（UnlockTechFunction @0512），基础值只有 SetForNewGame / Import 会写。原版基础值 10，活取自 Configs.freeMode.logisticCourierSpeed。0 或负数 = 保持原版。",
+  "courierSpeedMultiplier": 10,
+
   "//stack": "集装（堆叠）层数。当前设 255（= Cargo.stack 这个 byte 的上限，层数本身有护栏不会溢出）。**但喷了增产剂的货在 64 层及以上会静默丢光增产点数** —— ——Cargo.inc 同样是 byte、存的是**整堆**总点数、而且**没有护栏**：63 层是 252 正好装下（满 4 级），64 层就是 256 回绕成 0，255 层是 1020 回绕成 252、每件 252÷255=0 级。**是悬崖不是斜坡**，63 完美、64 归零。所以全线喷涂的存档请把这三个值改回 63；开 255 只对不往传送带喷增产剂的玩法有意义。要两者兼得得给 inc 另开一本账，详见 CLAUDE.md 的 cargo stacking ceiling 一节。原版基础值：输入 2、输出 1、物流塔集装 1。改动后会调用 GameData.OnInserterTechChange() 同步到已建成的分拣器。",
   "//inserterStack": "分拣器一次抓**几垛**（不是几件！）。取货循环判的是 stackCount >= stackInput，每抓一垛 +1，而一垛是传送带上一整堆。所以一次摆臂的件数 ≈ 这个值 × 传送带集装层数，而承载它的 itemCount/itemInc 是 Int16（**没有加宽**，preloader 只动了 Cargo 和 stackInput/stackOutput），一次最多装 8191 件。代码按 8191 ÷ 集装层数自动夹住并在日志里说明，所以这里填多大都安全——填 5000 就是「能多高就多高」。传送带集装 5000 层时实际生效是 1 垛，那已经是一次搬 5000 件。硬填大值不会更快，只会让 itemCount 回绕成负数、货物凭空消失。另外存档里每台分拣器存的是夹在 255 的副本，真值在 GameHistoryData，读档后由 OnInserterTechChange 刷回。",
   "inserterStackInput": 5000,
