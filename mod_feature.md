@@ -1517,11 +1517,34 @@ logistics station means working around every one of those assumptions:
 | When the player puts something into the building, the `storageId` check comes first | It is filtered out for hubs, so drones go into the logistics station rather than falling into the tray |
 | Three panels (storage / station / distributor) fight over one click, and the last match wins | Only the station panel is kept; distribution mode comes from the config instead |
 | A distributor only works on items configured in the **delivery request list**, and an empty list means everything idles | Not worked around — the list belongs to the player, and the hub serves only what the player put on it (`autoDeliveryList` restores the automatic fill) |
-| **One distributor serves exactly one item** (`filter` is both the pairing condition and the item ID used when picking up) | `filter` is rotated to the next item once per second, leaving pairing, pickup and dispatch entirely to vanilla |
+| **One distributor serves exactly one item** (`filter` is both the pairing condition and the item ID used when picking up) | **`filter` moves on only once the current item is done**, leaving pairing, pickup and dispatch entirely to vanilla |
 
-> That last one is this building's only imperfection: **it serves one item at a time**. At one rotation per second
-> with 20 bots you cannot tell in practice; making one distributor genuinely serve several would mean taking over
-> every `filter` site inside an 8.9 KB `InternalTick`, which is not worth it.
+> That last one is this building's only imperfection: **it serves one item at a time**. Making one distributor
+> genuinely serve several would mean taking over every `filter` site inside an 8.9 KB `InternalTick`, which is not
+> worth it.
+
+> **1.12.10 fixed a bug that made it deliver almost nothing, and the symptom was indistinguishable from "the patch
+> never applied".** It used to rotate **once per second**, while a delivery round trip takes several seconds — and
+> changing `filter` triggers `RefreshDispenserTraffic` → `CourierTurnbackFromPlayer`, which turns every in-flight
+> bot around empty-handed. The existing "don't rotate while bots are flying" guard stopped the mid-flight case but
+> **not the just-landed one**: the idle window right after a landing always falls before the next rotation, so the
+> same item never got a second trip.
+>
+> Measured: **33 of 34 status samples read "20 idle / 0 flying"**, while the same line kept saying "mecha holds 0 /
+> needs 5000 → should deliver". Goods, demand, pairing and the per-planet switch were all in place and not one bot
+> went out.
+>
+> The test is therefore now **"rotate only once this item has no work left"** (the mecha's requirement is met, the
+> recycle line is cleared, or the hub is out of that item), with a **30-second fallback** so that an item which can
+> never be delivered cannot lock the hub up. The once-per-second beat is now only a *check*, not a rotation.
+>
+> **And "the mecha's requirement is met" was itself computed wrongly, which turned out to be the last straw.**
+> "How much does it hold" read only the **delivery-list cell**, while what the mecha actually owns sits in its
+> **inventory** — so with 5000 already in the backpack the test read "holds 0, still needs delivering" and the
+> rotation stayed pinned on an item that was long since satisfied until the 30-second fallback expired. Nine listed
+> items in a row is **four and a half minutes**, and the one item genuinely missing always queued behind them. Both
+> places (the rotation and the status line) now copy vanilla's own expression from `InternalTick` verbatim:
+> `delivery cell + inventory including the held stack`, plus the "is there room for it" gate.
 
 > **The storage space is those 30 slots; the transit tray stores nothing.** Between ticks it is necessarily empty:
 > the item currently being served is loaded onto it just before dispatch, and whatever is on it at the end of that
@@ -1535,8 +1558,16 @@ logistics station means working around every one of those assumptions:
 > **For diagnosis**: turn on `courierDebugLog` in `machines.json` and it prints one status line every 10 seconds
 > (slots / units stranded on the tray / request list / bots / pairing / item currently served). That chain has five
 > stages, and any one of them being empty looks identical from the outside — "the bots are just sitting there".
-> The tray figure **should normally be 0**; anything else means one thing only: the slots are full and the goods
-> cannot go back.
+> The tray figure **should normally be 0**.
+>
+> **1.12.10 closed two holes that made it non-zero and kept growing.** First, the drain-back picked a slot by
+> "is it the same item" alone and **returned that slot even when it was full**, so "how much room is there"
+> came out as 0 and the units could never go home — and since a hub slot holds ten million and the logistics
+> network keeps topping it up, "that slot is full" is the normal case, not an edge case. Second, staging added another full
+> batch every tick instead of topping up to what is already on the tray. Together the tray grew without bound —
+> measured: **290,000 Assembling Plants stranded on it**, several times the single-tick limit, and invisible on the
+> panel. The drain-back now falls back to the capacity of the station's other slots, and staging only tops up, so
+> the tray is bounded by construction at "what could be dispatched this tick".
 
 ### Wind Turbine Cluster
 

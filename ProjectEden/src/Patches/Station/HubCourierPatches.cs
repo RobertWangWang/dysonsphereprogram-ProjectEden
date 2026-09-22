@@ -57,8 +57,23 @@ namespace ProjectEden.Patches
         /// </summary>
         private const int IntervalTicks = 10;
 
-        /// <summary>多久把配送器的 filter 轮到下一种货。60 tick = 1 秒。</summary>
+        /// <summary>
+        /// 多久<b>检查一次</b>要不要把 filter 轮到下一种货。60 tick = 1 秒。
+        ///
+        /// <para><b>它是检查周期，不是轮换周期</b>——这个区别是实测逼出来的。
+        /// 1.12.10 之前这里就是轮换周期，而一趟配送要好几秒，于是每一趟都在
+        /// 落地后的空窗里被换掉，34 次状态采样里 33 次是「20 架闲着 / 0 架在飞」。
+        /// 现在真正的判据是「当前这种货还有没有活干」，见 <c>RotateFilter</c>。</para>
+        /// </summary>
         private const int RotateTicks = 60;
+
+        /// <summary>
+        /// 同一种货最多霸占多久（tick）。1800 = 30 秒。
+        ///
+        /// <para>兜底用的：<b>没有它，一种永远送不到的货会把整台枢纽锁死</b>——
+        /// 「还有活干」会一直成立，于是永远轮不到下一种。</para>
+        /// </summary>
+        private const int MaxDwellTicks = 1800;
 
         // ── 一、把配送器接到自己那个中转台上 ──────────────────
 
@@ -176,8 +191,14 @@ namespace ProjectEden.Patches
             // 会让下面的 want 变成 0——摆不上货，表现是配送运输机原地不动
             long cap = (long)courierCarries * __instance.idleCourierCount;
 
-            Stage(station, __instance.storage, __instance.filter,
+            int moved = Stage(station, __instance.storage, __instance.filter,
                 cap > int.MaxValue ? int.MaxValue : (int)cap);
+
+            // 诊断用：这一 tick 真的摆上去了多少。**状态行到目前为止只能看到「台上剩多少」，
+            // 而正常情况下那必然是 0（后置会清空），所以它分不开「摆上去了又被取走」
+            // 和「压根没摆上去」**——两者都显示 0，而后者正是「一架不飞」的成因之一。
+            if (moved > 0) System.Threading.Interlocked.Add(ref _stagedSinceReport, moved);
+            else System.Threading.Interlocked.Increment(ref _stageMissSinceReport);
         }
 
         /// <summary>
@@ -326,6 +347,33 @@ namespace ProjectEden.Patches
             // 没有别的货可换——这不算「被挡住」，不要走下面那条解释
             if (chosen == 0 || chosen == current) return;
 
+            // <b>当前这种货还有活干的时候不要换。</b>
+            //
+            // 这一条是实测逼出来的。下面那道 workCourierCount 守卫防住了「在飞时换」，
+            // 但它<b>防不住「刚落地又换」</b>：检查每 60 tick 跑一次，而一趟配送要好几秒，
+            // 于是每次落地后的那个空窗都会被换掉，下一趟根本轮不到同一种货。
+            // 34 次状态采样里 <b>33 次是「20 架闲着 / 0 架在飞」</b>，
+            // 而同一行一直写着「机甲持有 0 / 需求 5000 → 该送货」——
+            // 货、需求、配对、星球开关全都在，就是没有一架飞出去。
+            //
+            // 所以判据从「时间到了就换」改成「这一种没活干了才换」：
+            // 机甲要的量已经满足（或者该回收的已经收完），或者枢纽里这种货没了。
+            //
+            // <b>必须留一条兜底</b>，否则一种永远送不到的货会把这台枢纽锁死：
+            // 同一种货最多霸占 <see cref="MaxDwellTicks"/>，到点强制轮换。
+            (int, int) dwellKey = (factory.planetId, dispenserId);
+            long since = DwellSince.GetOrAdd(dwellKey, time);
+
+            if (current > 0
+                && HasWork(pkg, current, dispenser)
+                && Stocked(station, current)
+                && time - since < MaxDwellTicks)
+            {
+                ExplainDwell(time, current);
+
+                return;
+            }
+
             // <b>换 filter 会把正在飞的配送运输机原地掉头。</b>
             // SetDispenserFilter @0035 调 RefreshDispenserTraffic → OnRematchPairs，
             // 而那个方法里有<b>三处</b> CourierTurnbackFromPlayer，它做的事是
@@ -347,8 +395,244 @@ namespace ProjectEden.Patches
             // 走 SetDispenserFilter 而不是直接赋值：它会顺带 RefreshDispenserTraffic 重新配对
             factory.transport.SetDispenserFilter(dispenserId, chosen);
 
+            DwellSince[dwellKey] = time;
+
             _lastRotateTick = time;
             System.Threading.Interlocked.Increment(ref _rotations);
+        }
+
+        /// <summary>
+        /// 把原版自己算出来的「卡在哪一道闸」念出来，外加那两道闸各自的实际数值。
+        ///
+        /// <para><b>DispenserComponent.InternalTick 开头就是一条闸门链，每过一道就把
+        /// <c>playerDeliveryCondition</c> 往前推一格</b>（IL 00CE / 00EF / 0105 / 0142 / 015E）：</para>
+        /// <code>
+        ///   00C0  if (time % 3 != gene)        整段跳过（原版的错帧闸，每 3 tick 轮到一次）
+        ///   00CE  condition = 1
+        ///   00E8  if (idleCourierCount &lt;= 0)  退出   → 卡在 1：没有闲置配送运输机
+        ///   00EF  condition = 2
+        ///   00FE  if (playerPairCount &lt;= 0)    退出   → 卡在 2：没有配对
+        ///   0105  condition = 3
+        ///   0112  CheckDeliveryRange(...)              → 卡在 3：机甲不在配送范围内
+        ///   0142  condition = 4（只有在范围内才写）
+        ///   0157  if (energy &lt; 距离×20000+100000) 退出 → 卡在 4：配送器电不够
+        ///   015E  condition = 5                        → 全过了，正在干活
+        /// </code>
+        ///
+        /// <para><b>配送范围是个角度，不是距离。</b> <c>deliveryRange</c> 由
+        /// <c>PlanetTransport.GameTick</c> @02E6–0318 算出来：
+        /// <c>cos(history.dispenserDeliveryMaxAngle × π / 180)</c>，小于 −0.999 时钳成 −1（整颗星球）。
+        /// 所以判据是「枢纽方向和机甲方向的夹角」，而<b>这正是「换了颗星球就不送货」最自然的解释</b>——
+        /// 落点离枢纽太远，超出了那个角度。这里把点积和阈值都打出来，一眼能对。</para>
+        /// </summary>
+        private static string DeliveryVerdict(PlanetFactory factory, StationComponent station,
+            DispenserComponent dispenser)
+        {
+            if (dispenser == null) return "配送闸 —（没有配送器）";
+
+            var stage = (int)dispenser.playerDeliveryCondition;
+
+            string name;
+
+            switch (stage)
+            {
+                case 0: name = "**这一 tick 没轮到**（原版每 3 tick 才过一次）"; break;
+                case 1: name = "**卡在「没有闲置配送运输机」**"; break;
+                case 2: name = "**卡在「没有配对」**"; break;
+                case 3: name = "**卡在「机甲不在配送范围内」**"; break;
+                case 4: name = "**卡在「配送器电不够」**"; break;
+                case 5: name = "全过了，正在派机"; break;
+                default: name = $"未知（{stage}）"; break;
+            }
+
+            // 范围那一道：算出点积和阈值，直接对着看
+            var angleText = "";
+
+            Player player = GameMain.mainPlayer;
+
+            if (player != null && factory.entityPool != null
+                                && station.entityId > 0 && station.entityId < factory.entityPool.Length)
+            {
+                UnityEngine.Vector3 hub = factory.entityPool[station.entityId].pos.normalized;
+                UnityEngine.Vector3 me = player.position.normalized;
+
+                double dot = hub.x * me.x + hub.y * me.y + hub.z * me.z;
+                float maxAngle = GameMain.history?.dispenserDeliveryMaxAngle ?? 0f;
+                double threshold = System.Math.Cos(maxAngle * System.Math.PI / 180.0);
+
+                if (threshold < -0.999) threshold = -1.0;
+
+                angleText = $"｜配送范围 夹角余弦 {dot:0.0000} vs 阈值 {threshold:0.0000}"
+                            + $"（上限 {maxAngle:0.#}°，{(dot >= threshold ? "在范围内" : "**超出范围**")}）";
+            }
+
+            return $"配送闸 {name}｜配送器电量 {dispenser.energy / 1e6:0.##} MJ / "
+                   + $"{dispenser.energyMax / 1e6:0.##} MJ" + angleText
+                   + $"｜摆台 本周期 {System.Threading.Interlocked.Exchange(ref _stagedSinceReport, 0)} 件"
+                   + $"／空手 {System.Threading.Interlocked.Exchange(ref _stageMissSinceReport, 0)} 次"
+                   + $"（槽位里这种货还有 {SlotStock(station, dispenser.filter)} 件）"
+                   + PairMath(dispenser);
+        }
+
+        /// <summary>
+        /// 派机循环里最后那两道闸的实际数值，外加原版自己给每一对记的 <c>runtimeState</c>。
+        ///
+        /// <para><b>这两道闸之前一次都没被看过，而它们恰恰在「闸全过了」之后。</b>
+        /// <c>playerDeliveryCondition</c> 只走到「进了配对循环」（=5）就不再往下写了，
+        /// 循环<b>内部</b>还有两道，记在 <c>SupplyDemandPair.runtimeState</c> 上
+        /// （IL 01DF / 026B / 027B）：</para>
+        /// <code>
+        ///   01D7  if (格子物品 != filter)      跳过这一对        → state 保持 0
+        ///   01DF  state = 1
+        ///   0263  if (机甲实际持有 >= 需求)     跳过              → 卡在 1：已经够了
+        ///   026B  state = 2
+        ///   0273  if (还装得下的量 &lt;= 0)       跳过              → 卡在 2：**装不下**
+        ///   027B  state = 3                                     → 这一对真的去派机了
+        /// </code>
+        ///
+        /// <para>其中「还装得下的量」= <c>grid.stackSizeModified − grid.modifiedCount
+        /// + packageUtility.GetPackageItemCapacity(itemId)</c>，也就是
+        /// <b>配送清单那一格的剩余空间 + 背包的剩余空间</b>。两者都满就是 0，
+        /// 于是货有、需求有、闸全过，却一架都不派。</para>
+        /// </summary>
+        private static string PairMath(DispenserComponent dispenser)
+        {
+            int filter = dispenser.filter;
+
+            if (filter <= 0) return "";
+
+            var states = "";
+
+            if (dispenser.pairs != null)
+                for (var p = 0; p < dispenser.playerPairCount && p < dispenser.pairs.Length; p++)
+                    states += (p > 0 ? "," : "") + dispenser.pairs[p].runtimeState;
+
+            DeliveryPackage pkg = GameMain.mainPlayer?.deliveryPackage;
+
+            if (pkg?.grids == null) return $"｜配对状态 [{states}]";
+
+            for (var g = 0; g < pkg.gridLength; g++)
+            {
+                if (pkg.grids[g].itemId != filter) continue;
+
+                int inPack = dispenser.packageUtility?.GetPackageItemCountIncludeHandItem(filter) ?? -1;
+                int capacity = dispenser.packageUtility?.GetPackageItemCapacity(filter) ?? -1;
+                int stackMod = pkg.grids[g].stackSizeModified;
+                int modified = pkg.grids[g].modifiedCount;
+                int required = pkg.grids[g].clampedRequireCount;
+
+                long have = pkg.grids[g].count + (long)inPack;
+                long room = (long)stackMod - modified + capacity;
+
+                return $"｜配对状态 [{states}]｜派机算式：实际持有 {have}"
+                       + $"（清单 {pkg.grids[g].count} + 背包含手上 {inPack}）"
+                       + $" vs 需求 {required}"
+                       + $"；还装得下 {room}（清单格剩 {stackMod - modified} + 背包剩 {capacity}）"
+                       + $" → {(have >= required ? "**已经够了，不派**" : room <= 0 ? "**装不下，不派**" : "该派机")}";
+            }
+
+            return $"｜配对状态 [{states}]｜派机算式：**这种货不在配送清单里**";
+        }
+
+        /// <summary>
+        /// 这种货对机甲还有活干吗？<b>判据逐字抄状态行里那一条</b>
+        /// （<see cref="MechaNeed"/>），两处用同一个式子，才不会出现
+        /// 「日志说该送货、轮换却认为没活干」这种自相矛盾。
+        ///
+        /// <para>三个字段都在 <c>DeliveryPackage/GRID</c> 上：持有少于需求 → 该送货；
+        /// 持有多于回收线 → 该回收。两者都不是就没活干。</para>
+        /// </summary>
+        private static bool HasWork(DeliveryPackage pkg, int itemId, DispenserComponent dispenser)
+        {
+            if (pkg?.grids == null || itemId <= 0) return false;
+
+            for (var g = 0; g < pkg.gridLength; g++)
+            {
+                if (pkg.grids[g].itemId != itemId) continue;
+
+                // <b>「持有多少」必须把背包（含手上那一格）算进去。</b>
+                // 配送清单那一格的 count 只是<b>清单自己</b>的数，机甲真正拥有的在背包里——
+                // 原版 InternalTick @01EC–0223 算的是
+                // `max(modifiedCount, count) + GetPackageItemCountIncludeHandItem(itemId)`。
+                //
+                // **只读 count 会把「背包里已经有 5000 个」读成「持有 0」**，于是
+                // 「还有活干」恒为真，轮换被卡在一种早就够了的货上直到 30 秒兜底到期。
+                // 9 种货就是四分半钟——真正缺的那一种排在后面，表现正是「不给机甲送货」。
+                int inPack = dispenser?.packageUtility?.GetPackageItemCountIncludeHandItem(itemId) ?? 0;
+
+                long have = (long)pkg.grids[g].count + inPack;
+
+                // 装得下多少，同样抄原版 @022D–024D：清单格剩余 + 背包剩余。
+                // 这一项是 0 的时候原版也不派（@0273），所以它同样算「没活干」
+                int capacity = dispenser?.packageUtility?.GetPackageItemCapacity(itemId) ?? 0;
+
+                long room = (long)pkg.grids[g].stackSizeModified - pkg.grids[g].modifiedCount + capacity;
+
+                bool deliver = have < pkg.grids[g].clampedRequireCount && room > 0;
+                bool recycle = have > pkg.grids[g].recycleCount;
+
+                return deliver || recycle;
+            }
+
+            // 不在清单里的货配送器根本不碰，当然也就没活干
+            return false;
+        }
+
+        /// <summary>槽位里这种货一共还有多少件——只给诊断用。</summary>
+        private static long SlotStock(StationComponent station, int itemId)
+        {
+            StationStore[] slots = station.storage;
+
+            if (slots == null || itemId <= 0) return 0;
+
+            long sum = 0;
+
+            for (var s = 0; s < slots.Length; s++)
+                if (slots[s].itemId == itemId)
+                    sum += slots[s].count;
+
+            return sum;
+        }
+
+        /// <summary>枢纽的槽位里还有这种货吗？没有了就该轮下一种，再等也没用。</summary>
+        private static bool Stocked(StationComponent station, int itemId)
+        {
+            StationStore[] slots = station.storage;
+
+            if (slots == null) return false;
+
+            for (var s = 0; s < slots.Length; s++)
+                if (slots[s].itemId == itemId && slots[s].count > 0)
+                    return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// 每台配送器「当前这种货是什么时候换上的」。
+        ///
+        /// <para><b>必须按配送器分开记，不能用一个全局量</b>：
+        /// <c>PlanetTransport.GameTick</c> 是跨星球并行的，一个静态字段会被几十个
+        /// 星球的枢纽互相覆盖，兜底超时就变成了随机数。本文件里那个
+        /// <c>_lastRotateTick</c> 只喂给一条一次性的解释日志，不参与判定。</para>
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<(int, int), long>
+            DwellSince = new System.Collections.Concurrent.ConcurrentDictionary<(int, int), long>();
+
+        private static int _dwellExplained;
+
+        /// <summary>一次性说明：现在是「送完再换」，不是「到点就换」。</summary>
+        private static void ExplainDwell(long time, int itemId)
+        {
+            if (System.Threading.Interlocked.Exchange(ref _dwellExplained, 1) != 0) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"综合物流枢纽：当前服务的「{LDB.items.Select(itemId)?.name ?? itemId.ToString()}」还没送完，"
+                + "先不轮换。**这是有意的**——检查每秒一次，而一趟配送要好几秒，"
+                + "「到点就换」会把每一趟都掐死在落地后的那个空窗里"
+                + "（换 filter 会 RefreshDispenserTraffic → CourierTurnbackFromPlayer 把在飞的掉头）。"
+                + $"改成「这一种没活干了才换」，并留 {MaxDwellTicks / 60} 秒兜底，"
+                + "免得一种永远送不到的货把整台枢纽锁死。");
         }
 
         /// <summary>轮换过多少次。<b>状态行里必须有这个数</b>，见 <see cref="Report"/> 里的说明。</summary>
@@ -453,7 +737,11 @@ namespace ProjectEden.Patches
                 $"中转台滞留 {bufferKinds} 种（{bufferText.Trim()}，正常为 0）｜" +
                 $"配送清单 {listed} 条｜" +
                 $"配送运输机 闲 {dispenser?.idleCourierCount ?? -1} / 忙 {dispenser?.workCourierCount ?? -1}｜" +
-                $"货源已接 {(dispenser?.pickStorageSearchStart != null ? "是" : "否")}｜" +
+                // 这里原本写的是 `dispenser?.pickStorageSearchStart != null ? "是" : "否"`，
+                // 而那是个 **Int32**——`int?` 只要 dispenser 不为 null 就恒为 true，
+                // 于是这一栏永远是「是」。**一个不会随被测对象变化的读数不是测量**，
+                // 本文件记过三次的那条，这是第四次。真正要问的是「货源那个储物仓接上了没有」
+                $"货源 {(dispenser?.storage != null ? $"已接（{dispenser.storage.size} 格）" : "**没接上**")}｜" +
                 $"已配对 {dispenser?.playerPairCount ?? -1} 条｜" +
                 // <b>光报「当前服务哪种货」会骗人，必须带上轮换次数。</b>
                 // 这一行每 600 tick 一条，而轮换是每 60 tick 一次——两种货正好轮 10 次（偶数）
@@ -461,8 +749,10 @@ namespace ProjectEden.Patches
                 // 「均值掩盖双峰分布」的同族：周期采样和周期过程对齐时，读数是个假象
                 $"当前服务 {LDB.items.Select(dispenser?.filter ?? 0)?.name ?? "（无）"}" +
                 $"（已轮换 {_rotations} 次）｜" +
-                $"{MechaNeed(pkg, dispenser?.filter ?? 0)}｜" +
-                $"星球配送开关 {factory.transport.playerDeliveryEnabled}");
+                $"{MechaNeed(pkg, dispenser?.filter ?? 0, dispenser)}｜" +
+                $"星球配送开关 {factory.transport.playerDeliveryEnabled}｜" +
+                // **原版自己就记着「卡在哪一道闸」**，而我们绕了好几轮才想起来读它
+                DeliveryVerdict(factory, station, dispenser));
         }
 
         /// <summary>
@@ -656,7 +946,7 @@ namespace ProjectEden.Patches
         /// 这三个字段都在 <c>DeliveryPackage/GRID</c> 上（<c>StorageComponent/GRID</c> 没有
         /// requireCount/recycleCount，两个 GRID 是不同的嵌套类型，别弄混）。
         /// </summary>
-        private static string MechaNeed(DeliveryPackage pkg, int itemId)
+        private static string MechaNeed(DeliveryPackage pkg, int itemId, DispenserComponent dispenser)
         {
             if (pkg?.grids == null || itemId <= 0) return "机甲需求 —";
 
@@ -664,15 +954,25 @@ namespace ProjectEden.Patches
             {
                 if (pkg.grids[g].itemId != itemId) continue;
 
-                int have = pkg.grids[g].count;
-                int need = pkg.grids[g].requireCount;
+                // <b>这一行曾经撒过谎，代价是连着好几轮查错方向。</b>
+                // 原先只读 `pkg.grids[g].count`——那是<b>配送清单那一格</b>里的数，
+                // 而机甲真正拥有的在背包里。于是背包里躺着 5000 个的时候，
+                // 这一行报「持有 0 → 该送货」，而原版同一 tick 判的是「已经够了，不派」，
+                // **两者在同一行日志里自相矛盾，却没人发现**。
+                //
+                // 现在逐字抄原版 InternalTick @01EC–0223 的式子。
+                int inPack = dispenser?.packageUtility?.GetPackageItemCountIncludeHandItem(itemId) ?? 0;
+
+                long have = (long)pkg.grids[g].count + inPack;
+                int need = pkg.grids[g].clampedRequireCount;
                 int back = pkg.grids[g].recycleCount;
 
                 string verdict = have < need ? "**该送货**"
                     : have > back ? "**该回收**"
                     : "够了，没活干";
 
-                return $"机甲持有 {have} / 需求 {need} / 回收线 {back} → {verdict}";
+                return $"机甲持有 {have}（清单 {pkg.grids[g].count} + 背包含手上 {inPack}）"
+                       + $" / 需求 {need} / 回收线 {back} → {verdict}";
             }
 
             return "机甲需求 —（这种货不在配送清单里，配送器不会碰它）";
@@ -754,16 +1054,12 @@ namespace ProjectEden.Patches
                 // 一种货是摊在多个格子里的（每格一个堆叠上限），逐格算会把大头漏在台上
                 if (SeenEarlier(buffer, g, itemId)) continue;
 
-                int slot = FindSlot(slots, itemId);
+                int slot = FindDrainSlot(slots, itemId, out long room);
 
-                if (slot < 0) continue;
-
-                int room = slots[slot].max - slots[slot].count;
-
-                if (room <= 0) continue;
+                if (slot < 0 || room <= 0) continue;
 
                 int have = buffer.GetItemCount(itemId);
-                int move = have < room ? have : room;
+                int move = have < room ? have : (int)room;
 
                 if (move <= 0) continue;
 
@@ -831,23 +1127,43 @@ namespace ProjectEden.Patches
         /// 所以 cap 给大了最多是多搬一趟（后置当 tick 原样收回），给小了才会少派货。
         /// 取「闲置运输机数 × 每架运载量」是这一 tick 可能派出去的上限，不会少。
         /// </summary>
-        private static void Stage(StationComponent station, StorageComponent buffer, int filter, int cap)
+        private static int Stage(StationComponent station, StorageComponent buffer, int filter, int cap)
         {
-            if (filter <= 0 || cap <= 0) return;
+            if (filter <= 0 || cap <= 0) return 0;
 
             StationStore[] slots = station.storage;
 
-            if (slots == null) return;
+            if (slots == null) return 0;
+
+            // <b>只补差额，不是每 tick 再加一笔。</b>
+            //
+            // 摆台的量本来就该以「这一 tick 最多派得出去多少」为上限，而原先是
+            // 无条件再搬 cap 件上来。正常情况下后置会把台子清空，所以看不出区别；
+            // <b>一旦退不回去（槽位满 / 空格 max 还是 0），中转台就会无界增长</b>——
+            // 实测抓到 天工装配厂 ×290000 卡在台上，那是 cap 的好几倍。
+            //
+            // 改成「台上已经有多少就少搬多少」之后，台面存量构造上不超过 cap，
+            // 退不回去最多也只是停在那个上限，不会再把槽位一点点抽干。
+            int already = buffer.GetItemCount(filter);
+            int want = cap - already;
+
+            if (want <= 0) return 0;
 
             for (var s = 0; s < slots.Length; s++)
             {
                 if (slots[s].itemId != filter || slots[s].count <= 0) continue;
 
-                Move(ref slots[s], buffer, filter, cap);
-
-                return;
+                return Move(ref slots[s], buffer, filter, want);
             }
+
+            return 0;
         }
+
+        /// <summary>这一轮报告周期里摆上台的总件数。</summary>
+        private static int _stagedSinceReport;
+
+        /// <summary>这一轮报告周期里「一件都没摆上去」的次数。</summary>
+        private static int _stageMissSinceReport;
 
         /// <summary>
         /// 从一个物流站槽位往中转台搬货，返回真的搬走了多少。
@@ -895,18 +1211,81 @@ namespace ProjectEden.Patches
             return added;
         }
 
-        private static int FindSlot(StationStore[] slots, int itemId)
+        /// <summary>
+        /// 这一站的槽位容量——取所有槽位里最大的那个 <c>max</c>。
+        ///
+        /// <para>只给 <see cref="DrainAll"/> 在「挑中的是个空格、而空格的 max 还是 0」
+        /// 时兜底用。不写死 <c>stations.json</c> 的 slotCapacity，是因为那是<b>默认值不是锁</b>
+        /// ——每一格的容量玩家都能在面板上自己改，写死会和玩家改过的值对不上。
+        /// 同一站的其它槽位是就地可得、且一定被引导过的参照。</para>
+        ///
+        /// <para>一个也找不到（整站 max 全是 0，只可能发生在引导之前的头几 tick）就返回 0，
+        /// 于是这一笔这一 tick 先不退，下一 tick 再试——不会丢货。</para>
+        /// </summary>
+        private static long SlotCapacity(StationStore[] slots)
+        {
+            long max = 0;
+
+            for (var s = 0; s < slots.Length; s++)
+                if (slots[s].max > max)
+                    max = slots[s].max;
+
+            return max;
+        }
+
+        /// <summary>
+        /// 退货时该往哪一格放，以及那一格还剩多少空间。
+        ///
+        /// <para><b>必须带着「还剩多少空间」一起挑，这是 1.12.11 修的那个洞。</b>
+        /// 原先是「找到同物品的格子就返回」——可那一格<b>满了的时候也返回</b>，
+        /// 于是 <c>room = 0</c>、这一笔退不回去，而下一 tick 摆台又搬一笔上来。
+        /// 枢纽的槽位容量是一千万且由物流网持续补满，所以「同物品的那一格是满的」
+        /// 恰恰是常态，不是边角情况：实测 天工装配厂 ×290000 就这样卡在台上，
+        /// 一直卡到把中转台塞爆、连当前服务的那种货都摆不上去，**配送整个停摆**。</para>
+        ///
+        /// <para>顺序：同物品且还有空间 → 空格子 → 找不到（-1，这一笔先留在台上）。
+        /// 落到空格子时会多出一格同物品的槽位，看着有点怪，但<b>货在面板上看得见、
+        /// 物流网也搬得走</b>，比烂在一个玩家看不见的仓里强。</para>
+        /// </summary>
+        private static int FindDrainSlot(StationStore[] slots, int itemId, out long room)
         {
             var empty = -1;
 
             for (var s = 0; s < slots.Length; s++)
             {
-                if (slots[s].itemId == itemId) return s;
+                if (slots[s].itemId == itemId)
+                {
+                    long left = (long)slots[s].max - slots[s].count;
+
+                    if (left > 0)
+                    {
+                        room = left;
+
+                        return s;
+                    }
+
+                    // 满了——别在这里 return，继续往下找空格子
+                    continue;
+                }
 
                 if (empty < 0 && slots[s].itemId == 0) empty = s;
             }
 
-            return empty;
+            if (empty < 0)
+            {
+                room = 0;
+
+                return -1;
+            }
+
+            // 空格子的 max 往往还是 0（容量是指派物品时才写的），按同站其它槽位兜底
+            long max = slots[empty].max;
+
+            if (max <= 0) max = SlotCapacity(slots);
+
+            room = max - slots[empty].count;
+
+            return room > 0 ? empty : -1;
         }
 
         // ── 三、别让中转台抢走点击建筑时的面板 ────────────────
