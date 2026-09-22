@@ -103,19 +103,55 @@ namespace ProjectEden.Patches
         private static long _sampled;
 
         /// <summary>
+        /// 逐星球的「<c>InternalUpdate</c> 调用次数 / 累计耗时 / 巨型建筑台次」。
+        ///
+        /// <para><b>这是为一个具体假设加的，不是通用统计。</b> 两次实测给出
+        /// 4,632 台 → 5,669 ns/次、9,326 台 → 10,609 ns/次——台数 ×2.01 而单次耗时 ×1.87，
+        /// 近乎成正比。若成立，则总耗时 ∝ n²，也就是<b>巨型建筑这一块是关于台数平方的</b>，
+        /// 而那会把优化方向整个换掉：该减的是「每 tick 摸多少台」，不是「每台跑多少周期」。</para>
+        ///
+        /// <para><b>两个点还不够，而「飞到小星球再量」这个实验是无效的</b>——DSP 里离开的星球
+        /// 工厂照样跑，全局工作集一点没变（本探针自己就报着「9326 台/帧」而本星球只有 7241）。
+        /// 按星球分桶才是对的：<b>一颗星球是一个并行工作项</b>，在一个线程上连续处理自己那批建筑，
+        /// 所以「这颗星球有多少座」就是那个线程的工作集。一局之内就能拿到多个点，
+        /// 同一台机器、同一份代码、同一个会话，<b>只有工作集大小不同</b>。</para>
+        ///
+        /// <para>查表只在 <see cref="BeginBuilding"/> 里做一次并缓存进线程，
+        /// 所以每次 <c>Add</c> 只是一次线程静态读——不能在 Add 里查字典，那会让探针
+        /// 变成它要测的那个问题。</para>
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, long[]> PerPlanet
+            = new System.Collections.Concurrent.ConcurrentDictionary<int, long[]>();
+
+        /// <summary>当前线程正在处理的那颗星球的桶。[0] 调用次数、[1] 累计 tick、[2] 台次。</summary>
+        [ThreadStatic] private static long[] _bucket;
+
+        [ThreadStatic] private static int _bucketPlanet;
+
+        /// <summary>
         /// 每台建筑进 <c>MegaTick</c> 时调一次，定下这一 tick 计不计时。
         /// 关掉时是一次字段读，开着时多一次 AND 和一次 <c>Interlocked</c>。
         /// </summary>
-        internal static void BeginBuilding(int entityId)
+        internal static void BeginBuilding(int entityId, int planetId)
         {
             if (!Enabled)
             {
                 _sampling = false;
+                _bucket = null;
 
                 return;
             }
 
             Interlocked.Increment(ref _buildings);
+
+            // 星球没变就不查表——扫描任务是一颗星球一个工作项，所以这一路上绝大多数是命中
+            if (_bucket == null || _bucketPlanet != planetId)
+            {
+                _bucket = PerPlanet.GetOrAdd(planetId, _ => new long[3]);
+                _bucketPlanet = planetId;
+            }
+
+            Interlocked.Increment(ref _bucket[2]);
 
             _sampling = (entityId & SampleMask) == 0;
 
@@ -158,7 +194,16 @@ namespace ProjectEden.Patches
         /// **三种情况该动的地方完全不同**，所以这个数必须量，不能猜——
         /// 上一轮我猜「是探针在量自己」，猜错了。
         /// </summary>
-        internal static void AddCalls(int n) { if (_sampling && n > 0) Interlocked.Add(ref _calls, n); }
+        internal static void AddCalls(int n)
+        {
+            if (!_sampling || n <= 0) return;
+
+            Interlocked.Add(ref _calls, n);
+
+            long[] b = _bucket;
+
+            if (b != null) Interlocked.Add(ref b[0], n);
+        }
 
         private static long _calls;
 
@@ -180,7 +225,18 @@ namespace ProjectEden.Patches
         /// 减法比枚举可靠：漏包一处记账，减法仍然把它算在记账头上，
         /// 而逐个包会把漏掉的那处悄悄算成 0。每台只多 3.4 次取值。
         /// </summary>
-        internal static void AddInner(long t0) { if (t0 != 0L) Interlocked.Add(ref _tInner, Stopwatch.GetTimestamp() - t0); }
+        internal static void AddInner(long t0)
+        {
+            if (t0 == 0L) return;
+
+            long d = Stopwatch.GetTimestamp() - t0;
+
+            Interlocked.Add(ref _tInner, d);
+
+            long[] b = _bucket;
+
+            if (b != null) Interlocked.Add(ref b[1], d);
+        }
 
         private static long _tInner;
         /// <summary>
@@ -234,9 +290,12 @@ namespace ProjectEden.Patches
             long gameTick = GameMain.gameTick;
 
             // 第一次只对表不报；gameTick 倒退（换了存档）也重新对表。
+            //
+            // **第一个窗口 15 秒，之后 60 秒。** 排查卡顿的会话往往只有半分钟——
+            // 进去看一眼就退——而原来第一行要等满 60 秒，连着两局一个数都没拿到。
             if (_nextReport <= 0f || _lastGameTick < 0 || gameTick <= _lastGameTick)
             {
-                _nextReport = now + 60f;
+                _nextReport = now + 15f;
                 _lastGameTick = gameTick;
                 _lastStamp = Stopwatch.GetTimestamp();
                 _lastWall = now;
@@ -397,7 +456,63 @@ namespace ProjectEden.Patches
                 + "接近 1 说明分母还是错的，明显大于 1 说明这些建筑散在多颗星球上并行跑，"
                 + "那时候合计是 CPU 时间而不是单帧墙钟时间。）"
                 + "配方周期占大头 → 只剩批量结算这条路（风险高）；"
-                + "储物格同步占大头 → 加脏标记就行（风险低）。");
+                + "储物格同步占大头 → 加脏标记就行（风险低）。"
+                + PerPlanetTable(measuredFreq));
+        }
+
+        /// <summary>
+        /// 逐星球的 ns/次，用来判「单次 <c>InternalUpdate</c> 的耗时是不是随本星球的巨型建筑数增长」。
+        ///
+        /// <para><b>判据写在表后面，因为这张表只有一个用途。</b> 若 ns/次 随台数明显上升，
+        /// 那么总耗时 ∝ n²，优化方向要从「每台跑几个周期」换成「每 tick 摸几台」；
+        /// 若各星球的 ns/次 基本一致，那它就是个与规模无关的常数，这条路作废。</para>
+        ///
+        /// <para>累加器每轮清零，所以每份报表都是**这 60 秒**的，不是从开局以来的累计。</para>
+        /// </summary>
+        private static string PerPlanetTable(double freq)
+        {
+            if (PerPlanet.Count == 0) return "";
+
+            var rows = new System.Collections.Generic.List<(int Planet, long Calls, long Ticks, long Builds)>();
+
+            foreach (System.Collections.Generic.KeyValuePair<int, long[]> kv in PerPlanet)
+            {
+                long[] b = kv.Value;
+
+                long calls = Interlocked.Exchange(ref b[0], 0);
+                long t = Interlocked.Exchange(ref b[1], 0);
+                long builds = Interlocked.Exchange(ref b[2], 0);
+
+                if (calls > 0) rows.Add((kv.Key, calls, t, builds));
+            }
+
+            if (rows.Count == 0) return "";
+
+            // 按「这颗星球每帧有多少台」排序——那就是这个线程的工作集，也是要验的自变量
+            rows.Sort((x, y) => y.Builds.CompareTo(x.Builds));
+
+            var sb = new System.Text.StringBuilder();
+
+            sb.Append("\n  ── 逐星球：单次 InternalUpdate 的 ns（自变量是「这颗星球有多少台」）──");
+
+            foreach ((int planet, long calls, long t, long builds) in rows)
+            {
+                PlanetData pd = GameMain.galaxy?.PlanetById(planet);
+
+                sb.Append("\n    ").Append(pd?.displayName ?? planet.ToString())
+                  .Append("：台次 ").Append(builds)
+                  .Append("　调用 ").Append(calls)
+                  .Append("　**").Append((t / (double)calls * 1e9 / freq).ToString("0")).Append(" ns/次**");
+            }
+
+            sb.Append("\n    判据：**ns/次 随台数明显上升 → 总耗时 ∝ n²**，该减的是「每 tick 摸几台」"
+                      + "（tickDivider 那条路，MegaThrottle 已有现成且离线回放过的实现），"
+                      + "而不是「每台跑几个周期」；**各星球基本持平 → 它是个与规模无关的常数**，这条路作废。"
+                      + "已有两个点：4,632 台 → 5,669 ns、9,326 台 → 10,609 ns（×2.01 对 ×1.87），"
+                      + "但那是两次不同会话，所以才要这张同一会话内的表。"
+                      + "**注意「飞到小星球再量」是无效实验**——离开的星球工厂照样跑，全局工作集没变。");
+
+            return sb.ToString();
         }
 
         private static void Snapshot()

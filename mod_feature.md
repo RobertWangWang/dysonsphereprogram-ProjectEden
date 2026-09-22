@@ -4564,6 +4564,71 @@ Facilities" row fell from 12.3 ms to 1.6 ms.
 To turn it off, set `batchSettle` to `false` in `megabuildings.json`; throughput and correctness
 are identical, it is just slower.
 
+### 1.12.9: from 213 ms back down to 11.5 ms
+
+As the factory kept growing (**9,326 mega buildings on one planet**) the frame time came back —
+and hiding inside it was a **leftover value in the save**: batch settlement (③ above) had
+**never once taken effect** for the whole session, so every building was calling the vanilla
+settlement **47 times per tick**.
+
+> **Not one item of output was lost — it was simply eleven times slower.** Nothing reported an
+> error anywhere except the frame time. An over-strict guard does not fail loudly; it just makes
+> the feature quietly stop working, and this one was persisted through a save field.
+> **The fix is retroactive: an affected save repairs itself on load, with nothing to rebuild.**
+
+With that fixed, one new optimisation was added: **the global tick divider**
+(`globalTickDivider` in `megabuildings.json`, default **2**).
+
+The cost of one settlement grows super-linearly with *how many buildings this planet has*, so the
+real lever is **how many are touched per frame**, not how fast each one runs. The divider gives
+each building a turn once every G ticks and runs G times the cycles when its turn comes —
+**throughput is independent of G**, because the cycle count and the divider are both multiplied
+by G and cancel.
+
+| | before the fix | fixed | plus the divider |
+|---|---:|---:|---:|
+| Logic frame | 213 ms | 18.5 ms | **11.5 ms** |
+| Batch coverage | 0% | 97.5% | **98.7%** |
+| Real settlement calls per building per tick | 47.1 | 1.9 | **0.8** |
+
+**The cost is latency**: at G = 2 a building waits at most 33 ms for its turn and produces twice as
+much when it comes. Production lines do not care (everything downstream is a buffer); watching the
+numbers tick over on a panel does. Set it to `1` to turn it off (18.5 ms is still well inside the
+16.6 ms full-frame budget), or `4` to push harder (7 ms, but a 67 ms wait per building).
+
+### 1.12.9: placing a building no longer recomputes the whole logistics pairing table
+
+1.10.1 turned "recompute every supply/demand pairing on the planet each time a building is placed"
+into "at most once every 2 seconds". Once the factory grew another order of magnitude, **that one
+recomputation was itself 40–60 ms** — a mature planet carries **8,467 logistics stations and
+3.04 million pairs** — so continuous building stuttered every two seconds.
+
+This version switches to **incremental maintenance**: only the stations that actually changed are
+recomputed.
+
+```
+vanilla pairwise scan     81 ms
+index by item            32 – 49 ms
+only what changed         1.14 ms     <- now
+```
+
+> **No data structure can fix this, and that is worth stating.** The pairing table is "match supply
+> slots to demand slots by item", and evaluating that in full has a theoretical floor: **every input
+> must be read once and every result written once** (Yannakakis 1981's O(N+OUT), which is also the
+> lower bound). The output *is* those 3.04 million pairs, so no table can beat "write out 3.04
+> million pairs". The only way around it is **not to rewrite them every time**.
+
+Correctness is not taken on trust: every 200 incremental updates each planet inserts one full
+rebuild and reconciles against it. On a mismatch only the incremental path is switched off, the
+full-index path stays, and the table left behind is the one the full rebuild produced — so logistics
+is unaffected either way.
+
+**It also fixes a "every building placed freezes for 1.3 seconds" problem**: the pairing table's
+self-check re-runs vanilla's own matcher, which is O(stations²). Its throttle said "check every 20th
+rebuild" and was calibrated on a 2,101-station planet; on an 8,465-station one a single check grew to
+1.3 seconds. It is now throttled by **estimated cost**, and large planets skip it while printing the
+estimate they skipped.
+
 ## XXXVI. Antimatter: hoarding what a black hole evaporates
 
 The two ores from the previous section (Accretion Melt, Horizon Core) now have a downstream. Four
@@ -4765,7 +4830,7 @@ already decides each planet's radius, and two things writing the same number onl
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The sixteen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
+| `megabuildings.json` | The sixteen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, **the global tick divider `globalTickDivider`**, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), carry capacity (drone / vessel / **courier** configured separately), **base-speed multipliers for both craft** (`droneSpeedMultiplier` / `courierSpeedMultiplier`, applied to the base value, leaving the tech multiplier alone), stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |

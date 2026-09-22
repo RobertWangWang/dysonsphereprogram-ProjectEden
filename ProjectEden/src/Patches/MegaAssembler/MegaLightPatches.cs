@@ -176,7 +176,14 @@ namespace ProjectEden.Patches
         internal static void Suppress(ref AssemblerComponent component)
         {
             component.time = -component.speedOverride - 1;
-            component.extraTime = -component.extraSpeed - 1;
+
+            // **只在增产计时器真的会走的时候才压它。** extraSpeed == 0 时原版推进它的唯一
+            // 一处（IL 0586 `extraTime += power * extraSpeed`）加的是 0，本来就跨不过门槛，
+            // 哨兵毫无作用——而 extraTime 是**存档字段**、原版没有任何一处清零，于是那个
+            // 负数会永久留在存档里。它自己不引发任何症状，却会让 MegaBatchSettle.CanBatch
+            // 把这台建筑踢出批量结算（同一个坑在 MegaThrottle.RewindExtra 上实际发作过：
+            // 全存档 36 万台次全中，生产设施 14 ms → 210 ms）。
+            if (component.extraSpeed > 0) component.extraTime = -component.extraSpeed - 1;
         }
 
         /// <summary>

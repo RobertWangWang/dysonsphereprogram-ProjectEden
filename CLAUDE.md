@@ -173,7 +173,12 @@ powershell -ExecutionPolicy Bypass -File tools\verify_harmony.ps1   # 三类会�
 python tools\check_slots.py         # 物品格位 / 配方格位 / 建造栏槽位 / 模型 ID 的占用冲突
 python tools\check_guides.py        # 两份特性指南的 ##/### 条数与目录锚点是否对得上
 python tools\sim_throttle.py        # 离线复现巨型建筑分频节流的时序（见 MegaThrottle 那一节）
+python tools\sim_pairindex.py       # 物流配对表：增量维护和全量重建是否等价（见 LocalPairIndex 那一节）
+powershell -ExecutionPolicy Bypass -File tools\check_bp_nest.ps1       # 蓝图 CheckBuildConditions 里那 6 个 O(预览²) 循环还在不在
+powershell -ExecutionPolicy Bypass -File tools\check_bp_inner.ps1      # 那 6 个循环是不是仍然只写 condition（跳过它们的前提）
+powershell -ExecutionPolicy Bypass -File tools\check_bp_writes.ps1     # 整个 CheckBuildConditions 写了哪些字段（为什么不能整体短路）
 powershell -ExecutionPolicy Bypass -File tools\check_output_gate.ps1   # 产出闸的 7 处乘法站点还在不在（见 MegaOutputGatePatches）
+powershell -ExecutionPolicy Bypass -File tools\check_bp_anchor.ps1     # 蓝图粘贴里「物流站邻距」那道外层闸的锚点判据是否仍然唯一
 ```
 
 **Run `verify_harmony.ps1` after adding or editing any patch class.** It catches the three mistakes that throw out of `PatchAll` — a `TargetMethods` selector sharing a class with individual annotations, a bare-name patch on an overloaded game method, and **a prefix/postfix parameter name the target does not declare**. All three are invisible to the compiler and none of them fails as "this patch did nothing".
@@ -1321,8 +1326,19 @@ of magnitude below 氨, already the worst in `combustibles.json`; and its Carnot
   ×10 to the current value compounds across sessions: 100× on the second load, 1000× on the third,
   **and nothing logs it**. Both are therefore computed as `vanilla base × multiplier`, with the base
   read live from `Configs.freeMode` — the same source `GameHistoryData.SetForNewGame` @01F6 uses —
-  rather than hardcoding 8 and 10, which would go silently stale on a game update. That makes the
+  rather than hardcoding the numbers, which would go silently stale on a game update. That makes the
   write idempotent at any cadence.
+
+  **And reading the base out of `ModeConfig..ctor` is not the same as reading the mode**, which the
+  first draft of the docs got wrong. The ctor writes `logisticCourierSpeed = 10` (@01A1), and the
+  live `Configs.freeMode` value is **6** — the ctor literals are *defaults* that the mode overrides.
+  The drone happens to agree (8 in both), which is exactly what makes the mistake easy to keep. The
+  code was right because it reads `Configs.freeMode` live; only the quoted numbers were wrong.
+  **A constructor literal is the default, not the value** — read the accessor the game itself reads.
+
+  Measured on the owner's save: carry went `运输机 200 → 10000`, `配送机 20 → 5000`, and base speeds
+  `8 → 80` / `6 → 60`. That `20` is the number the owner had reported, which is what identified the
+  courier as the right field in the first place.
 
   **Which layer to scale was decided by enumerating writers, and it is the reason this is safe.**
   Final speed is `base × scale` (`get_logisticDroneSpeedModified`). `UnlockTechFunction` writes
@@ -2579,7 +2595,7 @@ before every launch, or put the file in `BepInEx/config/ProjectEden/` and use th
 `planet.json` (bigger planets: the master switch — **on by default since 1.12.1** — the radius
 multiplier, and the `probe` diagnostic; see *Bigger planets*) is the twenty-third.
 
-The 25 configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block), `advancedminer.json` (miner/pump limits, **`minerPeriod` — the miner's output ceiling, and the only lever on it; see the advanced-miner section**, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, `stationEnergy` — per-station charging power in **watts** and energy capacity in **joules**; 2103 / 2104 / 6531 all ship at 5 GW / 150 GJ — carry capacity, stacking, gas collector, `localDispatchPerTick` — how many planetary drones one station may launch per tick, see *Game internals: planetary drone dispatch* — and `inventoryStackSize`, the one `ItemProto.StackSize` shared by the inventory, chests, the delivery package and the mecha's ammo/fuel slots, see trap 4c), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed, plus `throughputProbe` — the four-causes-one-symptom flow probe, default off), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
+The 25 configs: `megabuildings.json` (tab, build category 12, the seven buildings with their pinned model IDs 704, 708 and 723–727, station block, plus **`globalTickDivider`** — the throughput-neutral working-set lever, see *The per-building working set is the real cost*), `advancedminer.json` (miner/pump limits, **`minerPeriod` — the miner's output ceiling, and the only lever on it; see the advanced-miner section**, the ore→ingot product map, the plain miner's own buffer via `smallMinerCapacity` — **which also scales the throttle divisor**, see the advanced-miner section — whether a pump may draw 岩浆 from a lava ocean, and the three rendering knobs added in 1.9.4: `stackedRenderLimit` / `stackedRenderRadius` — how many coincident same-proto buildings to draw — plus `veinMiningCircles` and the two diagnostics `veinMiningReport` / `renderCensus`, see the stacked-buildings section), `stations.json` (slot capacity/count, `stationEnergy` — per-station charging power in **watts** and energy capacity in **joules**; 2103 / 2104 / 6531 all ship at 5 GW / 150 GJ — carry capacity, stacking, gas collector, `localDispatchPerTick` — how many planetary drones one station may launch per tick, see *Game internals: planetary drone dispatch* — and `inventoryStackSize`, the one `ItemProto.StackSize` shared by the inventory, chests, the delivery package and the mecha's ammo/fuel slots, see trap 4c), `lab.json` (matrix production speed, `matrixTimeSpend` — every matrix recipe's craft time in ticks, swept over `LabComponent.matrixIds`, see the matrix-lab section — the lab↔station virtual feed, whether techs list 生物矩阵 directly, and how it shows in the lab’s 3-D animation), `recipes.json` (cloned recipes retyped for other machines, plus `vanillaEdits` — append ingredients to a vanilla recipe in place; see the extra-recipes section), `power.json` (power node coverage), `ores.json` (the custom vein table: extra items, per-ore item/vein ids, vein rarity, recolour parameters, each ore's recipe list, and the `gases[]` injected into gas giants), `machines.json` (cloned machines: source building, `kind`, recipe type, tint, build recipe), `belts.json` (per-tier belt speed, plus `throughputProbe` — the four-causes-one-symptom flow probe, default off), `metals.json` (the four-axis property table; `fieldIdBase` 74), `alloys.json` (the per-building 硬质合金 ratio: parts, cobalt range, grade buckets, waste penalty), `cheats.json` (the six rule-bypass switches, all **on** by default), `i18n.json` (the Chinese→English string table), `ammo.json` (the five ammo tiers and how a pair of alloys maps to damage and yield), `cargoprobe.json` (one bool: the shader `inc` probe), `composite.json` (the Living Composite: candidate fillers, the four grades' part thresholds, yield and percolation parameters, and the sintering outputs), `combustibles.json` (combustible liquid power: each liquid's working temperature, the Carnot cold-side temperature and second-law efficiency, the fuel-type bit, the property row's field id), `proliferator.json` (living proliferators: the candidate list shared by both feedstock slots, the character/grade score thresholds, and each outcome's spray level, spray count and yield), `alienvein.json` (the alien vein: which vein type consumes drill bits, the bit predicate’s hardness margin, yield formula and **exclusion list**, the miner’s bit slot and its capacity, and the rare-vein prospector switch), `redox.json` (the redox combustion plant: the reductant and oxidiser candidate lists with their **oxygen balance per item**, the three grain tiers with their heat values and density thresholds, and the oxidiser-ratio slider's range), `lens.json` (the living lens: power multiplier and photon multiplier — **independent**, see the catalyst-slot section — the heal rate, and which vanilla catalyst counts as "the other lens", resolved by `ItemProto.Name`), `abnormality.json` (one bool: suppress the "abnormal data" determination, **on** by default — see the next section for why a content mod trips it unavoidably).
 
 **Vector-authored icons live in `tools/make_icons.py`** (`drawsvg` → SVG → `resvg-py` → PNG; on Windows `cairosvg`/`renderPM` are dead ends, see below). Items are 80×80 and vein icons 480×480, matching GenesisBook's own split. An `icon` / `ingotIcon` / `oreIcon` field in `ores.json`, or a recipe's `icon`, names one of these files under `assets/icons/`.
 
@@ -3796,6 +3812,15 @@ assemblers" while knowing nothing about the gate. It now sums `min(cyclesPerTick
 building, reading the gate through **the same `Scale` the transpiler uses**, so the diagnostic and
 the behaviour cannot drift apart.
 
+**There was a second hand-kept copy and the same commit missed it — found by reading the log.**
+`ReferenceRatePatches.OutputGate` hardcoded the same `10` / `20`, so the moment the gate was raised
+the 参考速率 / 理论产能 panels flipped from over-reporting to **under-reporting by 3–6×**. The tell
+was two adjacent startup lines disagreeing: `参考速率：…组装类到 36,000/min` right above
+`巨型建筑产出闸：…一律放到 60`. It now routes through `Scale` as well. **The lesson is not "fix the
+second copy" — it is that "I made the diagnostic read the real function" is only true of the
+diagnostic you were looking at.** Enumerate who else holds the number *before* changing it; here the
+search is one grep for the constant, and it would have returned both.
+
 ### The three optimisations, and which one carries risk
 
 | | how | risk |
@@ -3958,6 +3983,108 @@ And one unresolved number, recorded rather than explained away: **a single `Inte
 85.7%. The likely mechanism is cache traffic on `productRegister[]` / `consumeRegister[]`, which are
 shared across the ~31 worker threads, but that is a hypothesis and is labelled as one.
 
+**Both halves of that paragraph are now retracted, and the retraction is the most reusable thing in
+this whole section.**
+
+- **The hypothesis was wrong.** Those two registers come from `factoryStatPool[factory.index]`
+  (`_assembler_parallel` @011D–0141) — **one pair per planet**, and one planet is one work item on
+  one thread. The 5 `Monitor.Enter/Exit` pairs inside `InternalUpdate` (@006D/@00B4/@01A3/@031A on
+  `productRegister`, @0474 on `consumeRegister`) are therefore **never contended**. A whole
+  optimisation (per-thread scratch registers, merge once per planet tick) was designed on that
+  hypothesis and cancelled by one Cecil dump before a line was written.
+- **The number itself was the probe measuring itself.** The bound that settles it needs nothing but
+  the vanilla panel: `生产设施` = 3.688 ms of wall clock, and the planet holding 7,240 mega
+  buildings is **one thread**, so the whole per-building-tick budget is ≈ **509 ns** — against the
+  probe's claimed 6,273 ns. Parallelism cannot bridge that: only three planets carry mega buildings,
+  so at most 3×. The real figure is **150–350 ns per call, which is exactly what 693 IL instructions
+  should cost.** There was never an anomaly.
+
+**Why the self-calibration could not catch it, which is the transferable part.** The probe measures
+one `GetTimestamp()` in a **tight loop** (22 ns) and subtracts `15 × 22 ns` per sampled building.
+But the 15 timestamps in the real code are on a **cold path** interleaved with cache-missing work,
+where the same call can cost an order of magnitude more. So the probe is **cheap in aggregate**
+(turning it off moved the frame by less than the noise) and **wrong per-sample by 12×** — and those
+two facts look contradictory until you notice the subtraction is scaled back up by the 1/64
+sampling factor. *A self-calibration is only as good as the representativeness of its calibration
+workload*, and a probe whose instrumentation sits **inside** the interval it measures can never
+calibrate that away by sampling less.
+
+**The rule: cross-check any probe against a number it does not produce.** Here that number was free
+— the vanilla performance panel, divided by the thread count the scheduler actually permits. The
+relative history (213 → 11.5 ms) stayed valid throughout because the same probe was on the whole
+time; only the absolute per-call figure was fiction. **Relative deltas from a biased instrument are
+usually fine; absolute values from one are not.**
+
+**And what that leaves for `InternalUpdate` itself: nothing.** Enumerated — 10 backward branches
+(all bounded by `requireCounts.Length` / `productCounts.Length`, i.e. 1–8), **0 `newobj`/`newarr`,
+0 `callvirt`**, 11 `call` of which 10 are the Monitor pair. It is a fixed-step state machine at
+`O(inputs + outputs)` with no search, no sort, no allocation and no virtual dispatch. The only data
+structure with any slack is the **3–4 small heap arrays per component** (`served` / `incServed` /
+`produced` / `needs`) versus the sequential `assemblerPool` struct array and the *shared*
+`recipeExecuteData` (all buildings on one recipe point at one object, so it stays hot). Defragmenting
+those arrays into allocation order was costed at ~15% and rejected: it depends on Mono sgen's
+placement and compaction, which is an implementation detail that fails silently. **The lever that
+did work was the call count — 47 → 1.9 → 0.8 per building-tick — never the cost per call.**
+
+### The per-building working set is the real cost, and `globalTickDivider` is the lever
+
+`megabuildings.json`'s `globalTickDivider` (default **2**) gives each building a turn once every
+G ticks and runs G× the cycles on that turn. **Throughput is independent of G by construction** —
+the divider becomes `per-building × G` (`MegaThrottle.Decide`) and the cycle count becomes
+`base × G` (`MegaThrottle.CyclesFor`), so `cycles / divider` cancels; this holds for the four
+antimatter buildings (`cyclesPerTick 1 / tickDivider 70`) with no special case. Offline replay in
+`tools/sim_throttle.py` asserts it at G = 1/2/3/4/8 (420,000 cycles each).
+
+**Two couplings, and missing either is silent:**
+
+- **The output gate must scale with G** (`MegaOutputGatePatches.Scale`), or the gate pins the G×
+  cycles back to 1× — presenting as "I turned on the divider and throughput dropped to 1/G".
+- **The input buffer must cover one settlement's worth of cycles** (`MegaStationPatches.StockCycles`),
+  or `MegaBatchSettle.BatchSize`'s ingredient bound bites first and the remainder falls back to
+  one-at-a-time. At G = 4 that is 240 cycles against a `requireStockMultiplier` of 200 — so the
+  multiplier is now a **floor**, and the real value is derived.
+
+Both were made *derived* rather than copied, because that constant has now been hand-copied to four
+places and gone stale in three of them (`PlanetCensus`, `ReferenceRatePatches`,
+`MegaBatchSettle.BatchSize`, `MegaStationPatches`).
+
+### An over-strict guard does not fail loudly — it persists through the save
+
+**The single most expensive bug of this campaign: batch settlement was off for an entire save, and
+nothing reported it.** Measured: coverage **0%**, every mega building calling vanilla's settlement
+**47 times per tick** instead of ~2, `生产设施` 14 ms → 210 ms. **Output was exact the whole time.**
+
+The chain, in the order it has to be read:
+
+1. `MegaThrottle.RewindExtra`'s fallback wrote `extraTime = -extraSpeed - 1`. With no proliferator
+   `extraSpeed == 0`, so it wrote **−1**.
+2. `extraTime` is a **save field**, and vanilla's only instruction that advances it (IL 0586,
+   `extraTime += (int)(power * extraSpeed)`) multiplies by that same zero. **Nothing in vanilla ever
+   clears it.** So one session with the divider on poisoned every mega building in the save,
+   permanently — and reverting the config did not undo it.
+3. `MegaBatchSettle.CanBatch` had `if (extraTime != 0) return false;`.
+
+**The guard was asking the wrong question.** Once `extraSpeed == 0` the extra timer is *frozen* — it
+provably cannot cross `extraTimeSpend` during a batch — so its value is irrelevant. The correct test
+is *"can the timer move"*, which the preceding `extraSpeed != 0` check already answers. Deleting the
+over-strict line **also repairs poisoned saves with no migration**, because the fix is retroactive by
+construction. `RewindExtra` and `MegaLightPatches.Suppress` additionally stopped writing a sentinel
+that cannot do anything (`-0 - 1`), and `sim_throttle.py` grew an assertion that suppression leaves
+`extraTime == 0` when nothing is sprayed — **the checker before the C#**, as usual.
+
+Three rules out of it:
+
+- **A guard that is too strict does not error; it makes the feature quietly not happen.** Prefer the
+  narrowest predicate that is *provably* sufficient, and write down the proof — here, "the timer
+  cannot advance" is one IL line.
+- **Never write a sentinel into a field vanilla will not clear.** `extraTime`'s only writer outside
+  our code is gated on the very value that makes the sentinel pointless, and the field is
+  serialized. A per-tick scratch value that reaches the save is a permanent decision.
+- **A single counter summarising several distinct rejection reasons measures nothing.** `CanBatch`
+  had four conditions behind one counter and `IsSteadyUnit` six behind another; splitting them
+  named the culprit in one launch each, twice in one session. This is the same lesson as *a scrub is
+  not coverage* — the distinction has to be in the instrument.
+
 ## Game internals: building is part of the logic frame, and this mod makes it quadratic
 
 Measured on the same save, during a build spree. The player's own report was the decisive half
@@ -4080,6 +4207,88 @@ checksum. A snapshot would cost 12 MB at this scale; the checksum is O(pairs) an
 because our emission order is deliberately aligned with vanilla's, order-sensitivity is the
 *stronger* test, not the weaker one. A mismatch logs ERROR and disables the index for the session —
 worst case "no faster", never "wrong pairs". Vanilla's table is what stays after an audit.
+
+### Incremental maintenance — the only way past O(OUT), and the three traps it hides
+
+**The index is already at the theoretical floor, so the next win had to come from not materialising
+the output at all.** This is a binary equi-join (match by `itemId`, complementary direction), i.e. a
+*free-connex* query, and for those **Yannakakis (1981) achieves O(N + OUT) and that is also the lower
+bound** — every input must be read once and every result written once. Our flat bucket index (direct
+indexing on `itemId`, chained nodes, `[ThreadStatic]`, zero allocation) is already better than a hash
+table and already O(N + OUT). **`OUT` is 3.04M pairs on that planet, so no data structure beats
+it.** The only remaining lever is **incremental view maintenance**: a placed building only adds its
+own pairs.
+
+Measured, one planet, 8,467 stations / 3,043,138 pairs: vanilla **81 ms** → full index **32–49 ms**
+→ **incremental 1.14 ms**.
+
+**Three traps, all of which fail silently, and all of which are now covered by
+`tools/sim_pairindex.py`** (add / change-slot / remove / batched, plus two negative controls):
+
+- **The audit's checksum must become order-insensitive first.** Full rebuild re-emits in
+  station-then-slot order; incremental appends. Same *set*, different *order* — so the old
+  order-sensitive checksum would fail every single increment and, by design, disable the index and
+  fall back to O(stations²): **slower than not doing IVM at all**. It is now a multiset sum, and
+  **sum rather than xor**, because xor cancels duplicates and "emitted the same pair twice" is
+  exactly what IVM gets wrong.
+- **`EmitPairsFor` must NOT keep the "counterpart id > mine" guard.** That guard is the full
+  traversal's way of emitting each logical pair once; when emitting for a single station it silently
+  drops every counterpart with a lower id.
+- **A batch shares one index rebuild, and then keys pair with each other twice.** Detach A, detach B,
+  emit A (B is in the index → A↔B), emit B (A is in the index → A↔B *again*). Fixed by skipping
+  keys already emitted in this batch. **And the batch itself is the point**: building the index is
+  ~2 ms (O(slots)) while emitting is ~96% of a full rebuild, so per-key index rebuilds made 20 keys
+  cost the same as a full rebuild — the first version capped the batch at 8 keys on a cost model that
+  was 7× wrong, and **incremental never ran once**.
+
+**Removal has to happen in `RemoveStationComponent`'s PREFIX, not at the `RefreshStationTraffic`
+call inside it.** Measured: @02D1 calls `Reset()` (which zeroes `id` and nulls `storage`) and only
+@02F5 calls `RefreshStationTraffic`. **`Reset` does not touch `localPairs`** — enumerated, zero
+instructions — so by @02F5 the pair array is intact but the station no longer knows its own id.
+The prefix sees it whole.
+
+**And "this station is gone" is not "incremental failed".** The removed station's key stays in
+`PendingKeys` — and *must*, because vanilla uses it for the drone-order repair — so the next flush
+looks it up and finds a reset component. The first version returned `false` there, which triggered a
+**full rebuild on every dismantle**. `RebuildOne` now returns `Applied` / `Vanished` / `Unsupported`;
+only the last one falls back. Same family as the `CanBatch` and `IsSteadyUnit` counters: **one return
+value covering two opposite situations cannot distinguish the normal path from a fault.**
+
+**A dropped key is a correctness hole, not a performance one — and IVM created it.** The coalescer
+caps how many changed stations it records. Before IVM a dropped key only meant "that station's drone
+orders were not repaired", because the table was rebuilt wholesale anyway. **With IVM it means that
+station's pairs are never updated** — `keys` is non-empty and looks like an ordinary delta batch. So
+the cap is now 512 (the break-even against a full rebuild is ~8,400 keys) **and overflow sets a
+per-planet "delta incomplete" flag that forces a full rebuild** — the same rule as "empty keys →
+full rebuild", in a more hidden form. Note the flag must be a *separate signal* from `keys`:
+emptying `keys` to force the full path would also drop the drone-order repair, which is the silent
+bug one door over.
+
+**Reconciliation replaces the audit for the incremental path, and the guarantee is transitive.**
+Every 200 increments per planet, one flush is promoted to a full rebuild and the two are compared as
+multisets. Full-index ≡ vanilla is still audited on small planets; incremental ≡ full-index is
+reconciled everywhere; the two compose. Comparing incremental against *vanilla* directly would cost
+O(stations²) — 1,300 ms on this planet, which is the very freeze the cost budget below exists to
+stop.
+
+### The audit's throttle was counted, but its cost scales — "every 20th" is not a budget
+
+`LocalPairIndex`'s replay audit re-runs **vanilla's own matcher**, which is O(stations²). Its
+"first 3 per planet, then every 20th" cadence was set on a **2,101-station** planet where that
+measured 81 ms. On an **8,465-station** one the same rule gives `(8465/2101)² × 81 ≈ 1,300 ms` —
+reported by the owner as **"placing a single building stutters"**, with three back-to-back freezes on
+first entering the planet.
+
+Fixed by throttling on **estimated cost** instead: the budget is derived from that one measured point
+(81 ms ↔ 2,101² ≈ 4.41M iterations, so a 30 ms ceiling is ~1.6M, about 1,280 stations), and a planet
+over it skips the audit **while printing the estimate it skipped** — a silently degraded safety net
+is not a safety net. Small planets still verify pair-for-pair, and that is sufficient because
+**the audit verifies a property of the algorithm, not of the planet**: a 539-station planet exercises
+the same code.
+
+**The general rule: a throttle counted in occurrences is only correct while the cost per occurrence
+is constant.** Anything whose cost grows with world size needs the budget expressed in the same unit
+as the cost.
 
 **`RefreshStationTraffic(int keyStationId = 0)` has an optional parameter, and that cost a silent
 bug.** Writing `RefreshStationTraffic()` compiles, runs and reports nothing — while passing 0 is
@@ -4430,6 +4639,22 @@ intercept `SteamAchievementManager` so nothing is uploaded); that layer is unwri
 an owner decision, not an oversight.
 
 ## Known gaps
+
+- **Pasting a blueprint of several thousand coincident buildings still freezes, and the
+  investigation was stopped rather than finished (owner decision).** Measured on
+  `BuildTool_BlueprintPaste.CheckBuildConditions`, three points: 1,840 previews → 109 s,
+  3,364 → 342 s, 6,076 → **1,041 s**, i.e. `log(3.04)/log(1.806) = 1.88` — **O(previews²)**.
+  Four candidates were measured, not reasoned about, and the first three were wrong:
+  `Physics.OverlapBoxNonAlloc` **0.06%**, `AddErrorMessage` **0.0006%**, the station-proximity block
+  **~6%** (exactly one sixth — it is one of six such loops). The six preview-vs-preview loops were
+  then found by enumerating the loop nesting offline and are now skipped when 无条件建造 is on
+  (`BlueprintPairLoopPatches`, verified by `check_bp_inner.ps1` to write nothing but `condition`) —
+  **and it still froze**, so even those are not the whole story and no measurement survives the
+  freeze (a frozen call never returns, so no postfix records it). **The remaining cost is unidentified.**
+  The three offline checkers are kept so the next attempt does not repeat the enumeration; the
+  scenario itself (thousands of buildings stacked on one point) is outside what this mod sets out to
+  support. **Note the failure mode of that whole session: four mechanisms that each *could* explain
+  the symptom, three of which did not — every one of them killed by a measurement, none by thinking.**
 
 - **More radius-200 constants almost certainly remain.** The four found so far (`kMaxMeshCnt`,
   `GetModPlane`'s `20020`, `TrashSystem.Gravity`'s `210/800/600`, and the stale `AstroData.uRadius`)

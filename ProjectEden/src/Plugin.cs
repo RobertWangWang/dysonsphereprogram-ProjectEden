@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.12.8";
+        public const string VERSION = "1.12.9";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -98,6 +98,10 @@ namespace ProjectEden
             Patches.Diagnostics.CpuCostProbe.Load();
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             Patches.LensPatches.Config = JsonHelper.Load<Patches.LensConfig>("lens");
+            // 蓝图粘贴探针（blueprintprobe.json，默认关）。单独一个文件的理由写在那份 JSON 里：
+            // JsonHelper 的磁盘覆盖是整份文件生效的，塞进 cheats.json 就得为一个开关影印六个作弊开关
+            Patches.Diagnostics.BlueprintPasteProbe.Config =
+                JsonHelper.Load<Patches.Diagnostics.BlueprintProbeConfig>("blueprintprobe");
             AmmoRegistry.Load();
             RedoxRegistry.Load();
             CompositeRegistry.Load();
@@ -148,6 +152,9 @@ namespace ProjectEden
             Patches.MegaExchangerDefaultPatches.Report();
             Patches.MegaOutputGatePatches.Report();
             Patches.BlueprintOverlapPatches.Report();
+            Patches.BlueprintStationSkipPatches.Report();
+            Patches.BlueprintPairLoopPatches.Report();
+            Patches.Diagnostics.BlueprintPasteProbe.Report();
             Patches.BeltThroughputProbe.Report();
             Patches.QualityCraftPatches.Report();
             Patches.QualityRepairPatches.Report();

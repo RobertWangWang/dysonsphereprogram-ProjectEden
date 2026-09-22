@@ -181,8 +181,9 @@ namespace ProjectEden.Patches.Diagnostics
 
             _lastFingerprint = fingerprint;
 
-            var rows = new System.Collections.Generic.List<(string Name, double Ms)>();
-            var sum = 0.0;
+            var rows = new System.Collections.Generic.List<(string Name, double Ms, bool Overlap)>();
+            var sum = 0.0;          // 只累加**不重叠**的那些
+            var overlapMax = 0.0;   // 重叠那一组取最大值，代表它们共同的那一段跨度
 
             foreach ((EGameLogicTask task, string name) in Watched)
             {
@@ -190,9 +191,22 @@ namespace ProjectEden.Patches.Diagnostics
 
                 if (ms <= 0.0005) continue;
 
-                rows.Add((name, ms));
-                sum += ms;
+                bool overlap = Overlapping(task);
+
+                rows.Add((name, ms, overlap));
+
+                if (overlap)
+                {
+                    if (ms > overlapMax) overlapMax = ms;
+                }
+                else
+                {
+                    sum += ms;
+                }
             }
+
+            // 重叠那一组的共同跨度只算一次
+            double frame = sum + overlapMax;
 
             if (rows.Count == 0)
             {
@@ -209,19 +223,52 @@ namespace ProjectEden.Patches.Diagnostics
 
             sb.Append("CPU 逐任务耗时（本帧，原版 GetThreadTaskTime_MainToAll 的口径，含工作线程）：")
               .Append(first ? "首次采样" : "计数器已更新")
-              .Append("　合计 ").Append(sum.ToString("0.000")).Append(" ms");
+              .Append("　逻辑帧约 ").Append(frame.ToString("0.000")).Append(" ms")
+              .Append("（= 不重叠各项之和 ").Append(sum.ToString("0.000"))
+              .Append(" ＋ 重叠组里的最大值 ").Append(overlapMax.ToString("0.000")).Append("）");
 
-            foreach ((string name, double ms) in rows)
+            foreach ((string name, double ms, bool overlap) in rows)
                 sb.Append('\n').Append("  ").Append(name).Append('：')
-                  .Append(ms.ToString("0.000")).Append(" ms　（")
-                  .Append((ms / sum * 100.0).ToString("0.0")).Append("%）");
+                  .Append(ms.ToString("0.000")).Append(" ms")
+                  .Append(overlap
+                      ? "　⚠ 跨度重叠，**不要和同组相加**"
+                      : "　（" + (ms / frame * 100.0).ToString("0.0") + "%）");
 
-            sb.Append("\n  判读：这是**一帧**的数，不是平均值，所以逐次会抖——看排序和占比，别抠小数。");
-            sb.Append("一颗星球是一个并行工作项，单颗星球加核心没用；");
+            sb.Append("\n  判读：这是**一帧**的数，不是平均值，所以逐次会抖——看排序，别抠小数。");
+            sb.Append("\n  ⚠ 打了「跨度重叠」的那几项是**连续的阶段**，而 GetThreadTaskTime_MainToAll 量的是");
+            sb.Append("「从我开始，到所有工作线程干完为止」——后一个阶段的跨度里含着前一个的。");
+            sb.Append("**把它们相加会得到一个比整帧还大的假数**，占比也会跟着全错，所以这里不给它们算占比；");
+            sb.Append("整帧只按「其余各项之和 ＋ 这一组的最大值」估。");
+            sb.Append("典型的骗局长这样：组里两项几乎相等（实测出现过 15.309 / 15.153 和 2.909 / 2.911），");
+            sb.Append("那不是巧合，是后一个在等同一批工作线程——**它量到的是同一份活，只是起点挪后了**。");
+            sb.Append("\n  一颗星球是一个并行工作项，单颗星球加核心没用；");
             sb.Append("要么这颗星球上的对象更少，要么把工厂摊到更多星球。");
 
             ProjectEdenPlugin.Log.LogInfo(sb.ToString());
         }
+
+        /// <summary>
+        /// 这个任务的跨度是否和同组的其它任务重叠。
+        ///
+        /// <para><b>这四个是连续的阶段</b>（1601 / 1700 / 1751 / 1800），而
+        /// <c>GetThreadTaskTime_MainToAll</c> 量的是「从我开始，到所有工作线程干完为止」——
+        /// 所以后一个阶段的跨度里<b>含着</b>前一个的。把它们相加会得到一个比整帧还大的数。</para>
+        ///
+        /// <para><b>这不是理论风险，它真的骗了人一次。</b> 一份实测报表里
+        /// 生产设施 15.309 / 研究站·科研 15.153、物流运输 2.909 / 研究站·出货 2.911——
+        /// 两两几乎相等，于是「研究站占了 45%」这个结论被当真了一轮；
+        /// 而那颗星球的普查白纸黑字写着<b>研究模式 0 座</b>，科研那一栏根本不可能有活。
+        /// 0.002 毫秒的「巧合」就是签名：后一个在等同一批工作线程。</para>
+        ///
+        /// <para>CLAUDE.md 早写着「large ones are not additive」，而这张报表照旧打了合计和占比。
+        /// <b>一个会让人读出错误结论的诊断，比没有诊断更糟</b>——所以现在由代码标出来，
+        /// 而不是指望读的人记得那条。</para>
+        /// </summary>
+        private static bool Overlapping(EGameLogicTask task)
+            => task == EGameLogicTask.FactoryFacility
+               || task == EGameLogicTask.FactoryLabResearch
+               || task == EGameLogicTask.FactoryTransport
+               || task == EGameLogicTask.FactoryLabOutput;
 
         /// <summary>
         /// 一个**不参与计算**的活性指纹：几个任务的结束计数器之和。取多个是因为单个任务

@@ -22,8 +22,14 @@ MK3_MILLI = 0.25             # Cargo.incTableMilli 第 4 档（增产剂 Mk.III�
 
 
 def run(divider, ticks, release_enabled, spray_milli=0.0, power=1.0,
-        time_spend=21_000_000, extra_spend=210_000_000, entity_id=227):
-    """跑 ticks 个 tick，返回（结算周期数，额外产出次数，扣料次数）。"""
+        time_spend=21_000_000, extra_spend=210_000_000, entity_id=227,
+        cycles_per_tick=1, want_extra_time=False):
+    """跑 ticks 个 tick，返回（结算周期数，额外产出次数，扣料次数）。
+
+    cycles_per_tick 就是 megabuildings.json 那个旋钮：RunExtraCycles 在原版那次调用
+    **之前**补跑 cycles_per_tick − 1 遍，所以一个非压制 tick 一共跑 cycles_per_tick 遍。
+    压制 tick 直接 return 0，补跑一遍都没有，只剩原版那一次（而且被 Hold 压住）。
+    """
     time = 0
     extra_time = 0
     replicating = False
@@ -36,6 +42,8 @@ def run(divider, ticks, release_enabled, spray_milli=0.0, power=1.0,
 
     for tick in range(ticks):
         # ── MegaTick：跑在原版调用**之前** ──────────────────────
+        hold = False
+
         if divider > 1:
             hold = tick % divider != entity_id % divider
 
@@ -45,8 +53,12 @@ def run(divider, ticks, release_enabled, spray_milli=0.0, power=1.0,
             # 当场越过门槛——实测比例会是 1.00 而不是原版的 0.25。
             if release_enabled and replicating and extra_speed > 0:
                 extra_time -= extra_speed
-            else:
+            elif extra_speed > 0:
                 extra_time = -extra_speed - 1
+            else:
+                # 没喷增产剂：哨兵没有意义（加 0 跨不过门槛），而 extraTime 是存档字段、
+                # 原版不清零，写进去的 −1 会永久留着并让 CanBatch 把这台踢出批量结算。
+                extra_time = 0
 
             if hold:
                 # **前置钩子取消不了它后面那次调用**：压完之后原版照样跑一遍，
@@ -61,29 +73,39 @@ def run(divider, ticks, release_enabled, spray_milli=0.0, power=1.0,
                     extra_time += extra_speed * time_spend // speed_override
 
         # ── 原版 AssemblerComponent.InternalUpdate ──────────────
-        if power < 0.1:                                             # IL 0000
-            continue
-        if extra_time >= extra_spend:                               # IL 0022
-            extra_cycles += 1
-            extra_time -= extra_spend                               # IL 00F3
-        if time >= time_spend:                                      # IL 0101
-            replicating = False                                     # IL 0127
-            extra_speed = 0                                         # IL 034D
-            speed_override = SPEED                                  # IL 0355
-            cycles += 1
-            time -= time_spend                                      # IL 0375
-        if not replicating:                                         # IL 0383
-            if served < 1:                                          # IL 03D7 够不够
-                time = 0
-                continue
-            served -= 1
-            consumed += 1
-            extra_speed = int(SPEED * spray_milli * 10 + 0.1)       # IL 04C7
-            speed_override = SPEED                                  # IL 04F2
-            replicating = True                                      # IL 054E
-        if time < time_spend and extra_time < extra_spend:          # IL 055D / 0566
-            time += int(power * speed_override)                     # IL 056F
-            extra_time += int(power * extra_speed)                  # IL 0586
+        #
+        # 一个 tick 跑几遍：压制 tick 只有原版那一次（RunExtraCycles 已经 return 0），
+        # 其余 tick 是「补跑 cycles_per_tick − 1 遍 + 原版 1 遍」。
+        # 顺序上补跑在前（MegaTick 是前置钩子），但这个模型里两者完全同构，不区分。
+        calls = 1 if (divider > 1 and hold) else cycles_per_tick
+
+        for _ in range(calls):
+            if power < 0.1:                                         # IL 0000
+                break
+            if extra_time >= extra_spend:                           # IL 0022
+                extra_cycles += 1
+                extra_time -= extra_spend                           # IL 00F3
+            if time >= time_spend:                                  # IL 0101
+                replicating = False                                 # IL 0127
+                extra_speed = 0                                     # IL 034D
+                speed_override = SPEED                              # IL 0355
+                cycles += 1
+                time -= time_spend                                  # IL 0375
+            if not replicating:                                     # IL 0383
+                if served < 1:                                      # IL 03D7 够不够
+                    time = 0
+                    break
+                served -= 1
+                consumed += 1
+                extra_speed = int(SPEED * spray_milli * 10 + 0.1)   # IL 04C7
+                speed_override = SPEED                              # IL 04F2
+                replicating = True                                  # IL 054E
+            if time < time_spend and extra_time < extra_spend:      # IL 055D / 0566
+                time += int(power * speed_override)                 # IL 056F
+                extra_time += int(power * extra_speed)              # IL 0586
+
+    if want_extra_time:
+        return cycles, extra_cycles, consumed, extra_time
 
     return cycles, extra_cycles, consumed
 
@@ -130,6 +152,51 @@ def main():
         c2, e2, k2 = run(div, ticks, release_enabled=True, time_spend=ts, extra_spend=ts * 10)
         out.write("  %2d 秒配方: 周期 %3d  扣料 %3d\n" % (secs, c2, k2))
         check(c2 == want and k2 == c2 + 1, "%d 秒配方对不上" % secs)
+
+    # ── 全局分频（globalTickDivider）：产能必须一个周期都不差 ────────────────
+    #
+    # 它把**每一座**巨型建筑的分频数乘以 G、周期数也乘以 G，所以推导上
+    # 吞吐 = 周期/分频 = (基准×G)/(每座×G) 与 G 无关。推导归推导，这里量一遍——
+    # 原版是「上一次攒、这一次结」的两段流水线，而分频恰好让「攒满的下一 tick」
+    # 变成压制 tick，1.12.5 就是在这个接缝上丢光了产量的。
+    out.write("\n全局分频 G：产能应当与 G 无关（分频和周期同乘 G）\n")
+    base_c, base_e, base_k = run(1, ticks, release_enabled=True, cycles_per_tick=60)
+    out.write("  G = 1（基准，60 周期/tick）      : 周期 %6d  扣料 %6d\n" % (base_c, base_k))
+
+    for gg in (2, 3, 4, 8):
+        c3, e3, k3 = run(gg, ticks, release_enabled=True, cycles_per_tick=60 * gg)
+        out.write("  G = %d（%3d 周期/tick，%d tick 一次): 周期 %6d  扣料 %6d  差 %+d\n"
+                  % (gg, 60 * gg, gg, c3, k3, c3 - base_c))
+        # 容差 = 一个 G 周期的边界效应：7000 不一定整除 G，收尾那一轮可能少跑一次
+        check(abs(c3 - base_c) <= 60 * gg, "全局分频 G = %d 改变了产能（差 %d 个周期）" % (gg, c3 - base_c))
+
+    # 反物质那四座（cyclesPerTick 1 / tickDivider 70）叠上全局分频，同样不能变
+    out.write("  反物质四座（1 周期 / 70 分频）叠 G：\n")
+    ref4, _, _ = run(70, ticks, release_enabled=True, cycles_per_tick=1)
+
+    for gg in (2, 4):
+        c4, _, _ = run(70 * gg, ticks, release_enabled=True, cycles_per_tick=gg)
+        out.write("    G = %d: 周期 %3d（不叠是 %3d）\n" % (gg, c4, ref4))
+        check(abs(c4 - ref4) <= gg, "全局分频改变了反物质那四座的产能")
+
+    # ── 压制不许往 extraTime 里留残值（没喷增产剂时）────────────────────────
+    #
+    # 实际发作过：RewindExtra 在 extraSpeed == 0 时写 −1，而 extraTime 是存档字段、
+    # 原版推进它的唯一一处乘的正是 extraSpeed，所以那个 −1 永久留在存档里，
+    # MegaBatchSettle.CanBatch 据此把每一台都踢出批量结算——**产量一件不差，只是慢几十倍**。
+    # 这里把 run() 改成返回末态的 extra_time，断言「不喷就不留残值」。
+    out.write("\n压制残值：没喷增产剂时 extraTime 必须停在 0\n")
+
+    for dv, cyc in ((2, 120), (70, 1), (4, 240)):
+        _, _, _, left = run(dv, ticks, release_enabled=True, cycles_per_tick=cyc, want_extra_time=True)
+        out.write("  分频 %2d / %3d 周期: 末态 extraTime = %d\n" % (dv, cyc, left))
+        check(left == 0, "分频 %d 在没喷增产剂时往 extraTime 留了残值 %d" % (dv, left))
+
+    # 喷了的那一支不能被上面那条改坏：残值本来就该有
+    _, e5, _, left5 = run(70, ticks, release_enabled=True, spray_milli=MK3_MILLI, want_extra_time=True)
+    out.write("  分频 70 + 增产剂 Mk.III: 额外 %d 次，末态 extraTime = %d（这一支有残值是对的）\n"
+              % (e5, left5))
+    check(e5 > 0, "喷了增产剂却一次额外产出都没有")
 
     if failures:
         out.write("\n失败：\n")

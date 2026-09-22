@@ -125,7 +125,8 @@ namespace ProjectEden.Patches
             if (component.speed < MegaBuildingRegistry.MegaSpeedThreshold) return;
 
             // 抽样判定必须排在所有 Now() 之前：它决定这一 tick 的十二个计时点开不开
-            MegaTickProfiler.BeginBuilding(component.entityId);
+            // 带上星球号：分段探针要按星球分桶，用来验「单次耗时是否随本星球的建筑数增长」
+            MegaTickProfiler.BeginBuilding(component.entityId, factory.planetId);
 
             long tOther = MegaTickProfiler.Now();
 
@@ -525,9 +526,14 @@ namespace ProjectEden.Patches
 
             // 第一次进来只对表，不报——否则报的是「开局到现在」那一段，
             // 里面多半是还没建成的空工厂，稀释掉真正想看的数。
+            //
+            // **第一个窗口只等 15 秒，之后才每 60 秒一次。** 原来第一行要等满 60 秒，
+            // 于是一局「进去看一眼卡不卡就退出来」的会话一行都不打——而那正是排查
+            // 卡顿时最常见的会话长度，结果是连着两次拿不到覆盖率和分段数据。
+            // 采样窗口短一点只是抖一点，比彻底没有强。
             if (_nextSkipReport <= 0f)
             {
-                _nextSkipReport = now + 60f;
+                _nextSkipReport = now + 15f;
                 _lastRan = System.Threading.Interlocked.Read(ref _cyclesRan);
                 _lastSkipped = System.Threading.Interlocked.Read(ref _cyclesSkipped);
 
@@ -612,6 +618,10 @@ namespace ProjectEden.Patches
 
         private static long _lastBatched, _lastStepped, _lastBailP, _lastBailS;
 
+        private static long _lastBailU, _lastBailES, _lastBailET, _lastBailIS;
+
+        private static long _lastShC, _lastShX, _lastShN, _lastShL, _lastShV, _lastShP;
+
         /// <summary>
         /// 批量结算的覆盖率，跟在空转统计那一行后面报。
         ///
@@ -648,6 +658,73 @@ namespace ProjectEden.Patches
                 + $"；退回逐次的原因——带增产剂 {bp} 次、单次调用没落在稳态 {bs} 次。"
                 + $"自检已回放 {MegaBatchAudit.Checks} 次，其中偏保守 {MegaBatchAudit.Conservative} 次"
                 + "（偏保守只是慢一点，不影响正确性；真出问题会报 ERROR 并整局关掉批量）。");
+
+            // 四条退回理由分开报。**「带增产剂」是四个条件合成的一个数**，而它们的含义
+            // 完全不同：incServed 有余量是玩家真的喷了（结构性），extraTime 非零则更可能是
+            // 本 mod 自己的压制留下的（Suppress / Hold），那就是 bug 不是设计。
+            long u = MegaBatchSettle.BailIncUsed - _lastBailU;
+            long es = MegaBatchSettle.BailExtraSpeed - _lastBailES;
+            long et = MegaBatchSettle.BailExtraTime - _lastBailET;
+            long ise = MegaBatchSettle.BailIncServed - _lastBailIS;
+
+            _lastBailU = MegaBatchSettle.BailIncUsed;
+            _lastBailES = MegaBatchSettle.BailExtraSpeed;
+            _lastBailET = MegaBatchSettle.BailExtraTime;
+            _lastBailIS = MegaBatchSettle.BailIncServed;
+
+            if (bp > 0)
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑·批量结算·退回明细（共 {bp} 台次）："
+                    + $"用过增产点 {u}、extraSpeed 非零 {es}、**extraTime 非零 {et}**、incServed 有余量 {ise}。"
+                    + "前两条和最后一条是「玩家真的喷了」，结构性的；"
+                    + "**extraTime 非零基本只可能是本 mod 自己压制后没清干净**（MegaLightPatches.Suppress / "
+                    + "MegaThrottle.Hold 都会把它写成负数），那一条占大头就是 bug，不是设计。");
+
+            // 「没落在稳态」同样是六个出口合成的一个数，同样拆开。
+            long sc = MegaBatchSettle.ShapeCycle - _lastShC;
+            long sx = MegaBatchSettle.ShapeExtra - _lastShX;
+            long sn = MegaBatchSettle.ShapeNoRecipe - _lastShN;
+            long sl = MegaBatchSettle.ShapeLength - _lastShL;
+            long sv = MegaBatchSettle.ShapeServed - _lastShV;
+            long spd = MegaBatchSettle.ShapeProduced - _lastShP;
+
+            _lastShC = MegaBatchSettle.ShapeCycle;
+            _lastShX = MegaBatchSettle.ShapeExtra;
+            _lastShN = MegaBatchSettle.ShapeNoRecipe;
+            _lastShL = MegaBatchSettle.ShapeLength;
+            _lastShV = MegaBatchSettle.ShapeServed;
+            _lastShP = MegaBatchSettle.ShapeProduced;
+
+            if (bs > 0)
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑·批量结算·没落在稳态的明细（共 {bs} 台次）："
+                    + $"**这次调用没结算出周期 {sc}**、额外产出动了 {sx}、没有配方 {sn}、"
+                    + $"数组长度对不上 {sl}、原料差值不符 {sv}、产物差值不符 {spd}。"
+                    + "第一条占大头是正常的——缺料、产物槽满、刚建好都会这样，"
+                    + "而且紧接着的空转提前退出会一遍就停；"
+                    + "**后三条占大头才值得查**，那说明这一次调用里还发生了别的事。");
+
+            // **覆盖率低要吵，不能只是印出来。**
+            // 1.12.8 把产出闸抬了，而 BatchSize 里那份手抄的系数没跟着走，于是覆盖率从
+            // 98.9% 掉到两成上下、生产设施 14 ms → 190 ms——**而这一行当时就在日志里印着
+            // 那个数，只是没人会去比**。自检抓不到它：批 20 个再逐次跑 100 个完全正确，
+            // 只是慢，所以正确性的守卫结构上看不见性能的塌方。
+            //
+            // **上一版这里把 bp 和 tot 相比，那是两种单位：bp 数的是「台次」，tot 数的是
+            // 「周期」，一台退回会跑出几十个周期，所以那个百分比必然小得离谱**——它报出
+            // 「带增产剂只占 2.1%」，而真相是 100% 的台次都栽在那里。改成和台次比。
+            // 这正是本文件反复记的那条：**量纲不一致的比值不是测量。**
+            long decisions = bp + b + s > 0 ? bp : 0;
+
+            if (tot > 0 && b * 100 < tot * 80)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"巨型建筑·批量结算：**覆盖率只有 {100.0 * b / tot:0.#}%**，"
+                    + $"逐次真调了 {s} 个周期。看上面那行退回明细定位是哪一条："
+                    + "incServed / incUsed 占大头 → 工厂喷满了增产剂，批量按设计就不接，"
+                    + "**这才是「建筑一多就卡」的主因，不是 bug**；"
+                    + "extraTime 占大头 → 本 mod 自己的压制没清干净，是 bug；"
+                    + $"退回台次 {decisions} 却仍有大量周期逐次跑 → BatchSize 里复现的产出闸"
+                    + "和 MegaOutputGatePatches 真正抬到的值对不上了。");
         }
 
         /// <summary>

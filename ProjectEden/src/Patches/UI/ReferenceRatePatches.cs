@@ -359,7 +359,7 @@ namespace ProjectEden.Patches
                     if (divider < 1) divider = 1;
                 }
 
-                int gate = OutputGate(comp.recipeType, comp.recipeExecuteData);
+                int gate = OutputGate(ref comp);
 
                 cap = cycles < gate ? cycles : gate;
             }
@@ -390,16 +390,31 @@ namespace ProjectEden.Patches
         /// 认不出就返回 <see cref="int.MaxValue"/>，让 <c>cyclesPerTick</c> 单独说了算——
         /// **宁可少夹一点，也不报一个编出来的数**。
         /// </summary>
-        private static int OutputGate(ERecipeType type, RecipeExecuteData data)
+        /// <summary>
+        /// 这台机器每 tick 最多能结算几个周期——也就是原版那道产出闸。
+        ///
+        /// <b>两档乘法闸的系数必须问 <see cref="MegaOutputGatePatches.Scale"/>，不能写死。</b>
+        /// 那个转译器把巨型建筑的闸从 9 / 19 抬到了 <c>cyclesPerTick − 1</c>，
+        /// 而这里曾经把 10 / 20 写死——于是面板反过来<b>少报 3 到 6 倍</b>，
+        /// 症状和当初「报一个引擎不允许的数」正好相反，而且一样不报错。
+        ///
+        /// 这是同一次改动里漏掉的第二份拷贝：普查那行当时改成了读同一个函数，
+        /// 这里没有。**一个事实有两份手工维护的拷贝，分叉只是时间问题**——
+        /// 现在两处都走 <c>Scale</c>，转译器怎么抬，面板就怎么跟。
+        /// </summary>
+        private static int OutputGate(ref AssemblerComponent comp)
         {
-            int[] counts = data?.productCounts;
+            ERecipeType type = comp.recipeType;
+            int[] counts = comp.recipeExecuteData?.productCounts;
 
             if (counts == null || counts.Length == 0) return int.MaxValue;
 
-            // produced[j] > productCounts[j] × 9 → 拒绝，于是能结算 0..9 共 10 个，和件数无关
-            if (type == ERecipeType.Assemble) return 10;
+            // produced[j] > productCounts[j] × K → 拒绝，于是能结算 0..K 共 K+1 个，和件数无关。
+            // K 取抬过之后的值：普通装配机拿回原版的 9 / 19，巨型建筑拿 cyclesPerTick − 1。
+            if (type == ERecipeType.Assemble) return MegaOutputGatePatches.Scale(9, ref comp) + 1;
 
-            // 冶炼是唯一和件数有关的一档：produced[j] + productCounts[j] > 100 → 拒绝
+            // 冶炼是唯一和件数有关的一档：produced[j] + productCounts[j] > 100 → 拒绝。
+            // 这一档 MegaOutputGatePatches 故意没改（加法形状，本来就不受它限），所以照原样算。
             if (type == ERecipeType.Smelt)
             {
                 int cap = int.MaxValue;
@@ -418,8 +433,8 @@ namespace ProjectEden.Patches
                 return cap;
             }
 
-            // 其余全部（原版 2/3/5 加本 mod 的 9~17）：produced[j] > productCounts[j] × 19 → 拒绝
-            return 20;
+            // 其余全部（原版 2/3/5 加本 mod 的 9~17）：produced[j] > productCounts[j] × K → 拒绝
+            return MegaOutputGatePatches.Scale(19, ref comp) + 1;
         }
 
         /// <summary>
@@ -469,15 +484,29 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+            int baseCycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+
+            // **全局分频把周期数和分频数同时乘了 G**，所以：闸和周期都按 G 放大，
+            // 而每分钟的产量除以 G 又把它约掉。这一行以前写 Math.Max(20, cyclesPerTick)，
+            // 那就是这个数的又一份手抄件——自己的下一句还写着「不是另抄一份」。
+            int g = MegaThrottle.GlobalDivider;
+            int cycles = baseCycles * g;
+            int gate = Math.Max(20, cycles);
+
+            // 每分钟：min(周期, 闸) × 3600 ÷ 分频。G 在这里约掉，所以报的仍是每座的真实产量。
+            int smelt = Math.Min(cycles, 100) * 3600 / g;
+            int other = Math.Min(cycles, gate) * 3600 / g;
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"参考速率：已接上（{attached} 个方法、{sum} 处落点）。"
-                + $"巨型建筑按 min(cyclesPerTick={cycles}, 产出闸) × 3600 报，"
-                + "产出闸是原版自己的三档——冶炼 100/件数、组装 10、其余 20，"
-                + $"所以冶炼类到 {Math.Min(cycles, 100) * 3600:N0}/min、"
-                + $"组装类到 {Math.Min(cycles, 10) * 3600:N0}/min、"
-                + $"其余到 {Math.Min(cycles, 20) * 3600:N0}/min；研究站没有补跑周期，恒为 3,600/min。");
+                + $"巨型建筑按 min(周期数={cycles}, 产出闸) × 3600 ÷ 分频 报，"
+                + $"产出闸原版分三档（冶炼 100/件数、组装 10、其余 20），而 MegaOutputGatePatches "
+                + $"把后两档对巨型建筑抬到了 {gate}——**这一行的数跟着它走，不是另抄一份**，"
+                + $"所以冶炼类到 {smelt:N0}/min、组装类到 {other:N0}/min、其余到 {other:N0}/min；"
+                + $"研究站没有补跑周期，恒为 3,600/min。"
+                + (g > 1
+                    ? $"（全局分频 G = {g}：周期和分频同乘 G，产量里约掉，所以这几个数和 G = 1 时一样。）"
+                    : ""));
         }
     }
 }

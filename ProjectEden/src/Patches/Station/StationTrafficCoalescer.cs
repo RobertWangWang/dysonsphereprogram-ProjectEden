@@ -99,7 +99,10 @@ namespace ProjectEden.Patches
             // **拆站那一次绝不能延迟**，理由见 _removing 的注释：延迟它会留下悬空引用，
             // 而不是「晚两秒」。这里立刻冲刷，正好是原版的时机（原版就在
             // RemoveStationComponent @02F5 同步调这一次）。
-            if (_removing) FlushNow(__instance, GameMain.gameTick);
+            // 前置里已经把这个站点的配对增量摘干净了，就不必再全量冲刷一次——
+            // 那次同步冲刷存在的理由正是「别留下悬空引用」，而它已经被消掉了。
+            // 摘不成（_detached 为 false）时照旧同步全量，行为和以前完全一样。
+            if (_removing && !_detached) FlushNow(__instance, GameMain.gameTick);
 
             return false;
         }
@@ -152,9 +155,33 @@ namespace ProjectEden.Patches
         /// </summary>
         [System.ThreadStatic] private static bool _removing;
 
+        /// <summary>这一次拆站的配对已经在前置里增量摘干净了，<see cref="Defer"/> 不必再全量冲刷。</summary>
+        [System.ThreadStatic] private static bool _detached;
+
+        /// <summary>
+        /// <b>拆站的摘除必须在这里做，不能等到 <c>RefreshStationTraffic</c> 那一刻。</b>
+        ///
+        /// <para>实测链路：<c>RemoveStationComponent</c> @02D1 调 <c>Reset()</c>，
+        /// @02F5 才调 <c>RefreshStationTraffic</c>。而 <c>Reset()</c> 把 <c>id</c> 归零、
+        /// <c>storage</c> 置空——<b>但它不动 <c>localPairs</c></b>（枚举过 <c>Reset</c> 的全部指令，
+        /// 一条都没有）。所以到了 @02F5，配对数组还在、站号已经没了，
+        /// 增量摘除认不出这个站点是谁。前置里它还是完整的。</para>
+        ///
+        /// <para>摘干净之后就不需要那次同步全量冲刷了——那次冲刷存在的理由正是
+        /// 「别留下悬空引用」，而这里已经把悬空引用消掉了。做不了增量时
+        /// <c>_detached</c> 保持 false，<see cref="Defer"/> 照旧同步全量，行为不变。</para>
+        /// </summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.RemoveStationComponent))]
-        private static void RemoveStation_Prefix() => _removing = true;
+        private static void RemoveStation_Prefix(PlanetTransport __instance, int id)
+        {
+            _removing = true;
+            _detached = false;
+
+            if (!LocalPairIndex.Enabled || !LocalPairIndex.IncrementalEnabled) return;
+
+            _detached = LocalPairIndex.DetachOne(__instance, id);
+        }
 
         /// <summary>
         /// 后置里清标志。<b>用后置而不是 try/finally</b>：Harmony 的后置在原方法抛异常时
@@ -166,7 +193,11 @@ namespace ProjectEden.Patches
         /// </summary>
         [HarmonyPostfix]
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.RemoveStationComponent))]
-        private static void RemoveStation_Postfix() => _removing = false;
+        private static void RemoveStation_Postfix()
+        {
+            _removing = false;
+            _detached = false;
+        }
 
         /// <summary>
         /// 每颗星球欠着哪几个 <c>keyStationId</c>。
@@ -184,10 +215,38 @@ namespace ProjectEden.Patches
         private static readonly ConcurrentDictionary<int, ConcurrentDictionary<int, byte>> PendingKeys =
             new ConcurrentDictionary<int, ConcurrentDictionary<int, byte>>();
 
-        /// <summary>一次冲刷最多补跑多少个 key。超了就只保留先到的那些，并报一次。</summary>
-        private const int MaxKeysPerFlush = 32;
+        /// <summary>
+        /// 一次冲刷最多记多少个变更站点。
+        ///
+        /// <para><b>这个数原来是 32，而那是给全量路径定的——增量上线之后它同时太小、也太危险。</b></para>
+        ///
+        /// <para><b>太小</b>：实测一个 2 秒窗口里放建筑能攒下 10~20 个，连续建造轻松破 32，
+        /// 于是每次都退回全量（实测 32.5 ms），而增量只要 1.14 ms。而增量的单价是
+        /// 「一次索引重建 ≈ 2 ms + 每键约 360 条发射」，和全量的盈亏平衡点在
+        /// <c>304 万 ÷ 360 ≈ 8,400</c> 个键——32 离它差了两个半数量级。</para>
+        ///
+        /// <para><b>更危险</b>：以前丢一个键只意味着「那台站点的无人机订单没补跑」，
+        /// 配对表反正是全量重建的、不受影响。<b>增量上线之后，丢键意味着那台站点的配对
+        /// 永远不会更新</b>——表会对那一台静默地陈旧下去。所以光放大不够，见
+        /// <see cref="DeltaIncomplete"/>：真丢了键就强制这一次走全量。</para>
+        ///
+        /// <para>512 是按「远低于盈亏平衡点、又足够大到实际碰不到」取的；碰到了也安全，
+        /// 只是退化成全量。</para>
+        /// </summary>
+        private const int MaxKeysPerFlush = 512;
 
         private static int _keyOverflowWarned;
+
+        /// <summary>
+        /// 这颗星球的这一批 delta <b>不完整</b>（有键被丢掉了），冲刷时必须走全量。
+        ///
+        /// <b>「不知道 delta 是什么的时候，唯一安全的 delta 是全部」</b>——
+        /// 这条规则在 <c>keys</c> 为空时已经用过一次，丢键是同一种情况的另一种形态，
+        /// 而且更隐蔽：<c>keys</c> 非空，看着像个正常的增量批次。
+        /// </summary>
+        private static readonly ConcurrentDictionary<int, byte> Incomplete = new ConcurrentDictionary<int, byte>();
+
+        internal static bool DeltaIncomplete(int planetId) => Incomplete.ContainsKey(planetId);
 
         private static void RememberKey(int planetId, int keyStationId)
         {
@@ -198,11 +257,15 @@ namespace ProjectEden.Patches
 
             if (set.Count >= MaxKeysPerFlush)
             {
+                // **标记这一批 delta 不完整，本次冲刷退回全量。** 只警告不标记的话，
+                // 增量会拿着一份缺项的 delta 往下算，而那台站点的配对从此静默陈旧。
+                Incomplete[planetId] = 0;
+
                 if (System.Threading.Interlocked.Exchange(ref _keyOverflowWarned, 1) == 0)
                     ProjectEdenPlugin.Log.LogWarning(
-                        $"物流配对刷新：一次合并窗口里攒了超过 {MaxKeysPerFlush} 个变更站点，" +
-                        "多出来的不再单独补跑无人机订单修复。配对表本身仍然是全量重建的、不受影响；" +
-                        "受影响的只是那几台站点上**正在飞**的运输机订单，它们会在下一次派机时自行归位。");
+                        $"物流配对刷新：一次合并窗口里攒了超过 {MaxKeysPerFlush} 个变更站点。" +
+                        "**本次冲刷已退回全量重建**（缺项的 delta 会让那几台站点的配对静默陈旧），" +
+                        "所以配对表仍然是对的，只是这一次不省时间。整局只报这一行。");
 
                 return;
             }
@@ -260,6 +323,13 @@ namespace ProjectEden.Patches
             // 就等于把去抖整个关掉，而且不会有任何迹象
             PendingKeys.TryRemove(planetId, out ConcurrentDictionary<int, byte> keys);
 
+            // **取走即清**，否则这颗星球会永远走全量。
+            //
+            // 注意这里**不能**顺手把 keys 丢掉来逼出全量——keys 还要用来补跑无人机
+            // 订单修复，丢了它就换来另一个静默 bug（本仓库为这个可选参数栽过一次）。
+            // 所以「配对表走全量」和「keys 用于订单修复」是两个独立的信号。
+            bool deltaComplete = !Incomplete.TryRemove(planetId, out _);
+
             long began = System.Diagnostics.Stopwatch.GetTimestamp();
 
             _flushing = true;
@@ -268,7 +338,7 @@ namespace ProjectEden.Patches
             {
                 if (LocalPairIndex.Enabled)
                 {
-                    LocalPairIndex.Rebuild(__instance, keys);
+                    LocalPairIndex.Rebuild(__instance, keys, deltaComplete);
                 }
                 else
                 {
@@ -400,6 +470,7 @@ namespace ProjectEden.Patches
             long active = 0;
             long slots = 0;
             long stations = 0;
+            long mega = 0;
 
             // 每站的激活格数和总格数先收下来，**扫描次数要按真实的后缀格数算**，
             // 不能拿「每站 30 格」去估——这个比值是用来做决定的，估出来的数不配当依据
@@ -416,6 +487,14 @@ namespace ProjectEden.Patches
                 pairSlots += s.localPairCount;
                 slots += s.storage.Length;
                 cap[i] = s.storage.Length;
+
+                // 这一站是不是巨型建筑。**配对数按「同物品的供给站 × 需求站」平方增长，
+                // 而巨型建筑的配对可证明用不上**——虚拟物流是直接在储物格之间搬货、
+                // 不读 localPairs，所以它们的配对生成出来、被扫过、永远找不到活干
+                // （skipIdleMegaStationTick 这个开关存在的理由就是这个）。
+                // 要判断「把它们排除出配对表」值不值，就得先知道它们占多少——
+                // **这个比例是用来做决定的，估出来的数不配当依据。**
+                if (IsMegaStation(transport, i)) mega++;
 
                 for (var k = 0; k < s.storage.Length; k++)
                     if (s.storage[k].itemId > 0 && s.storage[k].localLogic != ELogisticStorage.None)
@@ -441,7 +520,38 @@ namespace ProjectEden.Patches
                 $"原版全刷的内层迭代约 {scan} 次。" +
                 "**换成按 itemId 的索引之后，代价降到「建索引 ≈ 储物格数」加「配对数」**——" +
                 $"也就是约 {slots + pairSlots} 次，对比 {scan} 次。" +
-                "这两个数的比值就是这条改动的收益上限。");
+                "这两个数的比值就是这条改动的收益上限。" +
+                $"｜**其中巨型建筑 {mega} 个（{(stations > 0 ? 100.0 * mega / stations : 0):0.#}%），"
+                + $"真站点 {stations - mega} 个**——索引版之后剩下的代价就是「发 {pairSlots} 条配对」，"
+                + "而配对数按「同物品的供给站 × 需求站」平方增长。巨型建筑的配对可证明用不上"
+                + "（虚拟物流直接在储物格之间搬货，不读 localPairs），所以把它们排除出配对表"
+                + $"大致能把配对数降到 {(stations > 0 ? (double)(stations - mega) / stations : 1):0.###}² ≈ "
+                + $"{(stations > 0 ? 100.0 * (stations - mega) * (stations - mega) / (stations * stations) : 100):0.#}%。"
+                + "**这一行是用来决定那条改动值不值的，别拿它当结论。**");
+        }
+
+        /// <summary>
+        /// 这一站是不是巨型建筑。判据用本仓库一贯的那个——
+        /// <c>AssemblerComponent.speed &gt;= megaSpeedThreshold</c>，而不是 proto id：
+        /// 「哪些机器算巨型」这件事全仓库只有一个答案。
+        /// </summary>
+        private static bool IsMegaStation(PlanetTransport transport, int stationIndex)
+        {
+            PlanetFactory factory = transport?.factory;
+            StationComponent station = transport?.stationPool?[stationIndex];
+
+            if (factory?.entityPool == null || station == null) return false;
+
+            int entityId = station.entityId;
+
+            if (entityId <= 0 || entityId >= factory.entityPool.Length) return false;
+
+            int asmId = factory.entityPool[entityId].assemblerId;
+            AssemblerComponent[] asm = factory.factorySystem?.assemblerPool;
+
+            if (asmId <= 0 || asm == null || asmId >= asm.Length) return false;
+
+            return asm[asmId].id == asmId && asm[asmId].speed >= MegaBuildingRegistry.MegaSpeedThreshold;
         }
 
         /// <summary>换存档时清空：星球号会重复使用。</summary>

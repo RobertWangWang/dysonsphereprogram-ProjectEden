@@ -103,6 +103,11 @@ namespace ProjectEden.Patches
             if (SyncStorageLayout(factory, station, requires, products))
                 StationTrafficCoalescer.MarkDirty(factory);
 
+            // **循环外算一次。** 它读三个配置字段，而这个循环是每台巨型建筑每 tick
+            // 每种原料跑一遍——上一版把它写在循环里，等于把三次配置查表乘上了
+            // 「台数 × 原料数 × 60」。值在一个 tick 内不会变。
+            int stockCycles = StockCycles();
+
             lock (station.storage)
             {
                 // 原料：储物格 → served
@@ -112,7 +117,7 @@ namespace ProjectEden.Patches
 
                     if (slot < 0) continue;
 
-                    int want = requireCounts[i] * Config.requireStockMultiplier - component.served[i];
+                    int want = requireCounts[i] * stockCycles - component.served[i];
 
                     if (want <= 0) continue;
 
@@ -293,6 +298,37 @@ namespace ProjectEden.Patches
         ///
         /// 方向对不上就退回只按 ID 找，所以配方两边没有重复物品时行为和以前完全一样。
         /// </summary>
+        /// <summary>
+        /// 进料缓冲该备多少个周期的量。
+        ///
+        /// <para><b>它必须盖住「一次结算最多跑几个周期」，否则批量结算会被原料卡住，
+        /// 而那既不报错也说不出理由。</b> 一次结算是 <c>cyclesPerTick × 全局分频</c>
+        /// 个周期（分频把两者同乘 G，见 <see cref="MegaThrottle.GlobalDivider"/>）；
+        /// 备货少于它时 <c>MegaBatchSettle.BatchSize</c> 的原料上界就会先咬住，
+        /// 剩下的周期退回逐次真调 <c>InternalUpdate</c>——覆盖率掉、耗时涨，
+        /// 而日志里看到的只是「没落在稳态」变多。</para>
+        ///
+        /// <para><b>所以这里不能再写死一个数。</b> <c>requireStockMultiplier</c> 当成
+        /// <b>下界</b>，真正的取值是它和「一次结算的周期数」里的大者。同一个数被手抄
+        /// 到第二处、然后两处走散，这一轮已经付过三次账
+        /// （<c>PlanetCensus</c>、<c>ReferenceRatePatches</c>、<c>MegaBatchSettle.BatchSize</c>），
+        /// 这是第四处，改成派生而不是再抄一遍。</para>
+        ///
+        /// <para>代价说清楚：备货变多意味着每台机器里停着更多原料。G = 4 时是 240 份，
+        /// 相对物流站那 1000 万的槽位可以忽略。</para>
+        /// </summary>
+        private static int StockCycles()
+        {
+            int stock = Config?.requireStockMultiplier ?? 0;
+            int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+
+            if (cycles < 1) cycles = 1;
+
+            int need = cycles * MegaThrottle.GlobalDivider;
+
+            return stock > need ? stock : need;
+        }
+
         private static int FindSlot(StationComponent station, int itemId, ELogisticStorage logic)
         {
             if (itemId <= 0) return -1;

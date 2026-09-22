@@ -82,6 +82,35 @@ namespace ProjectEden.Utils
         public int cyclesPerTick;
 
         /// <summary>
+        /// <b>全局分频：每 G 个 tick 才摸一次这座建筑，轮到时跑 G 倍周期。</b>
+        /// 1 = 关（默认）。<b>吞吐不变</b>，变的只是每帧要碰多少台。
+        ///
+        /// <para><b>为什么吞吐不变（推导，不是估计）。</b> 分频器变成 <c>每座 × G</c>
+        /// （<see cref="Patches.MegaThrottle.Decide"/>），周期数变成 <c>基准 × G</c>
+        /// （<see cref="Patches.MegaThrottle.CyclesFor"/>），于是</para>
+        /// <code>吞吐 = 周期 / 分频 = (基准 × G) / (每座 × G) = 基准 / 每座</code>
+        /// <para>和 G 无关。这对反物质那四座（<c>cyclesPerTick 1 / tickDivider 70</c>）
+        /// 一样成立，所以不需要为它们开特例。相位靠 <c>entityId % divider</c> 错开，
+        /// 和原版错开物流站派机是同一个手法。</para>
+        ///
+        /// <para><b>它想治的是什么：单次 InternalUpdate 的成本随「这颗星球有多少台」超线性增长。</b>
+        /// 同一份代码，实测（一局，逐星球）：</para>
+        /// <code>
+        ///    70 台/tick -&gt;     95 ns/次
+        /// 1,354 台/tick -&gt;    544 ns/次
+        /// 4,948 台/tick -&gt; 15,543 ns/次
+        /// </code>
+        /// <para>164 倍的落差，指令数完全相同——所以瓶颈是访存/缓存，不是算术。
+        /// 分频把「每帧摸到的台数」按 G 缩小，工作集也跟着缩小。</para>
+        ///
+        /// <para><b>代价要说在前面：延迟。</b> G = 2 时一台建筑最长 2 tick（33 ms）才轮到一次，
+        /// 单次产出翻倍。对生产线没影响（下游是缓冲区），对「盯着面板看数字跳」有影响。
+        /// 另外 <see cref="Patches.MegaOutputGatePatches"/> 的产出闸要跟着放大 G 倍，
+        /// 否则闸会把那 G 倍周期卡回 1 倍，表现成「开了分频产能掉成 1/G」。</para>
+        /// </summary>
+        public int globalTickDivider;
+
+        /// <summary>
         /// 电力不足时按供电率线性降速。<b>默认开。</b>
         ///
         /// <b>不开的话巨型建筑对缺电几乎免疫，然后一头撞死</b>——这不是设计，是

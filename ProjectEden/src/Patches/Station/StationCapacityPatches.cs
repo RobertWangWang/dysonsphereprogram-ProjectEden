@@ -461,8 +461,8 @@ namespace ProjectEden.Patches
         public int shipCarries;
 
         /// <summary>
-        /// 配送运输机（送到机甲手上那种）的单次运载量。原版基础值 <b>5</b>
-        /// （<c>ModeConfig..ctor</c> @01A7），由科技累加。0 = 保持原版。
+        /// 配送运输机（送到机甲手上那种）的单次运载量。<c>ModeConfig</c> 的默认值是 5，
+        /// 由科技累加；实测存档里是 <b>20</b>——那正是「运力只有 20」的来源。0 = 保持原版。
         /// </summary>
         public int courierCarries;
 
@@ -477,7 +477,8 @@ namespace ProjectEden.Patches
         public float droneSpeedMultiplier;
 
         /// <summary>
-        /// 配送运输机的<b>基础</b>速度倍率，乘在原版基础值上（原版 10，
+        /// 配送运输机的<b>基础</b>速度倍率，乘在原版基础值上（原版 <b>6</b>，实测；
+        /// <c>ModeConfig..ctor</c> 里的字面量是 10，但那是默认值，<c>freeMode</c> 会覆盖——
         /// 活取自 <c>Configs.freeMode.logisticCourierSpeed</c>）。0 或负数 = 保持原版。
         /// 和 <see cref="droneSpeedMultiplier"/> 结构完全一样：科技只写
         /// <c>logisticCourierSpeedScale</c>（<c>UnlockTechFunction</c> @0512），从不碰基础值。

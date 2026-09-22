@@ -50,6 +50,11 @@ namespace ProjectEden.Patches
     ///   recipeType 4  组装   produced[j] > count[j] × 9        → 拒绝
     ///   其余（2/3/5/默认）   produced[j] > count[j] × 19       → 拒绝
     /// </code>
+    ///    <b>但后两档的系数现在不是 9 / 19 了</b>——<see cref="MegaOutputGatePatches"/>
+    ///    把它们对巨型建筑抬到了 <c>cyclesPerTick × 全局分频 − 1</c>。所以这里
+    ///    <b>必须问它要，不能照抄常量</b>：抄死了只会让批量止步于 20，剩下的周期
+    ///    退回逐次真调，**一个字都不报，只是慢几十倍**（实测 14 ms → 190 ms）。
+    ///    这是同一个数的第四份手抄件（前三份：PlanetCensus、ReferenceRatePatches、这里）。
     ///    <b>复现一道闸正是本仓库记过账的那类错</b>（钻头消耗：在原版决定要不要动手之前
     ///    跑的钩子，必须复现那个决定，而不是名义速率）。所以它<b>必须</b>配自检——
     ///    见 <see cref="MegaBatchAudit"/>，那不是装饰，是这条路能走的唯一理由。
@@ -115,19 +120,73 @@ namespace ProjectEden.Patches
         internal static bool CanBatch(ref AssemblerComponent c)
         {
             if (!Enabled) return false;
-            if (c.incUsed || c.extraSpeed != 0 || c.extraTime != 0) return false;
+
+            // **四个条件各记各的。** 它们原来合成一个「带增产剂」计数，于是日志只能说
+            // 「全都退回了」而说不出为什么——而这四条的含义完全不同：incServed 有余量是
+            // 玩家真的喷了（结构性，只能这样），而 extraTime 非零更可能是**本 mod 自己**
+            // 留下的（MegaLightPatches.Suppress 写 −speedOverride−1、MegaThrottle.Hold 写
+            // −extraSpeed−1），那就是个 bug 而不是设计。**一个分不出分支的计数器量不出东西。**
+            if (c.incUsed) { Interlocked.Increment(ref _bailIncUsed); return false; }
+            if (c.extraSpeed != 0) { Interlocked.Increment(ref _bailExtraSpeed); return false; }
+
+            // **这里曾经还有一条 `extraTime != 0`，它是这个功能整个失效的原因。**
+            //
+            // 走到这里 extraSpeed 已经是 0，而原版推进额外计时器的**唯一**一条指令是
+            // IL 0586 的 `extraTime += (int)(power * extraSpeed)` —— 乘数是 0，所以
+            // extraTime 被**冻住**了：它不可能在批量中途跨过 extraTimeSpend，也就不可能
+            // 冒出一份没被复制的额外产出。所以它的值是多少都与批量无关。
+            //
+            // 而它偏偏很容易非零，且**存档里会一直留着**：原版没有任何一处把它清零，
+            // 本 mod 的两处压制（MegaLightPatches.Suppress、MegaThrottle.RewindExtra）
+            // 又会在 extraSpeed == 0 时写进一个 −1 / −speedOverride−1。于是「某一局开过
+            // 一次分频」就足以让这个存档里每一台巨型建筑**永久**退出批量结算——实测
+            // 363,714 台次全中，每台每 tick 真调 47 次 InternalUpdate，生产设施 14 ms → 210 ms。
+            //
+            // 去掉这一条顺带把已经中招的存档修好了，不需要迁移：判据本来就该问
+            // 「计时器会不会动」，而不是「它现在是几」。
+            // **一个过强的守卫不会报错，它只是让功能悄悄不生效。**
 
             int[] inc = c.incServed;
 
             if (inc != null)
                 for (var i = 0; i < inc.Length; i++)
                     if (inc[i] != 0)
+                    {
+                        Interlocked.Increment(ref _bailIncServed);
+
                         return false;
+                    }
 
             return true;
         }
 
         internal static void CountBailProliferator() => Interlocked.Increment(ref _bailProliferator);
+
+        /// <summary>被 <see cref="CanBatch"/> 拒掉的四条理由，分开记。</summary>
+        internal static long BailIncUsed => Interlocked.Read(ref _bailIncUsed);
+
+        internal static long BailExtraSpeed => Interlocked.Read(ref _bailExtraSpeed);
+
+        internal static long BailExtraTime => Interlocked.Read(ref _bailExtraTime);
+
+        internal static long BailIncServed => Interlocked.Read(ref _bailIncServed);
+
+        private static long _bailIncUsed, _bailExtraSpeed, _bailExtraTime, _bailIncServed;
+
+        /// <summary><see cref="IsSteadyUnit"/> 的六个出口，分开记。</summary>
+        internal static long ShapeCycle => Interlocked.Read(ref _shapeCycle);
+
+        internal static long ShapeExtra => Interlocked.Read(ref _shapeExtra);
+
+        internal static long ShapeNoRecipe => Interlocked.Read(ref _shapeNoRecipe);
+
+        internal static long ShapeLength => Interlocked.Read(ref _shapeLength);
+
+        internal static long ShapeServed => Interlocked.Read(ref _shapeServed);
+
+        internal static long ShapeProduced => Interlocked.Read(ref _shapeProduced);
+
+        private static long _shapeCycle, _shapeExtra, _shapeNoRecipe, _shapeLength, _shapeServed, _shapeProduced;
 
         /// <summary>
         /// 量一遍原版的净变化，判断它是不是稳态的那一个单位。
@@ -137,27 +196,61 @@ namespace ProjectEden.Patches
         internal static bool IsSteadyUnit(ref AssemblerComponent c, int[] servedBefore, int[] producedBefore,
             int cycleBefore, int extraCycleBefore)
         {
-            if (c.cycleCount != cycleBefore + 1) return false;
-            if (c.extraCycleCount != extraCycleBefore) return false;
+            // **六个出口各记各的。** 它们原来合成一个「没落在稳态」计数，于是日志只能说
+            // 五分之一的台次退回了，说不出为什么——而这六条的含义差得很远：
+            // 「一个周期都没结算」是这一台缺料 / 产物满（正常），而「差值和配方表对不上」
+            // 是这一次调用里还发生了别的事（可能是别的机制在插手）。
+            // 这一招在 CanBatch 上连中两次，同一个理由。
+            if (c.cycleCount != cycleBefore + 1)
+            {
+                Interlocked.Increment(ref _shapeCycle);
+
+                return false;
+            }
+
+            if (c.extraCycleCount != extraCycleBefore)
+            {
+                Interlocked.Increment(ref _shapeExtra);
+
+                return false;
+            }
 
             RecipeExecuteData data = c.recipeExecuteData;
 
-            if (data?.requireCounts == null || data.productCounts == null) return false;
+            if (data?.requireCounts == null || data.productCounts == null)
+            {
+                Interlocked.Increment(ref _shapeNoRecipe);
+
+                return false;
+            }
 
             int[] served = c.served;
             int[] produced = c.produced;
 
-            if (served == null || produced == null) return false;
-            if (served.Length != data.requireCounts.Length) return false;
-            if (produced.Length != data.productCounts.Length) return false;
+            if (served == null || produced == null
+                               || served.Length != data.requireCounts.Length
+                               || produced.Length != data.productCounts.Length)
+            {
+                Interlocked.Increment(ref _shapeLength);
+
+                return false;
+            }
 
             for (var i = 0; i < served.Length; i++)
                 if (servedBefore[i] - served[i] != data.requireCounts[i])
+                {
+                    Interlocked.Increment(ref _shapeServed);
+
                     return false;
+                }
 
             for (var j = 0; j < produced.Length; j++)
                 if (produced[j] - producedBefore[j] != data.productCounts[j])
+                {
+                    Interlocked.Increment(ref _shapeProduced);
+
                     return false;
+                }
 
             return true;
         }
@@ -211,12 +304,21 @@ namespace ProjectEden.Patches
 
                 if (c.recipeType == ERecipeType.Smelt)
                     // 接受条件 p + k·cnt + cnt <= 100，最紧的一次是 k = n−1 → p + n·cnt <= 100
+                    // 加法闸，MegaOutputGatePatches 刻意没动它（它本来就不卡巨型建筑）
                     can = (100 - p) / cnt;
-                else if (c.recipeType == ERecipeType.Assemble)
-                    // 接受条件 p + k·cnt <= 9·cnt，最紧 k = n−1 → n <= (10·cnt − p)/cnt
-                    can = (10 * cnt - p) / cnt;
                 else
-                    can = (20 * cnt - p) / cnt;
+                    // **系数必须问 MegaOutputGatePatches 要，不能写死 9 / 19。**
+                    // 那两个数是原版的，而转译器已经把巨型建筑那两档抬到了
+                    // cyclesPerTick × 全局分频 − 1；这里写死就等于「批量只敢批到 20，
+                    // 剩下的每一个周期都真调一次 InternalUpdate」——**不报错，只是慢几十倍**。
+                    // 实测代价：生产设施 14 ms → 190 ms。
+                    //
+                    // 接受条件 p + k·cnt <= 系数·cnt，最紧的一次是 k = n−1
+                    //   → n <= ((系数 + 1)·cnt − p) / cnt
+                    // 代入原版系数 9 / 19 得回 (10·cnt − p)/cnt 和 (20·cnt − p)/cnt，
+                    // 所以这是把原来那两行参数化，不是换了一套算法。
+                    can = ((MegaOutputGatePatches.Scale(
+                                c.recipeType == ERecipeType.Assemble ? 9 : 19, ref c) + 1) * cnt - p) / cnt;
 
                 if (can < n) n = can;
             }
@@ -248,39 +350,43 @@ namespace ProjectEden.Patches
             int[] products = data.products;
             int[] productCounts = data.productCounts;
 
-            for (var i = 0; i < requireCounts.Length; i++)
-            {
-                int take = requireCounts[i] * n;
+            // ── 先改本组件自己的字段：无竞争，不该待在临界区里 ──────────────
+            for (var i = 0; i < requireCounts.Length; i++) served[i] -= requireCounts[i] * n;
 
-                if (take == 0) continue;
+            for (var j = 0; j < productCounts.Length; j++) produced[j] += productCounts[j] * n;
 
-                served[i] -= take;
+            // ── 再一次性进临界区累加统计寄存器 ────────────────────────────
+            //
+            // **锁原本在循环里，每个原料、每个产物各抢一次。** 那两个寄存器是
+            // **全局共享**的 int[12000]，而装配 tick 是按星球分线程的并行路径——
+            // 9326 台 × 60 tick × 约 4 把 ≈ 每秒 220 万次 Monitor 全压在两个对象上，
+            // 11 条线程互相抢。提到循环外之后每台每 tick 最多 2 次，而且临界区里
+            // 只剩几条加法。
+            //
+            // **不能换成 Interlocked.Add**：原版自己是 `lock (productRegister)` 里做
+            // 非原子的读-改-写，两种机制混用会丢更新（原版读完、我们 Interlocked 加、
+            // 原版再写回，我们那一笔就没了）。锁对象必须和原版是同一个。
+            if (consumeRegister != null && requires != null)
+                lock (consumeRegister)
+                    for (var i = 0; i < requireCounts.Length; i++)
+                    {
+                        int take = requireCounts[i] * n;
+                        int id = requires[i];
 
-                if (consumeRegister == null || requires == null) continue;
+                        if (take != 0 && id > 0 && id < consumeRegister.Length)
+                            consumeRegister[id] += take;
+                    }
 
-                int id = requires[i];
+            if (productRegister != null && products != null)
+                lock (productRegister)
+                    for (var j = 0; j < productCounts.Length; j++)
+                    {
+                        int make = productCounts[j] * n;
+                        int id = products[j];
 
-                if (id <= 0 || id >= consumeRegister.Length) continue;
-
-                lock (consumeRegister) consumeRegister[id] += take;
-            }
-
-            for (var j = 0; j < productCounts.Length; j++)
-            {
-                int make = productCounts[j] * n;
-
-                if (make == 0) continue;
-
-                produced[j] += make;
-
-                if (productRegister == null || products == null) continue;
-
-                int id = products[j];
-
-                if (id <= 0 || id >= productRegister.Length) continue;
-
-                lock (productRegister) productRegister[id] += make;
-            }
+                        if (make != 0 && id > 0 && id < productRegister.Length)
+                            productRegister[id] += make;
+                    }
 
             c.cycleCount += n;
 

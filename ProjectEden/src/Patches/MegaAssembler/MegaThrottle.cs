@@ -118,6 +118,27 @@ namespace ProjectEden.Patches
             _protoIds = ids.ToArray();
             _entries = entries.ToArray();
 
+            // **全局分频单独报一行，开和关都报。** 它是个纯性能旋钮，产能不变，
+            // 所以玩家看不出它开没开；而「开了但没生效」和「本来就没开」要是长得一样，
+            // 下一次量 ns/次 就没法判断量的是哪一种状态。
+            int g = GlobalDivider;
+
+            if (g > 1)
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"巨型建筑全局分频：G = {g}，每座建筑每 {g} 个 tick 才摸一次、轮到时跑 {g} 倍周期。"
+                    + "**吞吐不变**（周期 ÷ 分频 = 基准 ÷ 每座，与 G 无关），单次产出变成 "
+                    + $"{g} 倍、最长等 {g * 1000 / 60} ms。产出闸已同步放大 {g} 倍。"
+                    + "它治的是单次 InternalUpdate 随「本星球台数」超线性涨的那个成本——"
+                    + "实测 103 台 143 ns、1982 台 841 ns、7240 台 10959 ns（指令数完全相同，"
+                    + "所以是访存/工作集，不是常数开销）。"
+                    + $"进料缓冲已同步备到 {(MegaBuildingRegistry.Config?.cyclesPerTick ?? 1) * g} 个周期的量"
+                    + "——**备货少于一次结算的周期数时，批量会被原料卡住而且不报错**，"
+                    + "只表现为覆盖率掉、「没落在稳态」变多。");
+            else
+                ProjectEdenPlugin.Log.LogInfo(
+                    "巨型建筑全局分频：未启用（globalTickDivider = 1）。"
+                    + "一颗星球上巨型建筑过多导致卡顿时，把它调到 2 或 4 可以按比例缩小每帧摸到的台数，产能不变。");
+
             // **没有活儿也要报一行。** 「一座都没配」和「这段代码压根没跑」在日志里
             // 长得一样，而这条规矩本仓库已经付过六次账。
             if (_protoIds.Length == 0)
@@ -186,11 +207,14 @@ namespace ProjectEden.Patches
         {
             int i = IndexOf(factory, entityId);
 
-            if (i < 0) return globalCycles;
+            int c = globalCycles;
 
-            int c = _entries[i].Cycles;
+            if (i >= 0 && _entries[i].Cycles > 0) c = _entries[i].Cycles;
 
-            return c > 0 ? c : globalCycles;
+            // **全局分频的补偿就在这一句。** 每 G 个 tick 才轮到一次，所以轮到时要跑 G 倍的周期，
+            // 吞吐才和 G 无关——推导见 GlobalDivider 的注释。少了这一句，开全局分频就是
+            // 直接按 G 砍产能，而那不是这条优化的目的。
+            return c * GlobalDivider;
         }
 
         /// <summary>这一 tick 这台建筑该怎么办。</summary>
@@ -212,13 +236,45 @@ namespace ProjectEden.Patches
         /// <paramref name="powerRatio"/> 用来拉长分频数——缺电时降的是频率不是周期数，
         /// 理由见类注释。<c>power</c> 在原版里是 0..1 的供电率。
         /// </summary>
+        /// <summary>
+        /// 全局分频：对**所有**巨型建筑生效，和每座自己那个相乘。<c>1</c> = 关。
+        ///
+        /// <para><b>它是为缓存加的，不是为减产能加的，而且产能按构造不变。</b>
+        /// 实测三颗星球（同一会话、同一份代码，只有每颗星球的巨型建筑数不同）：</para>
+        /// <code>
+        /// 70 台   →     95 ns/次   ← 693 条 IL 该有的量级
+        /// 1,354 台 →   544 ns/次
+        /// 4,948 台 → 15,543 ns/次  ← 台数只多 3.65 倍，单次耗时却是 28.6 倍
+        /// </code>
+        /// <para>单次耗时在星球之间差 <b>164 倍</b>，而代码一模一样——所以贵的不是指令，
+        /// 是等内存；按每座约 500 字节估，1,354 台约 680 KB（L2 装得下）、4,948 台约 2.5 MB
+        /// （掉出 L2），悬崖的位置对得上。结论：<b>该减的是「这一 tick 摸了多少台」，
+        /// 不是「每台跑几个周期」</b>——后者本仓库已经压到每台每 tick 约 2 次调用了。</para>
+        ///
+        /// <para><b>产能不变是算出来的，不是估的。</b> 合并分频 = 每座分频 × 全局分频，
+        /// 而周期数同时乘上全局分频（见 <see cref="CyclesFor"/>），于是对<b>每一座</b>都有
+        /// <c>吞吐 = 周期/分频 = (基准×G)/(每座×G) = 基准/每座</c>，和 G 无关。
+        /// 反物质那四座（<c>cyclesPerTick 1 / tickDivider 70</c>）也照此成立，
+        /// 不会因为开了全局分频就偷偷变快。</para>
+        /// </summary>
+        internal static int GlobalDivider
+        {
+            get
+            {
+                int g = MegaBuildingRegistry.Config?.globalTickDivider ?? 1;
+
+                return g < 1 ? 1 : g;
+            }
+        }
+
         internal static Verdict Decide(PlanetFactory factory, int entityId, long gameTick, float powerRatio)
         {
             int i = IndexOf(factory, entityId);
 
-            if (i < 0) return Verdict.Free;
-
-            int divider = EffectiveDivider(i, factory, powerRatio);
+            // **全局分频要排在 i < 0 之前。** 普通巨型建筑压根不在 _entries 里
+            // （那张表只收配了 cyclesPerTick 或 tickDivider 的），照老写法会在这里直接 Free，
+            // 于是全局分频对它们一个都不生效——而它们正是这条优化要治的那一群。
+            int divider = (i < 0 ? 1 : EffectiveDivider(i, factory, powerRatio)) * GlobalDivider;
 
             if (divider <= 1) return Verdict.Free;
 
@@ -280,7 +336,10 @@ namespace ProjectEden.Patches
         {
             int i = IndexOf(factory, entityId);
 
-            return i < 0 ? 1 : EffectiveDivider(i, factory, 1f);
+            // 面板那一侧也得乘上全局分频，否则参考速率会按「不分频」报，
+            // 而那正是本仓库记过的「面板报一个引擎不允许的数」。
+            // 注意它和 CyclesFor 的 ×G 是一对：面板算的是 周期/分频，两处都乘 G 才抵消掉。
+            return (i < 0 ? 1 : EffectiveDivider(i, factory, 1f)) * GlobalDivider;
         }
 
         /// <summary>
@@ -379,8 +438,17 @@ namespace ProjectEden.Patches
         {
             if (component.replicating && component.extraSpeed > 0)
                 component.extraTime -= component.extraSpeed;
-            else
+            else if (component.extraSpeed > 0)
                 component.extraTime = -component.extraSpeed - 1;
+            else
+                // **没喷增产剂时什么都不写，写 0 也不写 −1。**
+                // 那个 `-extraSpeed - 1` 的形状是为了「再加一次 extraSpeed 也够不着门槛」，
+                // 而 extraSpeed == 0 时加的是 0、0 本来就够不着，所以哨兵毫无作用——
+                // 它只是往一个**存档字段**里塞了个永远不会被清掉的 −1
+                // （原版推进它的唯一一处 IL 0586 乘的正是 extraSpeed）。
+                // 代价不在这里显形：MegaBatchSettle.CanBatch 会因此把这台建筑永久踢出
+                // 批量结算，一局开过分频就够让整个存档慢几十倍。
+                component.extraTime = 0;
         }
 
         /// <summary>

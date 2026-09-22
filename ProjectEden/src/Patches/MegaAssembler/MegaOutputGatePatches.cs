@@ -81,7 +81,11 @@ namespace ProjectEden.Patches
 
             if (cycles < 1) cycles = 1;
 
-            int wanted = cycles - 1;
+            // **全局分频开着时闸门要跟着放大。** 每 G 个 tick 才轮到一次，轮到时要跑 G 倍周期
+            // （MegaThrottle.CyclesFor 的补偿），闸门不放大就会把那 G 倍卡回 1 倍——
+            // 表现是「开了全局分频，产能掉成 1/G」，而配置上看不出任何理由。
+            // 闸门只是天花板，真正的循环上限在 RunExtraCycles，所以放大它不会让谁多跑。
+            int wanted = cycles * MegaThrottle.GlobalDivider - 1;
 
             // 只抬不降：闸是天花板，减产另有三个旋钮（cyclesPerTick / 日照 / 分频）
             return wanted > vanilla ? wanted : vanilla;
@@ -119,7 +123,9 @@ namespace ProjectEden.Patches
                 return;
             }
 
-            int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+            // **报的是闸实际抬到哪，不是 cyclesPerTick。** 全局分频开着时两者差 G 倍，
+            // 而这一行曾经直接印 cyclesPerTick——那就成了这个数的又一份手抄件。
+            int cycles = (MegaBuildingRegistry.Config?.cyclesPerTick ?? 1) * MegaThrottle.GlobalDivider;
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"巨型建筑产出闸：已改写 {_rewritten} 处（应当 {ExpectedSites} 处）。"
