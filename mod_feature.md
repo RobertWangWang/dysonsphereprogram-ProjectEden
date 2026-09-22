@@ -350,19 +350,55 @@ Both share the same speed-up logic as the advanced mining machine:
 
 - **30 storage slots** (vanilla 4 / 5), with paging and a scrollbar added to the panel
 - **10,000,000 per slot**
-- **All three stations unified: max charging power 5 GW** (vanilla 0.06 GW) **and max energy capacity 150 GJ**
+- **All three stations unified: max charging power 20 GW, draggable to 100 GW on the panel** (vanilla 0.06 GW)
+  **and max energy capacity 1000 GJ**
+- **1500 berths for planetary Logistics Drones** (vanilla: 50 on the planetary station, 100 on the interstellar one)
+
+> 1500 is derived from the dispatch burst: the budget is 50 drones per tick and vanilla's busy-sampling window
+> (`droneDispatchStatus`) is 30 ticks long, so 50 × 30 = 1500 is exactly what it takes to keep one full round of
+> flat-out dispatching supplied. **This is a berth limit, not free drones** — you still have to put them in, or turn
+> on auto-replenish.
+>
+> Existing stations need nothing: vanilla's `PlanetTransport.Import` calls `PatchDroneArray` with the current value
+> on every load, and that method aligns in both directions, so raising or lowering takes effect immediately.
+> **But do not lower it while a station still holds drones** — `PatchDroneArray` moves the arrays and leaves
+> `idleDroneCount` alone, so a count larger than the array runs off the end (vanilla has the same hole; vanilla
+> simply offers no way to change the value).
+>
+> The cost is memory: each berth pre-allocates 84 bytes (`DroneData` 60 + `LocalLogisticOrder` 24), **reserved at
+> build time regardless of how many drones are actually parked**, so 1500 berths is 123 KB per station. Mega buildings
+> are not covered here (their berth count is configured separately), so that multiplies by the count of real
+> logistics stations.
+>
+> One favourable side effect: vanilla's adaptive stagger caps its interval by **how many drones a station actually
+> holds** (`workDroneCount + idleDroneCount >= 75` caps it at 10, otherwise 20). This save measures an average
+> interval of 19.9, pinned at 20 — so once the berths are actually filled the cap halves and dispatch opportunities
+> double.
 
 > "All three" means the Planetary Logistics Station, the Interstellar Logistics Station and the Integrated Logistics
 > Hub. Before 1.12.4 only the interstellar one had been retuned (30 GW) while the other two kept vanilla's value, and
-> energy capacity had never been touched at all. 150 GJ against 5 GW is thirty seconds to fill the buffer, and one
-> warp jump costs a flat 100 MJ — so a full tank is 1500 jumps.
+> energy capacity had never been touched at all. One warp jump costs a flat 100 MJ, so 1000 GJ is 10,000 jumps; at
+> the default 20 GW the buffer fills in fifty seconds, and at 100 GW in ten.
 
-> The charging slider's range on the panel is derived from that value: minimum half of it, maximum five times it, so
-> it now drags between **2.5 and 25 GW** — and the setting sticks. The mod raises a station only once, on load, and
-> only if it is still sitting at vanilla's value; after that it never interferes. **The cost is that this cuts both
-> ways**: stations already raised to 30 GW under 1.12.3 are *not* brought back down to 5 GW — their current value is
-> above vanilla's, which is indistinguishable in the data from a value the player dragged there, so they are left
-> alone. Newly built stations are 5 GW outright, and an old one catches up the moment you touch its slider.
+> **Why this went up from 5 GW / 150 GJ.** Once the planetary dispatch burst was raised to 25 drones per tick, the
+> energy it spends scales with the number of drones while charging arrives one tick's worth at a time — so a single
+> tick of dispatching can outspend a single tick of charging, and the station drains itself into vanilla's own "not
+> enough energy" gate. That gate is copied verbatim from vanilla, so anything it refuses vanilla would have refused
+> too: **the fix does not belong on the dispatch side, it belongs in how much arrives per tick.**
+
+> **The 20 GW in the config is derived backwards from the slider's right-hand end, not picked.** The panel slider's
+> range comes from that value: minimum half of it, maximum **five times** it — and that ×5 is hardcoded in vanilla's
+> own IL (`UIStationWindow.OnStationIdChange` @029B, `ldc.i4.5`), with no separate field to configure. The owner
+> wanted the panel to top out at 100 GW, so the config holds 100 ÷ 5 = **20 GW** and the slider spans **10 to
+> 100 GW**. The cost: **a newly built station also defaults to 20 GW, and reaching 100 GW means dragging the
+> slider.**
+
+> The setting sticks once dragged — the mod raises a station only once, on load, and only if it is still sitting at
+> vanilla's value; after that it never interferes. **The cost is that this cuts both ways**: stations already raised
+> to 5 GW or 30 GW under an earlier version are *not* changed to 20 GW — their current value is above vanilla's,
+> which is indistinguishable in the data from a value the player dragged there, so they are left alone. Newly built
+> stations are 20 GW outright, and an old one catches up the moment you touch its slider (whose minimum, 10 GW, is
+> already double the old setting).
 >
 > Energy capacity is not covered by that rule: the field has exactly three writers in the whole game — init, reset
 > and load — and **no UI can change it**, so it is simply aligned, and raising or lowering the config takes effect
@@ -395,7 +431,7 @@ Both share the same speed-up logic as the advanced mining machine:
 > by entry; on any disagreement it falls back to vanilla for the rest of the session and logs an error. **The worst
 > case is "no faster", never "wrong pairs".**
 
-> **Multiple drones dispatched per tick (10 by default; vanilla sends 1).**
+> **Multiple drones dispatched per tick (50 by default; vanilla sends 1).**
 >
 > A vanilla logistics station launches **at most one planetary drone per tick**, and not because it only looks at one
 > supply/demand pair — its dispatch loop already walks the entire pairing ring, it just **breaks out the moment it
@@ -421,7 +457,7 @@ Both share the same speed-up logic as the advanced mining machine:
 > vanilla stopped at the first hit and this keeps going until the budget runs out. The log reports the actual
 > multiplier and the dispatch-interval distribution every 60 seconds; lower the number if the logic frame suffers.
 
-> **Several vessels per dispatch evaluation (10 by default; vanilla sends one).** Since 1.10.7.
+> **Several vessels per dispatch evaluation (30 by default; vanilla sends one).** Since 1.10.7.
 >
 > The interstellar side has **exactly the same shape**: `DetermineDispatch`'s pairing scan already walks the whole
 > segment ring, and merely **leaves the moment it settles on one pair**. So the fix is the same — those three
@@ -429,7 +465,8 @@ Both share the same speed-up logic as the advanced mining machine:
 > own continue path. **Not one of vanilla's dispatch decisions is reimplemented**, the loop-back test is untouched
 > (so one evaluation still walks at most one ring), and the "not enough power" exit is left exactly as it is.
 >
-> **The same route can also send several ships in a row (4 by default, `remoteSameRouteMax`).**
+> **The same route can also send several ships in a row (30 by default — equal to the total budget, i.e. no
+> per-route limit at all — `remoteSameRouteMax`).**
 > With only the above in place, the measured result in game was just **2.28×, and the budget of 10
 > was never once exhausted** — because advancing to the next pair after every ship makes one
 > evaluation's ceiling "how many pairs in this ring have work" (measured: 2.3 out of ~7). So after a
@@ -445,14 +482,25 @@ Both share the same speed-up logic as the advanced mining machine:
 >
 > **`remoteSameRouteMax` is a fairness knob, not a safety one.** Because this mod raises a logistics
 > slot to 10,000,000, "the demand is satisfied" essentially never happens on such a save, so one
-> route would swallow the whole evaluation and leave the rest of the ring unserved that round. The
-> default 4 against a budget of 10 guarantees at least **3 distinct routes per evaluation**;
-> rotation across evaluations is unaffected, because running out of budget leaves through the exit,
-> and the exit advances the cursor all the same.
+> route would swallow the whole evaluation and leave the rest of the ring unserved that round.
+> **1.12.10 raised it from 4 to 8, and that guarantee has to be read together with the total budget**: against a
+> budget of 10 it means at least **2** distinct routes per evaluation, but the same release raised the budget to 30,
+> which makes it **4** — changing the total budget changes the spread as a side effect, so read the two numbers
+> together. Rotation across evaluations is unaffected, because running out of budget leaves through the exit,
+> and the exit advances the cursor all the same — so a pair missed this round still comes up next round; what this
+> knob trades away is only the evenness **within** one round.
 >
 > The budget is `remoteShipsPerDispatch` in `stations.json`; **1 restores vanilla behaviour**, and the cap is **64**.
 > That 64 is not a pick: a station's idle vessels are recorded in a 64-bit bitmask, so there can never be more than
 > 64 of them and a larger budget would have no vessel to send.
+>
+> **1.12.10 raised it from 10 to 30, and that came from a measurement**: in that version's log, **55.3%** of
+> evaluations were cut short by the budget, so the budget really was capping throughput. **But 30 is unlikely to be
+> reached** — the same log reports 264 idle vessels across all 25 interstellar stations in the cluster (about 10.6
+> each), and the burst's first guard is exactly "is there an idle vessel left". The test is clean: **if the
+> "cut short by budget" share drops sharply after this, the bottleneck has moved from the budget to "the station has
+> no vessel to send"**, and raising this number further buys nothing — round-trip time and how many vessels a
+> station actually holds are what to look at then.
 >
 > **But "one ship a second" is two things multiplied together, and the above fixes only one of them.** The other is
 > the **evaluation rate**: vanilla splits the pairings into six rotating passes, and the default `routePriority`
@@ -1417,9 +1465,9 @@ Puts **all three kinds of logistics drone** into one building:
 | Appearance | The Interstellar Logistics Station's model and icon, **tinted amber** |
 | Build | Interstellar Logistics Station ×1 + Electromagnetic Turbine ×20 + Circuit Board ×20, 5 s |
 | Location | Right next to the two logistics stations in the build bar |
-| Berths | **200 Logistics Drones + 50 Logistics Vessels + 20 Logistics Bots** |
+| Berths | **1500 Logistics Drones + 64 Logistics Vessels + 20 Logistics Bots** |
 | Automation | The bots resupply and recover from the mecha based on what the hub holds — no manual request list needed |
-| Storage / slots / charging | Same as this mod's enlarged logistics stations (30 slots × 10,000,000, 5 GW charging / 150 GJ buffer) |
+| Storage / slots / charging | Same as this mod's enlarged logistics stations (30 slots × 10,000,000, 20 GW charging / 1000 GJ buffer) |
 
 Vanilla's planetary station has only drones; the interstellar station has both but a small hangar. This one enlarges
 the berths as well, so one hub does the work of several.
@@ -4833,7 +4881,7 @@ already decides each planet's radius, and two things writing the same number onl
 | `megabuildings.json` | The sixteen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, **the global tick divider `globalTickDivider`**, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
-| `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), carry capacity (drone / vessel / **courier** configured separately), **base-speed multipliers for both craft** (`droneSpeedMultiplier` / `courierSpeedMultiplier`, applied to the base value, leaving the tech multiplier alone), stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
+| `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), **per-station drone berths** (`stationDrones`, the single writer of that number in this repo), carry capacity (drone / vessel / **courier** configured separately), **base-speed multipliers for both craft** (`droneSpeedMultiplier` / `courierSpeedMultiplier`, applied to the base value, leaving the tech multiplier alone), stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
 | `perfprobe.json` | Developer switch: prints per-task CPU cost into the log, so nobody has to copy ten milliseconds figures out of Statistics → Performance by hand. **Off by default, and it costs real time when on** |
 | `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes, plus `vanillaEdits`: **edit a vanilla recipe's ingredient list in place** (currently one entry: the Hydrogen Fuel Rod's hydrogen ×10 → ×56) |

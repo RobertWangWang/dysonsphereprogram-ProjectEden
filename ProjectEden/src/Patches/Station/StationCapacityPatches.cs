@@ -118,6 +118,7 @@ namespace ProjectEden.Patches
             if (Config == null) return;
 
             ApplyChargePower();
+            ApplyDroneCount();
 
             if (Config.slotCapacity <= 0) return;
 
@@ -199,6 +200,68 @@ namespace ProjectEden.Patches
                     + $"{model.prefabDesc.workEnergyPerTick * 60 / 1e9:0.###} GW；"
                     + $"最大能量容积：{beforeAcc / 1e9:0.###} GJ → "
                     + $"{model.prefabDesc.stationMaxEnergyAcc / 1e9:0.###} GJ");
+            }
+        }
+
+        /// <summary>
+        /// 物流站能停几架行星内物流运输机（<c>PrefabDesc.stationMaxDroneCount</c>）。
+        ///
+        /// <para><b>这一项不需要运行时补丁，而这一点是查出来的、不是想当然的。</b>
+        /// 枚举过这个字段的全部读取点，一共六处：<c>StationComponent.Init</c> @012B/@013D
+        /// （建站时按它开 <c>workDroneDatas</c> 和 <c>workDroneOrders</c> 两个数组）、
+        /// <c>PrefabDesc.ReadPrefab</c>（写入方）、两个界面的「往里塞运输机」按钮
+        /// （<c>OnDroneIconClick</c>，算的是 <c>max −（idle + work）</c>还能塞几架），
+        /// 以及 <b><c>PlanetTransport.Import</c> @00C3</b>——它每次读档都按<b>当前</b>
+        /// prefab 的值调一次 <c>StationComponent.PatchDroneArray</c>。</para>
+        ///
+        /// <para>而 <c>PatchDroneArray</c> 是<b>双向对齐</b>的：长度不等就重开一个数组，
+        /// 拷贝 <c>min(旧长度, 新长度)</c> 个元素（@0009 的 <c>beq</c> 早退、
+        /// @0028 的 <c>blt</c> 选较小者）。所以老站点读一次档就跟上了，调大调小都生效——
+        /// 和 <c>StorageComponent.Import</c> 重新推导 <c>GRID.stackSize</c> 是同一族，
+        /// 是「陷阱一」的反例。</para>
+        ///
+        /// <para><b>调小有代价，而且是崩溃级的，所以只在站点空着的时候调小。</b>
+        /// <c>PatchDroneArray</c> 只搬数组，<b>不动 <c>idleDroneCount</c> / <c>workDroneCount</c></b>。
+        /// 一座停着 300 架的站点把上限改成 100，那两个计数还是 300，而派机写的是
+        /// <c>workDroneDatas[workDroneCount]</c>——直接越界。原版同样有这个洞，只是原版
+        /// 没有任何途径去改这个值。</para>
+        ///
+        /// <para>内存：一架的账是 <c>DroneData</c> 60 字节 + <c>LocalLogisticOrder</c> 24 字节
+        /// = <b>84 字节</b>，而且<b>不管有没有真的停着运输机，建站时就按上限全开</b>。
+        /// 750 架 = 每座站 63 KB。巨型建筑不走这里（它们的架数在 megabuildings.json），
+        /// 所以乘的是「真站点」的数量。</para>
+        /// </summary>
+        private static void ApplyDroneCount()
+        {
+            if (Config.stationDrones == null) return;
+
+            foreach (StationDroneEntry entry in Config.stationDrones)
+            {
+                if (entry == null || entry.maxDroneCount <= 0) continue;
+
+                ItemProto item = LDB.items.Select(entry.itemId);
+                ModelProto model = item != null ? LDB.models.Select(item.ModelIndex) : null;
+
+                if (model?.prefabDesc == null || !model.prefabDesc.isStation)
+                {
+                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是物流站或没有 prefabDesc，运输机停放数未改");
+                    continue;
+                }
+
+                int before = model.prefabDesc.stationMaxDroneCount;
+
+                if (before == entry.maxDroneCount) continue;
+
+                model.prefabDesc.stationMaxDroneCount = entry.maxDroneCount;
+
+                // 每架 84 字节（DroneData 60 + LocalLogisticOrder 24），建站时按上限全开，
+                // 所以这一行报的是「每座站点多吃多少内存」，不是「实际停了几架」。
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"{item.name} 行星内运输机停放数：{before} → {entry.maxDroneCount} 架"
+                    + $"（每座站点预分配 {entry.maxDroneCount * 84 / 1024.0:0.#} KB；"
+                    + "老站点读档时由原版 PlanetTransport.Import → PatchDroneArray 自动跟上，"
+                    + "双向对齐。注意 PatchDroneArray 不动 idleDroneCount，"
+                    + "所以停着运输机的时候**不要调小**，会越界）");
             }
         }
 
@@ -550,6 +613,36 @@ namespace ProjectEden.Patches
 
         /// <summary>探针的自检间隔（秒）。0 = 10 秒</summary>
         public int cargoLedgerLogSeconds;
+
+        /// <summary>
+        /// 逐座物流站能停几架行星内物流运输机。见
+        /// <see cref="StationCapacityPatches.ApplyDroneCount"/>——它<b>只改 prefabDesc</b>，
+        /// 老站点由原版 <c>PlanetTransport.Import</c> 自己补齐。
+        ///
+        /// <para><b>这是这个数在本仓库里唯一的写入口，是有意收拢的。</b>
+        /// 巨型建筑走 <c>megabuildings.json</c> 的 <c>stationMaxDroneCount</c>（那是另一族建筑），
+        /// 而 <c>machines.json</c> 里 6531 的 <c>maxDroneCount</c> 已经留成 0 让给这里——
+        /// 同一个事实由两个文件、两个键各写一份，谁赢只取决于注册顺序，本仓库为
+        /// 模型 ID / 建造栏槽位 / 合成面板格位栽过三次。</para>
+        /// </summary>
+        public StationDroneEntry[] stationDrones;
+    }
+
+    /// <summary>单座物流站能停几架行星内物流运输机。</summary>
+    [Serializable]
+    internal class StationDroneEntry
+    {
+        public int itemId;
+
+        /// <summary>
+        /// 停放上限（<c>PrefabDesc.stationMaxDroneCount</c>）。0 = 不动这一项。
+        ///
+        /// <para><b>没有类型级上限</b>——和运输船不一样。船有 <c>idleShipIndices</c>
+        /// 这个 UInt64 位图，所以 64 是硬顶；运输机这边只有
+        /// <c>idleDroneCount</c>（Int32）和两个按它开的数组，没有位图。
+        /// 真正的约束是内存：每架 84 字节 × 站点数。</para>
+        /// </summary>
+        public int maxDroneCount;
     }
 
     /// <summary>单个站点的最大充能功率设定。</summary>
