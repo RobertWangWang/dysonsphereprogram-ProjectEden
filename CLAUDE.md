@@ -182,6 +182,8 @@ powershell -ExecutionPolicy Bypass -File tools\check_output_gate.ps1   # 产出�
 powershell -ExecutionPolicy Bypass -File tools\check_bp_anchor.ps1     # 蓝图粘贴里「物流站邻距」那道外层闸的锚点判据是否仍然唯一
 powershell -ExecutionPolicy Bypass -File tools\check_bp_coverbelt.ps1  # 「覆盖带重建」那六个条件和两条路径还在不在（见 BlueprintCoverBeltPatches）
 powershell -ExecutionPolicy Bypass -File tools\check_ship_bank.ps1     # 运输船泊位旁挂位图的全部前提（见 StationShipBank）
+powershell -ExecutionPolicy Bypass -File tools\check_lens.ps1          # 活性透镜：催化剂数据表 + 剩下那三处转译（见 LensPatches）
+powershell -ExecutionPolicy Bypass -File tools\check_modplane.ps1      # 地基基准面：GetModPlane 的三个消费方还在不在（见 PlanetModPlanePatches）
 ```
 
 **Run `verify_harmony.ps1` after adding or editing any patch class.** It catches the three mistakes that throw out of `PatchAll` — a `TargetMethods` selector sharing a class with individual annotations, a bare-name patch on an overloaded game method, and **a prefix/postfix parameter name the target does not declare**. All three are invisible to the compiler and none of them fails as "this patch did nothing".

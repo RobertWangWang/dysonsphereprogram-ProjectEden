@@ -25,7 +25,7 @@ namespace ProjectEden.Patches
     /// <para><b>放大之后的后果</b>：半径 400 的星球上，地基面仍然返回 200.2–204.19，
     /// 比真实地表低整整 200 格。而渲染和碰撞的高度是
     /// <c>h × (1-t) + 地基面 × t</c>（<c>ModelingPlanetMain</c> @0BB9–0BC8、
-    /// <c>UpdateDirtyMesh</c> @012B–013A），只要某格 <c>modLevel &gt; 0</c>
+    /// <c>UpdateDirtyMeshVertices</c> @0126–0135），只要某格 <c>modLevel &gt; 0</c>
     /// 顶点就被拉向 200.2 —— <b>地面塌进星球内部，人走过去直接掉穿</b>。
     /// 实测那一片网格顶点的最低值正是 <b>200.200</b>，分毫不差。
     ///
@@ -43,7 +43,8 @@ namespace ProjectEden.Patches
     /// <para><b>消费方是闭集，一共三处</b>（枚举所得，不是估的）：</para>
     /// <list type="bullet">
     /// <item><c>PlanetModelingManager.ModelingPlanetMain</c> @0BA8 —— 建网格；</item>
-    /// <item><c>PlanetData.UpdateDirtyMesh</c> @0116 —— 地形改动后重建那一块；</item>
+    /// <item><c>PlanetData.UpdateDirtyMeshVertices</c> @0111 —— 地形改动后重建那一块
+    /// （<b>0.10.35 之前这一段在 <c>UpdateDirtyMesh</c> 里</b>，那一版拆开了）；</item>
     /// <item><c>PlanetRawData.QueryModifiedHeight</c> @00C6 —— 查「算上地基之后的高度」。</item>
     /// </list>
     /// 三处都把返回值当「高度 × 100」用（第三处全程在原始单位里插值，@00B2–00FD），
@@ -72,7 +73,13 @@ namespace ProjectEden.Patches
             yield return AccessTools.Method(typeof(PlanetModelingManager), "ModelingPlanetMain",
                 new[] { typeof(PlanetData) });
 
-            yield return AccessTools.Method(typeof(PlanetData), "UpdateDirtyMesh",
+            // **0.10.35 把这一段从 UpdateDirtyMesh 拆进了 UpdateDirtyMeshVertices。**
+            // 两个方法都还在、签名都是 (int dirtyIdx)、都是 PlanetData 的实例方法，
+            // 所以只有名字变了；但旧名字里已经没有 GetModPlane 了，继续指着它的后果是
+            // **只改写 2/3 处、地基照样把地面拉到 200.2**——也就是当年查了七轮的那个
+            // 「出生点是个洞」。它是靠计数大声失败才被抓到的，日志里那行写着
+            // 「应为 1 处，实际 0 处」。
+            yield return AccessTools.Method(typeof(PlanetData), "UpdateDirtyMeshVertices",
                 new[] { typeof(int) });
 
             yield return AccessTools.Method(typeof(PlanetRawData), "QueryModifiedHeight",
@@ -89,7 +96,7 @@ namespace ProjectEden.Patches
         ///
         /// <para>三个方法的 <c>ldarg.0</c> 分别是什么，是查过的：
         /// <c>ModelingPlanetMain</c> 是静态方法、首参 <c>PlanetData</c>；
-        /// <c>UpdateDirtyMesh</c> 是 <c>PlanetData</c> 的实例方法；
+        /// <c>UpdateDirtyMeshVertices</c> 是 <c>PlanetData</c> 的实例方法；
         /// <c>QueryModifiedHeight</c> 是 <c>PlanetRawData</c> 的实例方法。
         /// 所以按 arg0 的类型选对应的重载。</para>
         /// </summary>

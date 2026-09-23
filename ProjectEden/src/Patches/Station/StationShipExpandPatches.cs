@@ -82,8 +82,22 @@ namespace ProjectEden.Patches.Station
 
             int planetId = __instance.planet?.id ?? 0;
 
-            if ((grown > 0 || shrunk > 0)
-                && Reported.TryAdd(planetId, 1))
+            // **「一行都没打」不能等于「这条路没跑过」。** 上一版只在 grown/shrunk > 0 时
+            // 才出声，于是日志里没有这一行时分不开两件事：这颗星球上没有站需要补，
+            // 还是这条补丁压根没被调到。本仓库为这条付过账（StackedRenderPatches 的
+            // 「离开星球再回来」那次）——**针对一个你自己触发不了的场景做修复时，
+            // 要记录那个场景本身，而不只是记录修复**。
+            if (grown == 0 && shrunk == 0)
+            {
+                if (Reported.TryAdd(planetId, 1))
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"运输船泊位补齐（星球 {planetId}）：扫过了，没有站需要补"
+                        + "（泊位数组已经和 prefab 一致，或者这颗星球上没有星际物流站）。");
+
+                return;
+            }
+
+            if (Reported.TryAdd(planetId, 1))
                 ProjectEdenPlugin.Log.LogInfo(
                     $"运输船泊位补齐（星球 {planetId}）：{grown} 座站的泊位数组按 prefab 补了上去，"
                     + $"共加 {slotsAdded} 个泊位"

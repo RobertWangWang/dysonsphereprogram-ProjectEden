@@ -10,23 +10,32 @@ namespace ProjectEden.Patches
     /// <summary>
     /// 活性透镜：一枚<b>活的</b>引力透镜。进的是<b>原版射线接收站</b>，不新增建筑。
     ///
-    /// <b>不加新建筑是所有者的决定，代价记在这里。</b> 引擎<b>不从透镜物品上读任何东西</b>：
-    /// <c>catalystId</c> 只是一次相等比较，<c>cata = 2 × (1 + inc)</c> 是硬写在三个方法里的
-    /// 字面量。所以「只加一个新透镜物品、让它进原版接收站」除了换个图标，行为和引力透镜
-    /// <b>一字不差</b>——倍率只能落在我们自己的 transpiler 上，也就是设计稿
-    /// <c>活性透镜.md</c> 第六节明确否掉过的那条「同一个乘积写在三个方法里」。
-    /// 现在那三处一起改，并断言必须正好命中 3 处。
+    /// <b>0.10.35 把这个功能的一半变成了数据，那一半的转译器已经删了——而这段历史值得留着。</b>
     ///
-    /// <b>这条约束不是风格问题。</b> 只改 <c>EnergyCap_Gamma_Req</c> 的话，接收站实发的电
-    /// 和它报给电网的最大出力（<c>MaxOutputCurrent_Gamma</c>）、向电网索要的量
-    /// （<c>RequiresCurrent_Gamma</c>）就对不上，电网按错误的数调度——症状是功率曲线抖
-    /// <b>而不是报错</b>。形状和自动集装机那四个 <c>4</c> 完全一样：同一个常数既是产能、
-    /// 又是申报、又是索取。
+    /// 旧版（≤ 0.10.34）引擎<b>不从透镜物品上读任何东西</b>：<c>catalystId</c> 只是一次相等
+    /// 比较，<c>cata = 2 × (1 + inc)</c> 是<b>硬写在三个方法里的字面量</b>
+    /// （<c>EnergyCap_Gamma_Req</c> / <c>MaxOutputCurrent_Gamma</c> / <c>RequiresCurrent_Gamma</c>），
+    /// 所以倍率只能落在我们自己的 transpiler 上，而且<b>三处必须一起改</b>——只改第一处的话，
+    /// 接收站实发的电和它报给电网的最大出力、向电网索要的量就对不上，电网按错误的数调度，
+    /// 症状是<b>功率曲线抖而不是报错</b>。形状和自动集装机那四个 <c>4</c> 完全一样：
+    /// 同一个常数既是产能、又是申报、又是索取。
+    ///
+    /// 0.10.35 把催化剂重做成了<b>和燃料同构的通用系统</b>：<c>ItemProto.CatalystType</c>
+    /// （位掩码，对应 <c>PrefabDesc.powerCatalystMask</c>）、<c>ItemProto.catalystNeeds</c>
+    /// （白名单数组，和 <c>fuelNeeds</c> / <c>turretNeeds</c> 同族）、
+    /// <c>ItemProto.catalystAbilityById[id] = Ability × 0.01f</c>（倍率）。
+    /// 于是那个字面量 2 没有了，三处一起改的约束也随之消失——<b>倍率只有一份数据</b>。
+    /// 四个转译器（三处 cata + 一处 <c>EntityFastFillIn</c>）因此全部删除，
+    /// 换成 <see cref="ApplyCatalystData"/> 写两个字段再重跑原版自己的两个构建器。
+    ///
+    /// <b>这次更新是靠「改写计数不对就大声失败」抓到的</b>：日志里那行
+    /// 「应当改写 7 处，实际 5 处」。没有那个计数的话，症状会是「透镜装上去不涨功率、
+    /// 而且放不进接收站」，而每一步都不报错。
     ///
     /// <b>光子和电力是两个独立旋钮</b>，这是读 IL 读出来的，不是设计出来的：
     /// <c>GameTick_Gamma</c> @00D2 是 <c>productCount += capacityCurrentTick / productHeat</c>，
-    /// 分母和分子完全解耦。所以电力倍率改分子（那三处 <c>cata</c>），光子倍率改分母
-    /// （一处 <c>productHeat</c>），互不牵扯。
+    /// 分母和分子完全解耦。电力倍率改分子（现在是 <c>Ability</c> 那份数据），
+    /// 光子倍率改分母（一处 <c>productHeat</c>，仍然是转译器），互不牵扯。
     ///
     /// <b>换料靠写 <c>catalystId</c> 本身，不靠放宽比较。</b> 插入侧三条路
     /// （传送带 <c>PickFrom</c>、<c>EntityFastFillIn</c>、<c>OnCataButtonClick</c>）
@@ -132,8 +141,115 @@ namespace ProjectEden.Patches
                 + $"发电 ×{_powerMul:0.##}，光子 ×{_photonMul:0.##}，自愈 {_healRate:0.##}"
                 + $"（满照寿命 ×{1f / (1f - _healRate):0.##}）");
 
+            ApplyCatalystData();
             ReportBalance();
             Report();
+        }
+
+        /// <summary>
+        /// 把倍率写成**数据**，而不是转译出来。
+        ///
+        /// <b>0.10.35 把催化剂做成了和燃料同构的通用系统，本 mod 的三个转译器因此全部作废。</b>
+        /// 旧版三处一字不差的 <c>cata = 2 × (1 + inc)</c> 里那个字面量 2 没有了，现在是：
+        /// <code>
+        /// V_0  = (float)Cargo.accTableMilli[catalystIncLevel]            // 喷涂等级
+        /// V_1  = ItemProto.catalystAbilityById[curCatalystId]            // ← 按物品 id 的倍率
+        /// cata = (catalystPoint > 0 || catalystCount > 0) ? V_1 * (1 + V_0) : 1
+        /// </code>
+        /// 而那张表由 <c>ItemProto.InitCatalystAbilityById</c> 建：
+        /// <c>catalystAbilityById[proto.ID] = proto.Ability × 0.01f</c>，只收
+        /// <c>CatalystType > 0</c> 的。**所以「×5」现在就是 <c>Ability = 500</c>**，
+        /// 三处一起改的问题不存在了——数据只有一份。
+        ///
+        /// 插入那一头同理：<c>EntityFastFillIn</c> 现在查
+        /// <c>ItemProto.catalystNeeds[catalystMask]</c>（和 <c>fuelNeeds</c> / <c>turretNeeds</c>
+        /// 同一族），所以只要 <c>CatalystType</c> 的位和接收站的 <c>powerCatalystMask</c> 对上，
+        /// 白名单自己就收了我们——那个转译器也一并删了。
+        ///
+        /// <b><c>CatalystType</c> 抄原版透镜的，不写死。</b> 它是个位掩码，要和
+        /// <c>PrefabDesc.powerCatalystMask</c> 对位，而两者都在 <c>resources.assets</c> 里，
+        /// 离线读不到——写死就是猜，猜错了表现是「放不进接收站」，一个字都不报。
+        ///
+        /// <b>两张表都是 preload 期建的静态缓存，必须重跑</b>（陷阱 4b）：
+        /// <c>InitCatalystNeeds</c> 在 <c>VFPreload.PreloadThread</c> @08AB、
+        /// <c>InitCatalystAbilityById</c> 在 @08B0，而 LDBTool 的 post-patch 列表里
+        /// 两个都没有。不重跑的话本 mod 的透镜根本不在表里，倍率读出来是 0
+        /// （<b>比 1 还糟：接收站直接不发电</b>），而且不会报错。两个构建器都是从
+        /// <c>dataArray</c> 整体重建的，所以重跑幂等。
+        /// </summary>
+        private static void ApplyCatalystData()
+        {
+            ItemProto lens = LDB.items.Select(LensId);
+
+            if (lens == null)
+            {
+                ProjectEdenPlugin.Log.LogError($"活性透镜：LDB 里取不到物品 {LensId}，倍率写不进去");
+
+                return;
+            }
+
+            ItemProto vanilla = DefaultCatalystId > 0 ? LDB.items.Select(DefaultCatalystId) : null;
+
+            if (vanilla == null || vanilla.CatalystType <= 0)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"活性透镜：原版催化剂「{Config.defaultCatalystName}」拿不到 CatalystType"
+                    + $"（proto {(vanilla == null ? "为空" : "的 CatalystType = " + vanilla.CatalystType)}）。"
+                    + "**透镜放不进射线接收站**——那个位掩码要和 PrefabDesc.powerCatalystMask 对位，"
+                    + "它在 resources.assets 里，离线读不到也猜不得");
+
+                return;
+            }
+
+            lens.CatalystType = vanilla.CatalystType;
+
+            // **倍率是相对原版透镜的，不是绝对值——差别是整整一倍。**
+            // 旧转译器把硬写的那个 2 乘上 powerMultiplier，所以 ×5 的配置意味着
+            // 最终 cata = 10（引力透镜是 2）。照搬成 `powerMul × 100` 会得到 cata = 5，
+            // 也就是**悄悄砍掉一半**，而且没有任何报错——两份文档里那张
+            // 「发电 ×2 / ×10」的对照表是唯一会露馅的地方。
+            //
+            // 所以基数取原版透镜自己的 Ability 而不是写死 100：它在
+            // resources.assets 里，写死就是猜，而且万一原版哪天把引力透镜从 ×2 调走，
+            // 「相对它 5 倍」这个承诺会自己跟上。
+            var ability = (int)System.Math.Round(vanilla.Ability * _powerMul);
+
+            if (ability < 1) ability = 1;
+
+            lens.Ability = ability;
+
+            ItemProto.InitCatalystNeeds();
+            ItemProto.InitCatalystAbilityById();
+
+            float[] table = ItemProto.catalystAbilityById;
+            float mine = table != null && LensId < table.Length ? table[LensId] : 0f;
+            float theirs = table != null && DefaultCatalystId < table.Length ? table[DefaultCatalystId] : 0f;
+
+            if (mine <= 0f)
+            {
+                ProjectEdenPlugin.Log.LogError(
+                    $"活性透镜：重建之后 catalystAbilityById[{LensId}] 仍然是 {mine}，"
+                    + "**接收站装上它会直接不发电**。检查 CatalystType 有没有写进去、以及重建有没有真的跑");
+
+                return;
+            }
+
+            // **把「相对倍率」也打出来。** 绝对值自己看不出对不对——
+            // 要核的是它是不是配置里那个 powerMultiplier，而那要两个数相除才知道。
+            float relative = theirs > 0f ? mine / theirs : 0f;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"活性透镜·催化剂表：CatalystType {lens.CatalystType}（抄自「{Config.defaultCatalystName}」）、"
+                + $"Ability {lens.Ability} → 倍率 ×{mine:0.##}；"
+                + $"原版「{Config.defaultCatalystName}」Ability {vanilla.Ability} → ×{theirs:0.##}；"
+                + $"**相对原版 ×{relative:0.##}**（配置要的是 ×{_powerMul:0.##}）。"
+                + "两张表（catalystNeeds / catalystAbilityById）已按原版自己的构建器重建"
+                + "——它们是 preload 期建的，LDBTool 两个都不会重跑。");
+
+            if (theirs > 0f && System.Math.Abs(relative - _powerMul) > 0.05f)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"活性透镜：相对倍率算出来是 ×{relative:0.###}，配置要的是 ×{_powerMul:0.###}，对不上。"
+                    + "Ability 是整数，原版基数小的时候四舍五入会有偏差；差得多就说明基数读错了");
         }
 
         /// <summary>
@@ -226,15 +342,6 @@ namespace ProjectEden.Patches
         // ════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// 替掉那三处 <c>ldc.r4 2</c>。<b>只有仓里有货时才会走到这里</b>——
-        /// 原版把它放在 <c>catalystPoint &gt; 0</c> 的分支里。
-        /// </summary>
-        internal static float CataFactor(ref PowerGeneratorComponent gen)
-        {
-            return Active && gen.catalystId == LensId ? 2f * _powerMul : 2f;
-        }
-
-        /// <summary>
         /// 替掉 <c>GameTick_Gamma</c> 里那一处 <c>ldfld productHeat</c>。
         ///
         /// 光子是 <c>capacityCurrentTick / productHeat</c>。分子已经被
@@ -303,43 +410,6 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// 替掉 <c>PlanetFactory.EntityFastFillIn</c> @1223 那次 <c>ldfld catalystId</c>。
-        ///
-        /// <b>这条路是第一版漏掉的，症状正是「活性透镜放不进射线接收站」。</b>
-        /// 从背包 shift 点击建筑走的是这个方法，而它<b>不看你手上拿的是什么</b>——
-        /// 它读 <c>catalystId</c>，然后 <c>TakeItemFromPlayer(ref 那个 ID, …)</c>
-        /// <b>照着这个号去背包里拿</b>。所以不改这里的话，shift 点永远只会塞引力透镜，
-        /// 背包里的活性透镜一件都进不去，而且<b>什么提示都没有</b>。
-        ///
-        /// 和窗口那条（<see cref="SwitchCatalystByHand" />）的区别：那边看你手上拿的是哪种，
-        /// 这边看背包里有没有。两种透镜都带着的时候，shift 点优先活性透镜——
-        /// 要精确指定就用窗口的催化剂槽。
-        /// </summary>
-        internal static int FastFillCatalyst(ref PowerGeneratorComponent gen)
-        {
-            int real = gen.catalystId;
-
-            if (!Active || real == LensId) return real;
-
-            // 仓里还有货就不换：换了的话剩下的点数会被算成新料，等于凭空换物品
-            if (gen.catalystPoint > 0) return real;
-
-            Player player = GameMain.mainPlayer;
-
-            if (player?.package == null) return real;
-
-            // 背包里没有活性透镜就维持原样，否则会把这台接收站锁死在一种拿不出来的料上
-            if (player.package.GetItemCount(LensId) <= 0) return real;
-
-            gen.catalystId = LensId;
-            gen.catalystIncPoint = 0;
-
-            ReportInsert($"快速填入：实体 {gen.entityId} 空仓，背包里有活性透镜，已换料");
-
-            return LensId;
-        }
-
-        /// <summary>
         /// 替掉取货之后那次 <c>ldfld catalystId</c>（比较的右操作数）。
         /// 返回 <paramref name="picked" /> 表示接受，返回别的值让原版的 <c>bne.un</c> 跳过。
         ///
@@ -363,82 +433,6 @@ namespace ProjectEden.Patches
             return picked;
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        //  A. 倍率：三个方法各一处 ldc.r4 2
-        // ════════════════════════════════════════════════════════════════════
-
-        private static readonly string[] CataMethods =
-        {
-            nameof(PowerGeneratorComponent.EnergyCap_Gamma_Req),
-            nameof(PowerGeneratorComponent.MaxOutputCurrent_Gamma),
-            nameof(PowerGeneratorComponent.RequiresCurrent_Gamma),
-        };
-
-        /// <summary>
-        /// 每个方法<b>最近一次</b>改写了几处。键是方法，不是累加器——
-        /// 同一个方法会被 transpile 不止一次（别的补丁挂到同一个方法上时 Harmony 会重跑），
-        /// 用累加器总数就会翻倍，而每一次其实都是对的。这是
-        /// <c>RecipeTypeCompatPatches</c> 上交过学费的那条。
-        /// </summary>
-        private static readonly Dictionary<string, int> Hits = new Dictionary<string, int>();
-
-        [HarmonyTranspiler]
-        [HarmonyPatch(typeof(PowerGeneratorComponent), nameof(PowerGeneratorComponent.EnergyCap_Gamma_Req))]
-        [HarmonyPatch(typeof(PowerGeneratorComponent), nameof(PowerGeneratorComponent.MaxOutputCurrent_Gamma))]
-        [HarmonyPatch(typeof(PowerGeneratorComponent), nameof(PowerGeneratorComponent.RequiresCurrent_Gamma))]
-        private static IEnumerable<CodeInstruction> CataTranspiler(
-            IEnumerable<CodeInstruction> instructions, MethodBase original)
-        {
-            var code = new List<CodeInstruction>(instructions);
-
-            // 先解析再进循环：**绝不能把 null 当操作数发出去**，那会一路活到
-            // ILManipulator.WriteTo 才炸，栈顶指向 Harmony 的写入器而不是这里
-            MethodInfo helper = AccessTools.Method(typeof(LensPatches), nameof(CataFactor));
-
-            if (helper == null)
-            {
-                ProjectEdenPlugin.Log.LogError("活性透镜：解析不到 CataFactor，倍率补丁本方法不改");
-
-                return code;
-            }
-
-            var hits = 0;
-
-            // 原版形状（三处一字不差）：
-            //   ldfld catalystPoint ; ldc.i4.0 ; bgt ; ldc.r4 1 ; br ;
-            //   [ldc.r4 2] ; ldc.r4 1 ; ldloc(inc) ; add ; mul
-            // 认的是「2 后面紧跟 1、ldloc、add、mul」——只认一个 ldc.r4 2 会误伤别处
-            for (int i = 0; i + 4 < code.Count; i++)
-            {
-                if (code[i].opcode != OpCodes.Ldc_R4) continue;
-                if (!(code[i].operand is float two) || Math.Abs(two - 2f) > 1e-6f) continue;
-
-                if (code[i + 1].opcode != OpCodes.Ldc_R4) continue;
-                if (!(code[i + 1].operand is float one) || Math.Abs(one - 1f) > 1e-6f) continue;
-
-                if (!code[i + 2].IsLdloc()) continue;
-                if (code[i + 3].opcode != OpCodes.Add) continue;
-                if (code[i + 4].opcode != OpCodes.Mul) continue;
-
-                // 原地改操作码，不换对象——`bgt` 正指着这一条，换对象会丢掉标签
-                code[i].opcode = OpCodes.Ldarg_0;
-                code[i].operand = null;
-
-                code.Insert(i + 1, new CodeInstruction(OpCodes.Call, helper));
-
-                hits++;
-                i += 5;
-            }
-
-            Hits[original.Name] = hits;
-
-            if (hits != 1)
-                ProjectEdenPlugin.Log.LogError(
-                    $"活性透镜：{original.Name} 里应当正好有 1 处 cata 倍率，实际 {hits} 处。"
-                    + "**三处必须一起改**，漏一处的症状是功率曲线抖而不是报错——游戏更新过的话要重新读 IL");
-
-            return code;
-        }
 
         // ════════════════════════════════════════════════════════════════════
         //  B + D：GameTick_Gamma 里的光子分母和两个取货口
@@ -630,61 +624,25 @@ namespace ProjectEden.Patches
             return code;
         }
 
-        // ════════════════════════════════════════════════════════════════════
-        //  F. 快速填入（背包 shift 点击建筑）
-        // ════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <c>PlanetFactory.EntityFastFillIn</c> 里唯一一处 <c>ldfld catalystId</c>（实测 @1223）。
-        /// 前面的 <c>ldelema PowerGeneratorComponent</c> 已经把元素地址压上来了，
-        /// 所以把 <c>ldfld</c> 原地换成 <c>call</c> 就是等价的，栈形状一模一样。
+        /// 每个方法<b>最近一次</b>改写了几处。键是方法，不是累加器——
+        /// 同一个方法会被 transpile 不止一次（别的补丁挂到同一个方法上时 Harmony 会重跑），
+        /// 用累加器总数就会翻倍，而每一次其实都是对的。这是
+        /// <c>RecipeTypeCompatPatches</c> 上交过学费的那条。
         /// </summary>
-        [HarmonyTranspiler]
-        [HarmonyPatch(typeof(PlanetFactory), nameof(PlanetFactory.EntityFastFillIn))]
-        private static IEnumerable<CodeInstruction> FastFillTranspiler(IEnumerable<CodeInstruction> instructions)
-        {
-            var code = new List<CodeInstruction>(instructions);
+        private static readonly Dictionary<string, int> Hits = new Dictionary<string, int>();
 
-            MethodInfo helper = AccessTools.Method(typeof(LensPatches), nameof(FastFillCatalyst));
-
-            FieldInfo cataField = AccessTools.Field(typeof(PowerGeneratorComponent),
-                nameof(PowerGeneratorComponent.catalystId));
-
-            if (helper == null || cataField == null)
-            {
-                ProjectEdenPlugin.Log.LogError("活性透镜：解析不到 FastFillCatalyst 或 catalystId，快速填入不改");
-
-                return code;
-            }
-
-            var hits = 0;
-
-            for (var i = 0; i < code.Count; i++)
-            {
-                if (code[i].opcode != OpCodes.Ldfld) continue;
-                if (!SameField(code[i].operand, cataField)) continue;
-
-                code[i].opcode = OpCodes.Call;
-                code[i].operand = helper;
-
-                hits++;
-            }
-
-            Hits["EntityFastFillIn"] = hits;
-
-            if (hits != 1)
-                ProjectEdenPlugin.Log.LogError(
-                    $"活性透镜：EntityFastFillIn 里应当正好有 1 处 catalystId，实际 {hits} 处。"
-                    + "**这条不生效的症状就是「活性透镜放不进射线接收站」**——shift 点击会照着"
-                    + "旧的 catalystId 去背包里拿引力透镜，而且什么提示都没有");
-
-            return code;
-        }
-
-        /// <summary>把各处改写数汇总成一行，开局日志里一眼能核。</summary>
+        /// <summary>
+        /// 把各处改写数汇总成一行，开局日志里一眼能核。
+        ///
+        /// <b>0.10.35 之后只剩 3 处，原先是 7。</b> 少掉的四处不是没修，是**不需要修了**：
+        /// 三处 <c>cata</c> 倍率和一处快速填入都被原版自己的数据表接管了
+        /// （<c>ItemProto.Ability</c> / <c>CatalystType</c>，见 <see cref="ApplyCatalystData"/>），
+        /// 转译器已删。剩下的三处是光子分母一处 + 传送带取货口两处。
+        /// </summary>
         private static void Report()
         {
-            var want = 0;
             var got = 0;
 
             var where = new List<string>();
@@ -697,12 +655,12 @@ namespace ProjectEden.Patches
 
             where.Sort();
 
-            // 三处 cata + 一处 productHeat + 两个取货口 + 一处快速填入
-            want = CataMethods.Length + 1 + 2 + 1;
+            // 一处 productHeat（光子分母）+ 两个传送带取货口
+            const int want = 1 + 2;
 
             string detail = string.Join("、", where.ToArray());
 
-            if (got == want && Hits.Count == CataMethods.Length + 3)
+            if (got == want && Hits.Count == 2)
                 ProjectEdenPlugin.Log.LogInfo($"活性透镜：共改写 {got} 处，全部命中（{detail}）");
             else
                 ProjectEdenPlugin.Log.LogError(
