@@ -152,9 +152,17 @@ namespace ProjectEden.Patches
 
                 if (bp == null) continue;
 
+                // <b>coverObjId != 0 对传送带不等于「被拦」，这是上一版探针的误报。</b>
+                // 带子有第二条路：CreatePrebuilds @012F 五个条件全中就登记进
+                // bpIdWitchWillRebuildCoverBelt，由 @07AB 另一条循环真正建出来。
+                // 不区分这两者的话，一条**建得好好的**带子也会被报成「跳过了」，
+                // 而那正是会把下一次排查带偏的那种日志——
+                // 本仓库记过：**一个分不清「被拦」和「走了另一条路」的探针，测的不是它要测的东西。**
+                bool coverBlocks = bp.coverObjId != 0 && !WillRebuildCoverBelt(bp);
+
                 bool blocked = bp.bpgpuiModelId <= 0
                                || (bp.condition != EBuildCondition.Ok && (int)bp.condition != 2)
-                               || bp.coverObjId != 0;
+                               || coverBlocks;
 
                 if (!blocked) continue;
 
@@ -164,7 +172,7 @@ namespace ProjectEden.Patches
                 int key = 0x40000 + item * 8
                           + (bp.bpgpuiModelId <= 0 ? 1 : 0)
                           + (bp.condition != EBuildCondition.Ok && (int)bp.condition != 2 ? 2 : 0)
-                          + (bp.coverObjId != 0 ? 4 : 0);
+                          + (coverBlocks ? 4 : 0);
 
                 if (!Seen.Add(key)) continue;
 
@@ -175,10 +183,57 @@ namespace ProjectEden.Patches
                     + $"bpgpuiModelId={bp.bpgpuiModelId}（<=0 就跳过，**排在 condition 之前**）、"
                     + $"condition={bp.condition}({(int)bp.condition})、coverObjId={bp.coverObjId}。"
                     + "三者里哪个不对就是拦住它的那一个；bpgpuiModelId 为 -1 说明是 "
-                    + "ArrangeOverlapBP 判了重叠，而它是和 condition 成对写的——只擦 condition 没用。");
+                    + "ArrangeOverlapBP 判了重叠，而它是和 condition 成对写的——只擦 condition 没用。"
+                    + CoverBeltDetail(bp));
 
                 if (_lines >= MaxLines) return;
             }
+        }
+
+        /// <summary>
+        /// 逐项复现 <c>CreatePrebuilds</c> @012F–@0195 的「覆盖带重建」登记条件。
+        ///
+        /// <b>这不是一个近似判断，是原版那六句 <c>brfalse</c>/<c>ble</c> 的逐条翻译。</b>
+        /// 探针拿它来区分「真的被 @019C 丢掉」和「走了 @07AB 那条重建路」——
+        /// 两者的 <c>coverObjId</c> 都非零，靠字段本身分不开。
+        /// 同一份判据也是 <see cref="BlueprintCoverBeltPatches"/> 决定要不要出手的依据。
+        /// </summary>
+        private static bool WillRebuildCoverBelt(BuildPreview bp)
+        {
+            if (bp.coverObjId <= 0) return false;
+            if (bp.desc == null || !bp.desc.isBelt) return false;
+
+            BuildPreview output = bp.output;
+
+            if (output == null) return false;
+            if (output.desc == null || !output.desc.isBelt) return false;
+            if (output.coverObjId <= 0) return false;
+
+            return output.condition == EBuildCondition.Ok;
+        }
+
+        /// <summary>
+        /// 传送带被 <c>coverObjId</c> 拦下时，把那五个条件<b>逐项</b>打出来。
+        ///
+        /// 只说「coverObjId 非零」没法行动——四项判据都在<b>下游那条带子</b>身上，
+        /// 要知道的是<b>断在哪一项</b>：没有下游、下游不是带子、下游没压着东西，
+        /// 还是下游自己建不了。
+        /// </summary>
+        private static string CoverBeltDetail(BuildPreview bp)
+        {
+            if (bp.desc == null || !bp.desc.isBelt || bp.coverObjId == 0) return "";
+
+            BuildPreview o = bp.output;
+
+            string why = o == null ? "没有下游（output 为空）"
+                : o.desc == null || !o.desc.isBelt ? "下游不是传送带"
+                : o.coverObjId <= 0 ? "下游没有压在已有实体上（output.coverObjId = 0）"
+                : o.condition != EBuildCondition.Ok ? $"下游自己建不了（output.condition = {o.condition}）"
+                : "五项都满足——它走的是重建路径，不该出现在这里";
+
+            return "　**这是一条压着已有带子的传送带**：原版要五项全中才登记进重建名单"
+                   + "（自己压着东西 + 自己是带子 + 有下游 + 下游是带子 + 下游也压着东西 + 下游能建），"
+                   + $"否则 @019C 直接丢弃。这一段断在：{why}。";
         }
 
         /// <summary>

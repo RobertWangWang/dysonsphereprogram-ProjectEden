@@ -180,6 +180,7 @@ powershell -ExecutionPolicy Bypass -File tools\check_bp_inner.ps1      # 那 6 �
 powershell -ExecutionPolicy Bypass -File tools\check_bp_writes.ps1     # 整个 CheckBuildConditions 写了哪些字段（为什么不能整体短路）
 powershell -ExecutionPolicy Bypass -File tools\check_output_gate.ps1   # 产出闸的 7 处乘法站点还在不在（见 MegaOutputGatePatches）
 powershell -ExecutionPolicy Bypass -File tools\check_bp_anchor.ps1     # 蓝图粘贴里「物流站邻距」那道外层闸的锚点判据是否仍然唯一
+powershell -ExecutionPolicy Bypass -File tools\check_bp_coverbelt.ps1  # 「覆盖带重建」那六个条件和两条路径还在不在（见 BlueprintCoverBeltPatches）
 ```
 
 **Run `verify_harmony.ps1` after adding or editing any patch class.** It catches the three mistakes that throw out of `PatchAll` — a `TargetMethods` selector sharing a class with individual annotations, a bare-name patch on an overloaded game method, and **a prefix/postfix parameter name the target does not declare**. All three are invisible to the compiler and none of them fails as "this patch did nothing".
@@ -4566,6 +4567,50 @@ restoring every field a vanilla routine wrote, read who else reads them — some
 the permission slip, not the lock.** Same family as the `coverObjId` split (an obstacle for a
 building, the connection itself for a belt), one level in.
 
+**And that `coverObjId` split left a hole that took until 1.12.13 to surface, because a belt has
+TWO paths out of `CreatePrebuilds` and only one of them is the gate everyone reads.** Reported as
+「堆叠建造模式下，传送带**可能**会出现不建造」 — and *"possibly"* is this bug's fingerprint, since
+four of the six conditions are about a **different** preview.
+
+```
+012F: if (bp.coverObjId > 0 && bp.desc.isBelt
+       && bp.output != null && bp.output.desc.isBelt
+       && bp.output.coverObjId > 0          // ← the DOWNSTREAM belt must also be covering
+       && bp.output.condition == Ok)        // ← and must itself be buildable
+       bpIdWitchWillRebuildCoverBelt[cursor++] = i;   // registered → built at @07AB
+
+0196: if (bp.coverObjId != 0) continue;     // ← everything else is dropped in silence
+```
+
+So a covering belt is **either** rebuilt by a second loop **or** discarded with no error, no red
+text and nothing in the log. The chain breaks wherever the downstream preview is absent, is not a
+belt, or is not covering anything — which is common the moment a blueprint is pasted onto a
+partially-overlapping area, i.e. exactly what stacked pasting does.
+
+**Half of this is self-inflicted, and it is the repo's own recurring shape.** `BuildConditionCheatPatches`
+clears `coverObjId` under 无碰撞 *so that buildings can stack*, but exempts belts and inserters
+(`IsConnectionCarrier`) because for those the field **is** the connection — two separate bug reports
+paid for that exemption. The result is that stacking was granted to buildings and withheld from
+belts, and the withholding is invisible. *A rule this repo added for one feature silently
+constrained another one added later* — **and here both sides are ours.**
+
+`BlueprintCoverBeltPatches` reproduces all six conditions term for term and clears `coverObjId`
+**only** for belts vanilla would have dropped; anything heading for the rebuild path is untouched.
+That is the drill-bit rule again — *a hook that runs before vanilla decides must reproduce that
+decision, not its nominal shape* — and `tools/check_bp_coverbelt.ps1` asserts the shape offline, so
+a game update that moves it fails loudly instead of silently mis-reproducing it.
+
+**Two process notes from writing that checker, both already rules here.**
+Its first run reported three failures and **all three were the checker's own**: the array is read
+**three** times, not two (the extra one is `if (arr == null) arr = new int[…]`), and a fixed byte
+window dragged in the tail of the preceding `addonType` block, which also reads `condition`. Classify
+each read by *what the next instructions do with it* (`stelem` → register, `ldelem` → consume,
+`stfld` same field → init) and anchor the window on the gate's own first `coverObjId` read.
+**Confirm a failure is real before reading anything into a checker's verdict.**
+And the existing paste probe had been reporting every `coverObjId != 0` belt as "skipped" — including
+the ones that were building perfectly well through the rebuild path. **A probe that cannot tell
+"blocked" from "took the other path" is not measuring what it claims to.**
+
 **A wrong diagnosis, kept because the reasoning error is the point.** The first fix blamed the collider pool: `BuildTool_Path.UpdateRaycast` genuinely does contain five `Physics.Raycast` calls, and disabling the pool genuinely does blind them, so the story was coherent — and wrong. Restoring the pool did not fix the belts. **A mechanism that *could* explain a symptom is not evidence that it *did*.** The pool split is kept anyway on its own merits (overlapping never needed it, and it blinds the build tools' raycasts), but the belt bug was `coverObjId`.
 
 That round also retracted a narrower claim: this file said "picking and dismantling are unaffected — `RaycastLogic` contains zero references to `UnityEngine.Physics`". That is still true *for picking and dismantling*, and it had been over-generalised into "interaction is unaffected". **The build tools do not use `RaycastLogic`; they use Unity physics directly.**
@@ -4656,6 +4701,26 @@ an owner decision, not an oversight.
   scenario itself (thousands of buildings stacked on one point) is outside what this mod sets out to
   support. **Note the failure mode of that whole session: four mechanisms that each *could* explain
   the symptom, three of which did not — every one of them killed by a measurement, none by thinking.**
+
+  **And "O(previews²)" is only half the curve — at small n there is a FLAT ~177 ms floor that has
+  nothing to do with the preview count.** Measured incidentally in 1.12.13 on `CreatePrebuilds`
+  (a different method from the one above, but the same click):
+
+  | previews | samples (ms) |
+  |---|---|
+  | 4 | 175.5 · 176.84 · 176.88 · 178.4 · 182.42 |
+  | 24 | 176.03 · 176.56 · 177.05 · 178.3 · 181.17 · 238.97 |
+
+  **Six times the previews, identical median.** Extrapolating the quadratic from 1,840 → 109 s puts
+  the n² term at **0.02 ms** for n = 24, i.e. all 177 ms is fixed cost. So the player-visible shape at
+  ordinary blueprint sizes is *"every paste click stalls ~0.18 s no matter how small the blueprint"*,
+  and that is a different bug from the freeze at thousands of previews — the quadratic only takes over
+  somewhere above n ≈ 1,000. **Not investigated** (the owner stopped the earlier probe), but the
+  distinction is recorded because attacking the quadratic would not move this number at all.
+
+  The probe's own line already prints both normalisations side by side (`每个` and `n² 摊`) and says
+  which to read: whichever stays constant across n *is* the complexity. Here **neither** does —
+  `每个` falls 6× and `n² 摊` rises 1000× — which is exactly the signature of a constant.
 
 - **More radius-200 constants almost certainly remain.** The four found so far (`kMaxMeshCnt`,
   `GetModPlane`'s `20020`, `TrashSystem.Gravity`'s `210/800/600`, and the stale `AstroData.uRadius`)
