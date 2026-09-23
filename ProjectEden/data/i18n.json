@@ -293,6 +293,8 @@
     "铬钒工具钢 · 熔炼": "Chrome-Vanadium Tool Steel · Melting",
     "钴铬合金 · 熔炼": "Cobalt-Chrome Alloy · Melting",
     "钒钛合金 · 熔炼": "Vanadium-Titanium Alloy · Melting",
+    "钛合金 · 真空重熔": "Titanium Alloy · Vacuum Remelting",
+    "钛合金里用得最多的那一种配比。铝撑住室温强度，钒稳住受热之后的另一相，两样缺一不可。它不经酸洗——料在真空里被电弧一点点熔掉、又一点点凝回去，氧化皮连生成的机会都没有。": "The ratio that accounts for half of all titanium alloy ever made. The aluminium holds the strength at room temperature, the vanadium holds the second phase together once things get hot, and neither can be left out. Nothing is pickled here: the stock is melted away by an arc and frozen back, a little at a time, in a vacuum where the oxide scale never gets the chance to form.",
     "//-- 克隆配方 --": "",
     "原油X射线裂解": "Crude Oil X-Ray Cracking",
     "以X射线轰击原油分子，使其裂解为精炼油与氢。产出与等离子精炼相同，但可在化工设备中进行。": "Bombards crude oil molecules with X-rays to crack them into refined oil and hydrogen. The yield matches plasma refining, but it can be run in chemical facilities.",

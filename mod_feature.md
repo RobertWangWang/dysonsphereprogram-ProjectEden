@@ -519,9 +519,20 @@ Both share the same speed-up logic as the advanced mining machine:
 > and the exit advances the cursor all the same — so a pair missed this round still comes up next round; what this
 > knob trades away is only the evenness **within** one round.
 >
-> The budget is `remoteShipsPerDispatch` in `stations.json`; **1 restores vanilla behaviour**, and the cap is **64**.
-> That 64 is not a pick: a station's idle vessels are recorded in a 64-bit bitmask, so there can never be more than
-> 64 of them and a larger budget would have no vessel to send.
+> The budget is `remoteShipsPerDispatch` in `stations.json`; **1 restores vanilla behaviour**, and it defaults to
+> **256** (raised from 30 in 1.12.14 to match the hub's berth count). The old "cap of 64" came from a station's
+> idle vessels being recorded in a 64-bit bitmask; that bitmask was replaced in 1.12.14, so 64 is no longer a
+> ceiling — the real one is the station's own berth count.
+>
+> **Measured, it will probably not be reached today.** Already at 30 the share of evaluations cut short by the
+> budget was **0%**, so the budget had stopped being the bottleneck; 256 is headroom for fleets that can now grow
+> four times larger (berths went 64 → 256), and a budget that is never reached costs nothing. What actually stops
+> a burst is vanilla's own pair of gates inside the loop — are there idle vessels left, and is there enough energy
+> — neither of which is rewritten.
+>
+> **One real cost: energy use becomes lumpy.** Each warp jump is a flat 100 MJ, so 256 vessels in one evaluation is
+> 25.6 GJ against a station's 1000 GJ buffer and 20 GW of charging. Run flat out, that reads as "release a batch,
+> then wait for the charge" rather than a steady stream. Lower the number if you want it smoother.
 >
 > **1.12.10 raised it from 10 to 30, and that came from a measurement**: in that version's log, **55.3%** of
 > evaluations were cut short by the budget, so the budget really was capping throughput. **But 30 is unlikely to be
@@ -1016,9 +1027,9 @@ still 1 gypsum short, plus coal and water. It saves two thirds of the acid, not 
 | **Stainless steel** | Smelter | Iron ×7 + Chromium ×2 + Manganese ×1 → ×10 | 5 s | Corrosion 90, the cheap all-rounder |
 | **Chrome-plated copper** | **Electrochemical Plant** | Copper ×4 + Chromium ×1 → ×4 | 3 s | **The only high conductivity + high corrosion resistance** |
 | **Chrome-vanadium tool steel** | Smelter | Iron ×6 + Chromium ×2 + Vanadium ×1 + Coal ×1 → ×8 | 6 s | Hardness 80, the hardest steel |
-| **Titanium alloy** | — | **Already in vanilla**, nothing new made | — | Decent at all three, weak at none |
+| **Titanium alloy** | Smelter | **The item is vanilla's**; this mod adds one acid-free recipe, see below | 1 s | Decent at all three, weak at none |
 | **Cobalt-chrome alloy** | Smelter | Cobalt ×6 + Chromium ×4 → ×10 | 7 s | Corrosion 95, and neither hard nor tough is weak |
-| **Vanadium-titanium alloy** | Smelter | Vanadium ×4 + Titanium ×6 → ×10 | 8 s | **Hard and tough at once — the only one** |
+| **Vanadium-titanium alloy** | Smelter | Titanium ×8 + Vanadium ×2 → ×10 | 8 s | **Hard and tough at once — the only one** |
 | **Cemented carbide** | Smelter | Tungsten carbide + cobalt, 100 parts total → ×50, ratio adjustable | 30 s | Hardness at the top of the scale |
 
 **Two of the nine add no new item**: the "carbon steel" you want *is* vanilla **Steel** (vanilla's Iron ×3 → Steel ×1
@@ -1027,6 +1038,26 @@ which incidentally pulls vanilla's materials into the same system.
 
 > A second "iron + coal → steel" recipe was deliberately **not** added: it would bypass vanilla's 3 iron per steel
 > and amount to a 3x buff.
+
+#### Titanium Alloy · Vacuum Remelting: a route that needs no sulfuric acid
+
+`Titanium ×45 + Aluminium ×3 + Vanadium ×2 → Titanium Alloy ×50`, Smelter, 1 s.
+
+The ratio is **Ti-6Al-4V**, 90 : 6 : 4 by mass — the grade that accounts for half of all titanium alloy ever
+made. Aluminium is an alpha stabiliser and vanadium a beta stabiliser, so the two phases sit at roughly half
+and half, which is exactly why it is both strong and still forgeable.
+
+**Why the acid can go.** Vanilla's recipe pickles the oxide scale off the titanium before alloying; this one is
+**vacuum arc remelting** (VAR), where the stock is melted away by an arc and frozen back a little at a time in
+a vacuum, so the scale never gets the chance to form. What replaces the acid in reality is equipment and
+electricity, not another consumable.
+
+> **This is a deliberate buff, stated up front.** One titanium alloy costs roughly 1 titanium + 1 steel +
+> 2 sulfuric acid in vanilla; this recipe costs 0.9 titanium + 0.06 aluminium + 0.04 vanadium, with the steel
+> and the acid gone entirely, and it is **unlocked from the start — the titanium alloy tech is not required**.
+> Do not expect a long craft time to claw it back: a mega building fills any recipe's time in a single tick, so
+> the time only affects a 1x smelter and the displayed rate. The real gate is **vanadium** — a rare-slot ore, so
+> without a vanadium line this recipe cannot run at all.
 
 **Ratios are by mass fraction, not by balanced equation** — an alloy is a solid solution, not a compound, and there
 is nothing to balance. But every one of them is derived from a real grade: manganese steel is Hadfield steel,
@@ -1515,7 +1546,7 @@ Puts **all three kinds of logistics drone** into one building:
 | Appearance | The Interstellar Logistics Station's model and icon, **tinted amber** |
 | Build | Interstellar Logistics Station ×1 + Electromagnetic Turbine ×20 + Circuit Board ×20, 5 s |
 | Location | Right next to the two logistics stations in the build bar |
-| Berths | **1500 Logistics Drones + 64 Logistics Vessels + 20 Logistics Bots** |
+| Berths | **1500 Logistics Drones + 256 Logistics Vessels + 20 Logistics Bots** |
 | Automation | The bots resupply and recover from the mecha based on what the hub holds — no manual request list needed |
 | Storage / slots / charging | Same as this mod's enlarged logistics stations (30 slots × 10,000,000, 20 GW charging / 1000 GJ buffer) |
 
@@ -1527,8 +1558,36 @@ the berths as well, so one hub does the work of several.
 > `isStellarStation` decides whether vessels are allocated. Cloning an interstellar station carries both switches
 > across unchanged, so both drone kinds are simply there; only the counts were tuned.
 >
-> **The vessel cap is 64**, a hard limit: `idleShipIndices` is a `UInt64` bitmask indexed `1L << (index & 63)`, and
-> a larger number would have entries overwrite each other. The config clamps anything above 64 and logs a WARNING.
+> **Vessels used to stop at 64; since 1.12.14 they do not.** The old wall was `idleShipIndices` /
+> `workShipIndices`, two `UInt64` bitmasks indexed `1L << (index & 63)` in all three helpers, so the 65th vessel's
+> bit folded back onto bit 0 and shared a slot with the first — one docking would clear the other's bit, and
+> vessels appeared or vanished out of nowhere **without a single line in the log**.
+>
+> **The fix is not to change the field's type (that would need a preloader) but to replace the eight tiny bit-flip
+> methods.** Thirteen methods touch those two bitmasks, and eight of them do nothing but flip one bit (the largest
+> is 25 instructions); this mod swaps all eight for a side bitmap, then patches the two **inline** bit reads inside
+> `ShipRenderersOnTick` — those bypass the helpers, so fixing only the eight would silently leave every berth past
+> the 64th unfillable, with no error.
+>
+> **It costs nothing in the save, and old saves still open.** The bitmap is entirely derived: each vessel in flight
+> carries its own berth number (already in the save), and the idle half is reconciled **by vanilla itself** every
+> tick. So one tick after loading it is correct again — no save block, no version bump, and **a save made without
+> this mod loads just the same**.
+>
+> **Stations that already exist grow their berths automatically**, with no rebuild — vanilla patches only the drone
+> arrays on load and this mod adds the vessel half. Growth only: shrinking would truncate vessels parked in the
+> high berths, which is losing ships, not changing a setting.
+>
+> **Two real costs.** Each berth holds one ship record plus four parallel array entries, about 25 KB per station at
+> 256; and the docking ring's radius is vanilla's hardcoded 11.5, so more berths pack the vessels tighter —
+> **at 256 they visibly overlap.** That is a cosmetic cost, not a fault. The clamp now sits at 4096, and it clamps
+> memory rather than bit width.
+>
+> **One log line tells you whether the berths are even being used** (since 1.12.14, always on, no switch): every
+> 10 seconds it looks at the planet you are standing on and reports only when the numbers change — in flight,
+> idle, **this session's peak in-flight for a single station**, and the actual berth count. A peak that stays far
+> below the berth count means the bottleneck is not the berths but dispatch cadence or charging, and adding
+> berths will do nothing at all.
 
 #### The third drone: Logistics Bots
 

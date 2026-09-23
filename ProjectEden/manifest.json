@@ -1,6 +1,6 @@
 {
   "name": "ProjectEden",
-  "version_number": "1.12.13",
+  "version_number": "1.12.14",
   "website_url": "https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden",
   "description": "把戴森球计划的后期产线整体拉满：十六座巨型建筑、十三种新矿脉（含极寒星球直接产水的冰矿脉、只在黑洞与中子星旁生成的两种）、裂变发电与黑洞反物质产线、随货物流动的物品品质、从煤和水通到有机化学与炼油的完整化工链、5000 层集装（带 preloader）、默认开启的 2 倍半径行星（面积 4 倍，会让老存档作废），外加 Ctrl+F 全星系找矿。每个数值都是从真实化学与物理推出来的，全在 JSON 里可调。",
   "dependencies": [

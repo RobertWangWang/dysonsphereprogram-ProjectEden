@@ -145,7 +145,7 @@ documents nothing.
 
 | | |
 |---|---|
-| Game | `G:\SteamLibrary\steamapps\common\Dyson Sphere Program`, v0.10.34.28529 |
+| Game | `G:\SteamLibrary\steamapps\common\Dyson Sphere Program`, **v0.10.35.29057** (updated 2026-09-23; was v0.10.34.28529). `verify_preloader.ps1` and every `tools/check_*.ps1` were re-run against it and pass. **UXAssist 1.5.8's `RemoveBuildRangeLimit` does not survive this update** — its transpiler reports `Undefined target method`, which is that mod's own breakage and unrelated to this repo's preloader. |
 | Unity | 2022.3.62f3c1, Mono |
 | BepInEx | 5.4.17 — inside an **r2modman profile**, not the game folder |
 | Profile | `%APPDATA%\r2modmanPlus-local\DysonSphereProgram\profiles\ProjectEden\BepInEx` |
@@ -181,6 +181,7 @@ powershell -ExecutionPolicy Bypass -File tools\check_bp_writes.ps1     # 整个 
 powershell -ExecutionPolicy Bypass -File tools\check_output_gate.ps1   # 产出闸的 7 处乘法站点还在不在（见 MegaOutputGatePatches）
 powershell -ExecutionPolicy Bypass -File tools\check_bp_anchor.ps1     # 蓝图粘贴里「物流站邻距」那道外层闸的锚点判据是否仍然唯一
 powershell -ExecutionPolicy Bypass -File tools\check_bp_coverbelt.ps1  # 「覆盖带重建」那六个条件和两条路径还在不在（见 BlueprintCoverBeltPatches）
+powershell -ExecutionPolicy Bypass -File tools\check_ship_bank.ps1     # 运输船泊位旁挂位图的全部前提（见 StationShipBank）
 ```
 
 **Run `verify_harmony.ps1` after adding or editing any patch class.** It catches the three mistakes that throw out of `PatchAll` — a `TargetMethods` selector sharing a class with individual annotations, a bare-name patch on an overloaded game method, and **a prefix/postfix parameter name the target does not declare**. All three are invisible to the compiler and none of them fails as "this patch did nothing".
@@ -3535,7 +3536,17 @@ it. Checked because it is exactly the kind of per-call identity that bursting wo
 
 So before 1.10.7 a default station holding 20 pairs took 20 seconds to cycle once: **slow fetching is dispatch cadence, not ship speed, carry capacity or storage size.** Giving the *fetching* station a route priority moves its pairs into segment 1 — **6×**, not the 12× this line used to claim (`tick%10` fires 6 times a second, `tick%60` once) — with no code change, which is why the cadence half stays unpatched. The two levers multiply: route priority × `remoteShipsPerDispatch`.
 
-Multiple ships per route already work: `StationStore.remoteOrder` reserves both ends (`remoteDemandCount = max - (count + remoteOrder)`), so the next evaluation sees the reduced demand. The real gates are `idleShipCount > 0` and `energy >= 6 MJ + CalcTripEnergyCost` (which adds a flat **100 MJ per warp jump** — this is what the 30 GW charging power buys). **64 ships per station is a type-level cap**: `idleShipIndices` is a `UInt64` bitmask indexed `1L << (index & 63)`.
+Multiple ships per route already work: `StationStore.remoteOrder` reserves both ends (`remoteDemandCount = max - (count + remoteOrder)`), so the next evaluation sees the reduced demand. The real gates are `idleShipCount > 0` and `energy >= 6 MJ + CalcTripEnergyCost` (which adds a flat **100 MJ per warp jump** — this is what the 30 GW charging power buys).
+
+**64 ships per station was a type-level cap and is not one any more (1.12.14) — and the reason it fell without a preloader is the transferable part.** `idleShipIndices` / `workShipIndices` are `UInt64`, indexed `1L << (index & 63)` in all three helpers, so the 65th ship aliases onto bit 0. The instinct is "a field's *type* needs a preloader", and that instinct is right about the field and wrong about the feature:
+
+- **Enumerate who touches it first.** Exactly **13 methods**, all on `StationComponent`, nothing elsewhere in the assembly. Eight of them are **pure bit flips** — `IdleShipGetToWork` is 24 instructions and its entire body is "clear the idle bit, set the work bit"; the largest, `HasShipIndex`, is 25. Replacing eight small methods wholesale is a prefix each; it is not a type change at all. `ShipRenderersOnTick` additionally holds **two inline** bit reads (@0013, @0076) that do *not* go through the helpers, so fixing only the eight silently leaves idle bits past 64 unfillable — one transpiler, two sites, loud-fail on any other count.
+- **Then ask whether the state is derived or stored**, because that is what decides the save cost. Here it is **entirely derived**: work bits are `workShipDatas[k].shipIndex` for k < `workShipCount` (that array's first `workShipCount` entries are a *compacted* in-flight list — `InternalTickRemote` @0529 `Array.Copy`s it forward on docking — and `ShipData.Import` @0209 restores `shipIndex`), and idle bits are reconciled **by vanilla itself** every tick: `ShipRenderersOnTick` @0000–@00A1 counts the idle bits, diffs against `idleShipCount`, adds or removes to match, and closes with `Assert.Zero(delta)`. So the side bitmap needs **no save block and no SaveVersion bump**, and old saves — including saves made without this mod — come back correct within one tick. Same family as `InitFluids`: *re-run the derivation rather than store a parallel copy.*
+- **Check where the derivation runs before relying on it.** The name says Renderers, but `InternalTickRemote` @3082 calls it **unconditionally** (@307B onward is straight-line; the preceding `blt` is an unrelated loop's back-edge). Had it been gated on the local planet, every remote planet's idle bits would stay 0 and dispatch would stop dead.
+
+Two things the array side needed, both trap 1: `StationComponent.Init` sizes **six** arrays from `stationMaxShipCount` (@016D/@017F/@0191/@01A3/@022F/@0241) while `Import` @021B sizes them from the *stream*, and vanilla patches only the drone arrays on load (`PatchDroneArray`, from `PlanetTransport.Import` @00C3/@00D4) — **the only `Patch*Array` in the assembly**. So already-built stations never grow and `StationShipExpandPatches` is the missing ship half; it must grow all six or `ShipRenderersOnTick` indexes `shipDiskPos` past its end on the render path. The docking ring is reproduced verbatim from `Import` @0475–@0541 (radius **11.5**, fixed — so more berths means ships packed tighter, a stated cosmetic cost, not a fault).
+
+**The remaining ceiling is memory and geometry, not width**: ~130 bytes of `ShipData` plus four parallel arrays per berth, clamped at 4096 with a warning that says which kind of limit it is. `tools/check_ship_bank.ps1` asserts all of the above offline, including simulating the transpiler's own match rule so a game update fails there instead of half-rewriting the method.
 
 **Anchoring the transpiler needed one more step than the planetary one, and that is the transferable
 part.** The "cursor +1 with wrap" pattern occurs **6 times** here (`016D, 02C9, 056F, 064E, 0CD8,

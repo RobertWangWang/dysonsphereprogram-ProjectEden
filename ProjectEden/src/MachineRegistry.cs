@@ -1123,13 +1123,23 @@ namespace ProjectEden
 
             if (station.maxShipCount > 0)
             {
-                // idleShipIndices 是 UInt64 位图，按 1L << (index & 63) 索引，超过 64 会绕回去
-                int ships = station.maxShipCount > 64 ? 64 : station.maxShipCount;
+                // **64 那道类型上限已经不在了**（1.12.14）：idleShipIndices / workShipIndices
+                // 那两个 UInt64 位图被 StationShipBank 整体换成了旁挂位图，八个翻位方法前缀
+                // 替换 + ShipRenderersOnTick 里两处内联取位转译。位图是派生量，不进存档。
+                //
+                // 这里还留一个夹子，但它夹的是**内存**不是类型：每艘船一条 ShipData
+                // （约 130 字节）加上四个并行数组，一座站按泊位数全额分配，而泊位环的
+                // 半径是原版写死的 11.5——泊位越多船贴得越紧。4096 是个说得出理由的头，
+                // 不是又一条位宽。
+                const int roomCeiling = 4096;
+
+                int ships = station.maxShipCount > roomCeiling ? roomCeiling : station.maxShipCount;
 
                 if (ships != station.maxShipCount)
                     ProjectEdenPlugin.Log.LogWarning(
-                        $"运输船上限 {station.maxShipCount} 超过类型上限，已夹到 {ships}——" +
-                        "StationComponent.idleShipIndices 是 64 位位图，再多会互相覆盖");
+                        $"运输船上限 {station.maxShipCount} 超过 {roomCeiling}，已夹到 {ships}——" +
+                        "这不是位宽限制（那道已经解除），是内存和停泊环的现实：" +
+                        "每个泊位要一条 ShipData 加四个并行数组项，而环的半径原版写死 11.5");
 
                 desc.stationMaxShipCount = ships;
             }

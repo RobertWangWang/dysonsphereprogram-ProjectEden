@@ -122,11 +122,18 @@ namespace ProjectEden.Patches
         private const long EnergyFloor = 6000000L;
 
         /// <summary>
-        /// 一次派船评估最多放几艘。硬上限 <b>64</b> 是推出来的，不是挑的：
-        /// <c>idleShipIndices</c> 是 <c>UInt64</c>，按 <c>1L &lt;&lt; (index &amp; 63)</c> 索引，
-        /// 所以一个站点至多只可能有 64 艘闲置船，再大的额度也没有船可放。
+        /// 一次派船评估最多放几艘。
+        ///
+        /// <b>这里原本是 64，而那个 64 是从 <c>idleShipIndices</c> 是 <c>UInt64</c>、
+        /// 按 <c>1L &lt;&lt; (index &amp; 63)</c> 索引推出来的——1.12.14 起那条推导的前提没了</b>
+        /// （<see cref="StationShipBank"/> 把八个翻位方法整体换成了旁挂位图）。留着它的后果
+        /// 正是本仓库最讨厌的那一种：配置里写 256，日志里读起来像生效，实际被静默夹回 64。
+        ///
+        /// 现在这个数和 <c>MachineRegistry</c> 里泊位的那道夹子同源、同理由：**夹的是内存和
+        /// 停泊环，不是位宽**。真正让连发停下来的从来不是它，而是环体内原版自己的两道闸
+        /// （<c>idleShipCount &gt; 0</c> 和能量地板），所以额度配大了只是够不到，不会出事。
         /// </summary>
-        private const int HardCap = 64;
+        private const int HardCap = 4096;
 
         /// <summary>
         /// 同一条运输线（同一对供需配对）一次评估最多连发几艘。1 = 逐对轮转，
