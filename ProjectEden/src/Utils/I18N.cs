@@ -44,6 +44,9 @@ namespace ProjectEden.Utils
         /// <summary>简体中文的 LCID。其余语言一律落到英文，所以只需要认这一个</summary>
         private const int LcidZhcn = 2052;
 
+        /// <summary>en-US。<see cref="EnglishOf"/> 用它认出英文那一门语言。</summary>
+        private const int LcidEnus = 1033;
+
         /// <summary>中文 → 英文。来自 data/i18n.json</summary>
         private static Dictionary<string, string> _table;
 
@@ -83,6 +86,85 @@ namespace ProjectEden.Utils
         /// <c>Translate</c>，不经过这里。
         /// </summary>
         internal static string Tr(string zh) => zh == null ? null : zh.Translate();
+
+        /// <summary>英文那一门语言的下标；还没找到就是 −1。</summary>
+        private static int _englishIndex = -2;
+
+        /// <summary>
+        /// 某个 key 的<b>英文</b>写法，不管当前语言是什么。查不到返回 null。
+        ///
+        /// <para>给「中文客户端也能用英文搜」用的。两级：</para>
+        /// <list type="number">
+        /// <item>本 mod 自己那张表——它一直在内存里，和当前语言无关</item>
+        /// <item>原版的英文字符串表——铁矿、硅石这些 vanilla 物品不在我们表里，
+        /// 只能问原版。<b>英文那门语言是懒加载的</b>，所以这里会在第一次查的时候
+        /// 调一次 <c>Localization.LoadLanguage</c> 把它读进来。</item>
+        /// </list>
+        ///
+        /// <para><b>那一调不会改玩家的语言</b>，是查过 IL 的：<c>LoadLanguage(int)</c>
+        /// 全身 372 条指令里<b>没有一处 <c>stsfld currentLanguageIndex</c></b>，
+        /// 它只读 <c>Languages</c> 和 <c>lcId</c>。否则「搜个矿把界面语言切了」
+        /// 会是个极难联想到成因的 bug。</para>
+        /// </summary>
+        internal static string EnglishOf(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return null;
+
+            // 本 mod 自己的条目：随时可查，且不依赖原版加载了哪门语言
+            if (_table != null && _table.TryGetValue(key, out string mine)) return mine;
+
+            int index = EnglishIndex();
+
+            if (index < 0) return null;
+
+            if (Localization.namesIndexer == null
+                || !Localization.namesIndexer.TryGetValue(key, out int slot)) return null;
+
+            string[][] strings = Localization.strings;
+
+            if (strings == null || index >= strings.Length) return null;
+
+            string[] table = strings[index];
+
+            if (table == null || slot < 0 || slot >= table.Length) return null;
+
+            return table[slot];
+        }
+
+        private static int EnglishIndex()
+        {
+            if (_englishIndex != -2) return _englishIndex;
+
+            _englishIndex = -1;
+
+            Localization.Language[] languages = Localization.Languages;
+
+            if (languages == null) return -1;
+
+            for (var i = 0; i < languages.Length; i++)
+            {
+                if (languages[i].lcId != LcidEnus) continue;
+
+                _englishIndex = i;
+
+                // 懒加载：当前是中文时英文表多半还是 null，这里补一次。
+                // 只做一次，而且 LoadLanguage 不改 currentLanguageIndex（见上）
+                string[][] strings = Localization.strings;
+
+                if (strings != null && i < strings.Length && strings[i] == null)
+                {
+                    Localization.LoadLanguage(i);
+
+                    ProjectEdenPlugin.Log.LogInfo(
+                        "英文名检索：当前不是英文语言，已把原版英文字符串表读进内存"
+                        + "（只读一次，不会切换界面语言——LoadLanguage 全程没有写 currentLanguageIndex）");
+                }
+
+                break;
+            }
+
+            return _englishIndex;
+        }
 
         // ── 注册 ──────────────────────────────────────────────
 

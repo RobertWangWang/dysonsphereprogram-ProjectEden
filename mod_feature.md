@@ -1569,6 +1569,72 @@ logistics station means working around every one of those assumptions:
 > panel. The drain-back now falls back to the capacity of the station's other slots, and staging only tops up, so
 > the tray is bounded by construction at "what could be dispatched this tick".
 
+> **1.12.11 fixed one more thing that grew out of this: a duplicate slot for the same item would
+> appear in the station, automatically set to "Storage".** That slot is created by the **drain-back**
+> — "Storage" in the station UI is `ELogisticStorage.None(0)`, i.e. a slot whose **item was written
+> but whose direction never was**, and the drain-back is the only place in this repo that writes a
+> slot that way. The cause is the order inside one tick: `PlanetTransport.GameTick` runs **drone
+> arrival first** (which refills a Local Demand slot back to full) and **the dispenser second**, so
+> on any tick where nothing was staged out of that slot (the filter had rotated to another item, or
+> there was no idle courier), the slot is full — and anything the mecha **recycles** back then has
+> nowhere to go.
+>
+> The root cause was treated too: staging used to move "carry × idle couriers" = **100,000 items out
+> of the slot every tick** while the mecha was typically short by a few hundred, so almost all of it
+> had to go straight back. It is now additionally clamped by **how much of that item the mecha is
+> actually short of**, and offline replay shows delivery throughput is **unchanged** (4960/5000
+> either way) — everything removed was churn.
+>
+> When the slot really is full, the goods now **overflow into that same slot** (the panel shows a
+> count above the slot's capacity, which is the truth) instead of opening a new one. The
+> cleaner-looking alternative — leave them on the transit tray until the slot has room — was
+> **falsified** by the offline model: that slot is a Local Demand slot, so the network only fills it
+> further and room never appears; after 3600 ticks the tray had grown to **299,500 / 300,000**,
+> which is the 1.12.10 symptom in a new costume and would block every other item as well. Once the
+> count is over the cap, local demand goes negative and drones stop delivering that item there on
+> their own, so it is self-correcting; set the slot to "Supply" to push the excess back out. All
+> three routes are compared in `tools/sim_hubtray.py`.
+
+### Dustbin
+
+Takes in products you no longer want and destroys them. Nothing ever comes back out.
+
+| | |
+|---|---|
+| Build cost | **1 Iron Ingot + 1 Copper Ingot**, the same as the Fixed-Rate Miner |
+| What it is | A logistics station (cloned from the Interstellar Logistics Station) |
+| Storage slots | 30 slots, ten million each — same as any other station here |
+| Intake | Belt ports / Logistics Drones / Logistics Vessels, all three vanilla |
+| Output | **None.** Whatever arrives is gone the same tick |
+| Statistics | Everything destroyed is recorded in the **consumption** column of the production panel |
+
+**It is configured exactly like an ordinary station**: pick a slot, choose the item you don't want, and set it to
+**Local Demand** — drones will bring that item in from all over the planet and it will be destroyed. Set it to
+**Remote Demand** and vessels fetch it from other systems. Belt ports feed it as usual. The only difference is
+that nothing ever leaves again.
+
+> **Why a station rather than a small bin.** In this mod the waste does not pile up next to a machine — it piles
+> up in the logistics network: a mega building's byproducts go straight into its slots, and goods move between
+> planets on vessels. So what "recycle the products I don't need" was missing was never a container; it was a way
+> to **bring the waste in**. A station already has three of those, so the dustbin needs no feeding logic of its own.
+
+> **It produces nothing, and that is deliberate.** Giving it an output would open a "waste → some resource" route,
+> and waste is unlimited in a 10000× factory — that is a something-from-nothing hole. It is also why the building
+> needs no balance caveats at all: destroying things can only ever make you poorer.
+
+> **Space Warpers put into a slot are not destroyed.** A vanilla interstellar station draws warpers **out of its
+> storage slots** one per tick into its warper count (`StationComponent.InternalTickRemote` scans `storage` for
+> them). Clearing that slot along with the rest would leave the dustbin's own vessels permanently short of warpers,
+> and the symptom you would see is "it fetches from other systems very slowly" — nowhere near the cause. So that
+> one slot is left alone.
+
+> **Where it is in the build bar**: the same category as the vanilla logistics stations. That category may be out
+> of visible buttons, so scroll the child row sideways if you don't see it.
+
+> **For diagnosis**: turn on `voidDebugLog` in `machines.json` and it prints one line every 10 seconds with how
+> much that planet destroyed. Even with it off there are still two lines — the startup status line (is it wired
+> up), and one line the **first** time each planet actually destroys something.
+
 ### Wind Turbine Cluster
 
 A thousand wind turbines pressed into one tower array.
@@ -2425,6 +2491,34 @@ opened with nothing selected — both the mega buildings (page 3) and the Electr
 were affected.
 
 It now switches to the right tab and column page before selecting.
+
+### Resource search window: `Ctrl + F`
+
+Opens a standalone window: type the name of an ore or a gas and it lists **which planets have it, and how many
+veins and how much reserve each one holds**. Click a row to fly the map there.
+
+| | |
+|---|---|
+| Hotkey | `Ctrl + F` toggles it, `Esc` closes it |
+| What it finds | Ores and gas-giant gases, **in Chinese or English** (both 铁 and `iron` find Iron Ore); a numeric item ID works too |
+| Display | Follows the game's language automatically |
+| Ordering | Each resource's planet list is sorted by **vein count, most first** |
+| Paging | A draggable scrollbar on the right — no mouse wheel |
+
+**Results are ranked by match quality, not by rarity**: exact match > prefix match > substring match, and among
+those the closer the length the higher. The first version ranked by "fewest planets = rarest = what you must be
+looking for", so searching 铁 returned Titanium-Vanadium Magnetite — **rarity is not match quality**.
+
+> **The data comes from the game's own scan thread** (`PlanetModelingManager.RequestScanPlanet`), so it agrees
+> word for word with what you would see on arrival. It never re-rolls the RNG itself: between the constructor and
+> the rare-vein draws in `GenerateVeins` there is a **data-dependent** loop (up to 12 iterations, break on
+> failure), and a simulation that slips by one draw does not throw — **it confidently names the wrong planet**,
+> which is worse than reporting nothing.
+
+> Planets that already have vein data (visited or scanned) are read directly and never queued; the rest are
+> scanned in the background one at a time, with progress shown in the window. Veins are not part of the save
+> (`PlanetData`'s Export/Import contain no `veinGroups` — they are regenerated from the seed every time), so the
+> index can be rebuilt at any moment and there is no such thing as a stale cache.
 
 ---
 

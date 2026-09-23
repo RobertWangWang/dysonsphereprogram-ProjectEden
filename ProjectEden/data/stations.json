@@ -36,14 +36,16 @@
   "stationEnergy": [
     { "itemId": 2103, "chargePowerWatt": 20000000000, "maxEnergyJoule": 1000000000000 },
     { "itemId": 2104, "chargePowerWatt": 20000000000, "maxEnergyJoule": 1000000000000 },
-    { "itemId": 6531, "chargePowerWatt": 20000000000, "maxEnergyJoule": 1000000000000 }
+    { "itemId": 6531, "chargePowerWatt": 20000000000, "maxEnergyJoule": 1000000000000 },
+    { "itemId": 6687, "chargePowerWatt": 20000000000, "maxEnergyJoule": 1000000000000 }
   ],
 
   "//stationDrones": "三种物流站各能**停几架行星内物流运输机**（PrefabDesc.stationMaxDroneCount）。原版值是**从启动日志读回来的，不是回忆的**：2103 **50** 架、2104 **100** 架、6531 继承它克隆的 2104 也是 **100**（这一条在 1.12.10 之前由 machines.json 写成 200，现在那边留 0 让给这张表——所以**要是把这张表删掉或填 0，枢纽会从 200 掉到 100**，不是回到 200）。这里统一成 **1500**（1.12.10，所有者决定）。推导口径是「一整轮忙闲采样里全速派出去的架数」：droneDispatchStatus 是 byte[30]，一轮正好 30 帧，所以额度 25 那一版是 25 × 30 = 750，额度抬到 50 之后就是 50 × 30 = **1500**——**这个数是跟着 localDispatchPerTick 走的，改那个就要回来改这个**。\n\n**不需要运行时补丁，这一点是枚举出来的不是想当然的。** 这个字段全程序集只有六处读取：StationComponent.Init @012B/@013D（建站时按它开 workDroneDatas 和 workDroneOrders 两个数组）、PrefabDesc.ReadPrefab（写入方）、两个界面的「往里塞运输机」按钮（OnDroneIconClick，算 max −（idle + work））、以及 **PlanetTransport.Import @00C3**——它每次读档都按**当前** prefab 调一次 StationComponent.PatchDroneArray。而 PatchDroneArray 是**双向对齐**的（@0009 长度相等就早退，@0028 拷贝 min(旧,新) 个元素），所以老站点读一次档就跟上，调大调小都生效。这是「陷阱一」的反例，和 StorageComponent.Import 重新推导 GRID.stackSize 同一族。\n\n**调小有代价，而且是崩溃级的：只在站点空着的时候调小。** PatchDroneArray 只搬数组，**不动 idleDroneCount / workDroneCount**。一座停着 300 架的站点把上限改成 100，那两个计数还是 300，而派机写的是 workDroneDatas[workDroneCount]，直接越界。原版有同样的洞，只是原版没有任何途径改这个值。\n\n**没有类型级上限**——和运输船不一样：船有 idleShipIndices 那个 UInt64 位图，64 是硬顶；运输机只有 idleDroneCount（Int32）和两个按它开的数组，没有位图。真正的约束是内存：一架预分配 DroneData 60 字节 + LocalLogisticOrder 24 字节 = **84 字节**，而且**建站时就按上限全开，和实际停了几架无关**。1500 架 = 每座站 **123 KB**（启动日志里会报这个数），乘的是「真站点」的数量——**巨型建筑不走这里**（它们的架数在 megabuildings.json），而实测这个存档上巨型建筑占了站点总数的 98.9%（一颗 4928 站的星球里真站点只有 55 个），所以这一项的实际内存开销是几十 MB 量级。**但这条是随存档长的**：真物流站要是铺到几千座，1500 架就是每千座 120 MB，那时候要重新算这笔账。\n\n**顺带一个正向副作用。** 原版那个自适应错帧闸（droneTaskInterval）的上限是按**实际持有架数**分档的：InternalTickLocal @126D 是 `if (workDroneCount + idleDroneCount >= 75) 上限 10 else 上限 20`。实测这个存档的间隔平均 19.9、顶着 20，也就是每座站持有不到 75 架；真把架数喂上去之后上限会减半到 10，派机机会翻一倍。\n\n**这是这个数在本仓库里唯一的写入口**：machines.json 里 6531 的 maxDroneCount 已经留成 0 让给这里。同一个事实由两个文件两个键各写一份、谁赢只看注册顺序，本仓库为模型 ID / 建造栏槽位 / 合成面板格位栽过三次。填 0 或整条删掉 = 保持原版。",
   "stationDrones": [
     { "itemId": 2103, "maxDroneCount": 1500 },
     { "itemId": 2104, "maxDroneCount": 1500 },
-    { "itemId": 6531, "maxDroneCount": 1500 }
+    { "itemId": 6531, "maxDroneCount": 1500 },
+    { "itemId": 6687, "maxDroneCount": 1500 }
   ],
 
   "//collectorSpeed": "气体采集器（轨道采集器）的采集倍率，来自 PrefabDesc.stationCollectSpeed。采集速率 = gasSpeeds[i]/60 × collectSpeed × (1 - 60×workEnergyPerTick/(collectSpeed×gasTotalHeat))，算好之后存进存档，所以已建成的采集器由 GasCollectorPatches 在运行时按同一条式子重算。stationCollectSpeed 是 Int32，20 亿已经贴着上限；实际速率由 collectorMaxPerTick 夹住，所以这个数只要大到「一定会触顶」就行。填 0 保持原版。",

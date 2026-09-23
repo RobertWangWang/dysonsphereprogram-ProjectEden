@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.12.10";
+        public const string VERSION = "1.12.11";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -156,6 +156,7 @@ namespace ProjectEden
             Patches.BlueprintPairLoopPatches.Report();
             Patches.Diagnostics.BlueprintPasteProbe.Report();
             Patches.BeltThroughputProbe.Report();
+            Patches.UI.ResourceSearchWindow.Report();
             Patches.QualityCraftPatches.Report();
             Patches.QualityRepairPatches.Report();
             Patches.QualityCraftFlowPatches.Report();
@@ -197,6 +198,10 @@ namespace ProjectEden
             // 新生产设备同理：图标也是改色出来的，得排在 ProtoPreload 之后
             LDBTool.PreAddDataAction += MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction += MachineRegistry.OnPostAddData;
+
+            // 垃圾箱要问注册表「哪些物品是垃圾箱」，所以只能排在上一行之后：
+            // Machines 是在 PreAddDataAction 里才填出来的，Awake 那会儿它还是空的
+            LDBTool.PostAddDataAction += Patches.DustbinPatches.OnPostAddData;
 
             // 延后物品引用（ores.json 的配方引用 machines.json 的物品）**必须排在这一行之后**：
             // 要找的物品就是上一行注册的。见 LateItemRef——改的是 Items[] 的值不是长度，
@@ -355,6 +360,7 @@ namespace ProjectEden
             LDBTool.PreAddDataAction -= MachineRegistry.PreReserveGrids;
             LDBTool.PreAddDataAction -= MachineRegistry.OnPreAddData;
             LDBTool.PostAddDataAction -= MachineRegistry.OnPostAddData;
+            LDBTool.PostAddDataAction -= Patches.DustbinPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= Utils.LateItemRef.ResolveAll;
             LDBTool.PostAddDataAction -= Patches.MiniMinerPatches.OnPostAddData;
             LDBTool.PostAddDataAction -= BeltSpeedPatches.OnPostAddData;

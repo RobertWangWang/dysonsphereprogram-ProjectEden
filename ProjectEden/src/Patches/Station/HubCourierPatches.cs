@@ -191,6 +191,31 @@ namespace ProjectEden.Patches
             // 会让下面的 want 变成 0——摆不上货，表现是配送运输机原地不动
             long cap = (long)courierCarries * __instance.idleCourierCount;
 
+            // <b>再按「机甲这一种货还缺多少」夹一道，这是 1.12.11 修的那个洞。</b>
+            //
+            // 上面那个 cap 是<b>理论派出上限</b>：运载量 5000 × 闲置 20 架 = 每 tick
+            // 从槽位搬走 <b>10 万件</b>，而机甲往往只缺几百件。多搬的那 9 万多件
+            // 当 tick 就要原样退回去——可枢纽的槽位是<b>本地需求</b>、容量一千万，
+            // 物流网在同一 tick 里又把它填满了，于是退不回去，
+            // <see cref="FindDrainSlot"/> 只好另开一格：玩家看到的就是
+            // 「设了一格供货给伊卡洛斯，站里凭空多出一格同样的货，还自动设成了仓储」。
+            //
+            // 搬「真正缺的那点」而不是「理论上搬得动的那么多」，这笔churn就根本不存在。
+            // 式子<b>和 HasWork / MechaNeed 逐字同源</b>——三处共用一个式子，
+            // 才不会出现「日志说该送货、摆台却认为不用摆」这种自相矛盾。
+            long need = MechaShortfall(GameMain.mainPlayer?.deliveryPackage, __instance.filter, __instance);
+
+            if (need < cap) cap = need;
+
+            // 「机甲不缺这种货」和「想摆却一件也摆不上」是<b>两回事</b>，
+            // 合进一个计数就什么也测不出来——本仓库为这个形状付过好几次账
+            if (cap <= 0)
+            {
+                System.Threading.Interlocked.Increment(ref _stageNoNeedSinceReport);
+
+                return;
+            }
+
             int moved = Stage(station, __instance.storage, __instance.filter,
                 cap > int.MaxValue ? int.MaxValue : (int)cap);
 
@@ -470,6 +495,7 @@ namespace ProjectEden.Patches
                    + $"{dispenser.energyMax / 1e6:0.##} MJ" + angleText
                    + $"｜摆台 本周期 {System.Threading.Interlocked.Exchange(ref _stagedSinceReport, 0)} 件"
                    + $"／空手 {System.Threading.Interlocked.Exchange(ref _stageMissSinceReport, 0)} 次"
+                   + $"／机甲不缺 {System.Threading.Interlocked.Exchange(ref _stageNoNeedSinceReport, 0)} 次"
                    + $"（槽位里这种货还有 {SlotStock(station, dispenser.filter)} 件）"
                    + PairMath(dispenser);
         }
@@ -576,6 +602,44 @@ namespace ProjectEden.Patches
 
             // 不在清单里的货配送器根本不碰，当然也就没活干
             return false;
+        }
+
+        /// <summary>
+        /// 机甲这一种货<b>还能吃下多少</b>——摆台量的上限。
+        ///
+        /// <para><b>式子和 <see cref="HasWork"/> 逐字同源</b>，只是那边回答「有没有活」、
+        /// 这边回答「有多少活」。两处必须同源：摆台摆多了的那一笔当 tick 就要退回槽位，
+        /// 而枢纽的槽位常年是满的（本地需求 + 一千万容量 + 物流网持续补），
+        /// 退不回去就会另开一格同物品的槽位。</para>
+        ///
+        /// <para>只算<b>送货</b>方向。回收方向是货从机甲往枢纽走，不需要摆台，
+        /// 所以这里返回 0 是对的——回收那条路由原版自己往中转台里塞，
+        /// <see cref="DrainAll"/> 当 tick 收回槽位。</para>
+        /// </summary>
+        private static long MechaShortfall(DeliveryPackage pkg, int itemId, DispenserComponent dispenser)
+        {
+            if (pkg?.grids == null || itemId <= 0) return 0;
+
+            for (var g = 0; g < pkg.gridLength; g++)
+            {
+                if (pkg.grids[g].itemId != itemId) continue;
+
+                int inPack = dispenser?.packageUtility?.GetPackageItemCountIncludeHandItem(itemId) ?? 0;
+
+                long have = (long)pkg.grids[g].count + inPack;
+
+                int capacity = dispenser?.packageUtility?.GetPackageItemCapacity(itemId) ?? 0;
+
+                long room = (long)pkg.grids[g].stackSizeModified - pkg.grids[g].modifiedCount + capacity;
+
+                long need = pkg.grids[g].clampedRequireCount - have;
+
+                if (need <= 0 || room <= 0) return 0;
+
+                return need < room ? need : room;
+            }
+
+            return 0;
         }
 
         /// <summary>槽位里这种货一共还有多少件——只给诊断用。</summary>
@@ -1166,6 +1230,15 @@ namespace ProjectEden.Patches
         private static int _stageMissSinceReport;
 
         /// <summary>
+        /// 这一轮报告周期里「机甲根本不缺这种货，所以没摆」的次数。
+        ///
+        /// <b>和上面那个必须分开记。</b> 「不用摆」是正常稳态，「想摆却摆不上」是故障，
+        /// 合成一个计数就分不开——本仓库为「一个计数盖住好几种拒绝理由」栽过两次
+        /// （<c>CanBatch</c> 四种、<c>IsSteadyUnit</c> 六种），拆开之后各自一次就定位了。
+        /// </summary>
+        private static int _stageNoNeedSinceReport;
+
+        /// <summary>
         /// 从一个物流站槽位往中转台搬货，返回真的搬走了多少。
         ///
         /// <b>扣的是 AddItem 吃下的那一份，不是想搬的那一份</b>——和 remainInc 完全同构。
@@ -1233,6 +1306,32 @@ namespace ProjectEden.Patches
             return max;
         }
 
+        /// <summary>已经为「那一格满了、只好让它超过 max」报过一行的货。<b>每种货一次</b>。</summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte>
+            OverflowExplained = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
+
+        /// <summary>
+        /// 某一格被退货顶过 <c>max</c> 时报一行。
+        ///
+        /// <b>不能让它无声发生。</b> 面板上会出现「10,005,200 / 10,005,000」这种读数，
+        /// 玩家看到会当成 bug；而真正该被知道的那件事——「枢纽这一格已经装不下了，
+        /// 机甲还在往回还货」——不说就没人知道。
+        ///
+        /// 并行 tick 上的一次性日志要用并发容器抢，不能用普通 bool：
+        /// 每条线程都会看到未置位的标志，于是一起打。
+        /// </summary>
+        private static void ExplainOverflowOnce(int itemId)
+        {
+            if (!OverflowExplained.TryAdd(itemId, 0)) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"综合物流枢纽：{LDB.items.Select(itemId)?.name ?? itemId.ToString()} 那一格已经满了，"
+                + "而机甲还在往回还这种货，于是让它超过了格容量上限（面板上会显示成超出）。"
+                + "这是有意的：另开一格会凭空多出一个「仓储」方向的槽位，留在中转台上会把台子塞死。"
+                + "超过上限之后本地需求量变成负数，运输机自己就不再往这一格送了；"
+                + "想把多的推出去，把这一格改成「供应」即可。这行每种货只报一次。");
+        }
+
         /// <summary>
         /// 退货时该往哪一格放，以及那一格还剩多少空间。
         ///
@@ -1243,13 +1342,34 @@ namespace ProjectEden.Patches
         /// 恰恰是常态，不是边角情况：实测 天工装配厂 ×290000 就这样卡在台上，
         /// 一直卡到把中转台塞爆、连当前服务的那种货都摆不上去，**配送整个停摆**。</para>
         ///
-        /// <para>顺序：同物品且还有空间 → 空格子 → 找不到（-1，这一笔先留在台上）。
-        /// 落到空格子时会多出一格同物品的槽位，看着有点怪，但<b>货在面板上看得见、
-        /// 物流网也搬得走</b>，比烂在一个玩家看不见的仓里强。</para>
+        /// <para><b>而「满了就另开一格」是 1.12.11 收回去的，那是上一版留下的洞。</b>
+        /// 玩家报的症状是「给伊卡洛斯供货的那一格，站里会凭空多出一格同样的货，
+        /// 还自动设成了本地仓储 / 远程仓储」——那一格正是这里开的，
+        /// 而空格子的两个方向默认就是仓储。根因在摆台那一侧（见
+        /// <see cref="MechaShortfall"/>：原先每 tick 搬 10 万件、只送得出几百件），
+        /// 那边改完之后退不回去的量在稳态下是 0。</para>
+        ///
+        /// <para>所以现在的顺序是：同物品且还有空间 → 那一格；<b>同物品但满了 → 还是那一格，
+        /// 让它超过 max</b>；这一站压根没有这种货的格子 → 给它一个空格（不给就永远回不去）；
+        /// 一个空格都没有 → -1，这一笔先留在台上。</para>
+        ///
+        /// <para><b>「满了就溢进同一格」是离线跑出来的，不是拍的</b>（<c>tools/sim_hubtray.py</c>）。
+        /// 另外两个选项都试过、都不行：另开一格就是玩家报的症状；「留在台上等那一格腾空间」
+        /// 看着最干净，可那一格是<b>本地需求</b>格、物流网只会把它填得更满，永远腾不出空间——
+        /// 模型跑 3600 tick，中转台涨到 <b>299,500 / 300,000</b>，那正是 1.12.10 修掉的
+        /// 「天工装配厂 ×290000 卡在台上」换了个形态，而且这次会把别的货也一起挡住。</para>
+        ///
+        /// <para><b>超过 max 是安全的，而且是自我纠正的。</b>
+        /// <c>localDemandCount = max - (count + localOrder)</c>，<c>count</c> 越过 <c>max</c>
+        /// 之后它变成负数，而原版派机对「需求 ≤ 0」的处理就是跳过——
+        /// <b>运输机自己就不再往这一格送这种货了</b>。面板上会显示成
+        /// 「10,005,200 / 10,005,000」，略微难看，但那是<b>真的</b>：枢纽确实握着这么多。
+        /// 想推出去把这一格改成供应即可。货一件不丢，也不会多出一格。</para>
         /// </summary>
         private static int FindDrainSlot(StationStore[] slots, int itemId, out long room)
         {
             var empty = -1;
+            var full = -1;
 
             for (var s = 0; s < slots.Length; s++)
             {
@@ -1264,11 +1384,25 @@ namespace ProjectEden.Patches
                         return s;
                     }
 
-                    // 满了——别在这里 return，继续往下找空格子
+                    // 满了——记下来，但先继续找找有没有另一格同样的货还有空间
+                    if (full < 0) full = s;
+
                     continue;
                 }
 
                 if (empty < 0 && slots[s].itemId == 0) empty = s;
+            }
+
+            // 这种货有格子、只是全满了：溢进第一格，别另开一格。
+            // 上限取 Int32 余量，纯粹是防 count 溢出成负数——真要撞到它，
+            // 说明有别的东西坏了，而不是这里该处理的情况
+            if (full >= 0)
+            {
+                ExplainOverflowOnce(itemId);
+
+                room = int.MaxValue - (long)slots[full].count;
+
+                return room > 0 ? full : -1;
             }
 
             if (empty < 0)

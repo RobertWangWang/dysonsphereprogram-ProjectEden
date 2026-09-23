@@ -174,6 +174,7 @@ python tools\check_slots.py         # 物品格位 / 配方格位 / 建造栏槽
 python tools\check_guides.py        # 两份特性指南的 ##/### 条数与目录锚点是否对得上
 python tools\sim_throttle.py        # 离线复现巨型建筑分频节流的时序（见 MegaThrottle 那一节）
 python tools\sim_pairindex.py       # 物流配对表：增量维护和全量重建是否等价（见 LocalPairIndex 那一节）
+python tools\sim_hubtray.py         # 枢纽「摆台→派送→退货」一圈：复现「多出一格同样的货」，并比对三种退货策略
 powershell -ExecutionPolicy Bypass -File tools\check_bp_nest.ps1       # 蓝图 CheckBuildConditions 里那 6 个 O(预览²) 循环还在不在
 powershell -ExecutionPolicy Bypass -File tools\check_bp_inner.ps1      # 那 6 个循环是不是仍然只写 condition（跳过它们的前提）
 powershell -ExecutionPolicy Bypass -File tools\check_bp_writes.ps1     # 整个 CheckBuildConditions 写了哪些字段（为什么不能整体短路）

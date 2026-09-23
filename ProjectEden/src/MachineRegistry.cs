@@ -104,6 +104,22 @@ namespace ProjectEden
             }
         }
 
+        /// <summary>
+        /// 配成垃圾箱的那些物流站的物品 ID。<see cref="Patches.Station.DustbinPatches"/> 用。
+        ///
+        /// 走注册表而不是在补丁里写死号码：物品 ID 由 <see cref="ProtoSlots.ResolveItemId"/>
+        /// 解析，撞号时会顺延，写死的号会安静地指到别人身上。
+        /// </summary>
+        internal static IEnumerable<int> DustbinItemIds
+        {
+            get
+            {
+                foreach (Machine machine in Machines)
+                    if (machine.IsStation && machine.Entry?.station?.voidItems == true)
+                        yield return machine.ItemId;
+            }
+        }
+
         internal static void Load()
         {
             Config = JsonHelper.Load<MachinesConfig>("machines");
@@ -406,7 +422,8 @@ namespace ProjectEden
                 AddBuildRecipe(machine);
 
                 string what = machine.IsStation
-                    ? $"物流站：运输机 {entry.station?.maxDroneCount ?? 0} / 运输船 {entry.station?.maxShipCount ?? 0}" +
+                    ? (entry.station?.voidItems == true ? "垃圾箱（物流站，槽位每 tick 清空）：" : "物流站：") +
+                      $"运输机 {entry.station?.maxDroneCount ?? 0} / 运输船 {entry.station?.maxShipCount ?? 0}" +
                       (entry.station?.courierCount > 0 ? $" / 配送运输机 {entry.station.courierCount}" : "")
                     : machine.IsAccumulator
                         ? "蓄电器"

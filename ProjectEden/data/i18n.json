@@ -130,6 +130,8 @@
     "氧化还原设备": "Redox Facility",
     "综合物流枢纽": "Integrated Logistics Hub",
     "同时停泊行星内物流运输机与星际物流运输船的大型枢纽。机库与泊位都做了扩容，一座顶数座。": "A large hub that berths Logistics Drones and Logistics Vessels at the same time. Both the hangar and the docks are enlarged, so one hub does the work of several stations.",
+    "垃圾箱": "Dustbin",
+    "把不再需要的产物收进来直接销毁的物流站。储物格的用法和普通物流站完全一样：设成本地需求就把全行星的这种货收过来，设成远程需求就跨星系收，传送带口也照常进货——区别只是进来的东西不会再出去。销毁量记在生产面板的消耗栏里，所以扔掉了什么、扔了多少一目了然。它不产出任何东西。注意：放进储物格的空间翘曲器不会被销毁，那一格是它自己的星际船用来跃迁的。": "A logistics station that takes in products you no longer want and destroys them. Its storage slots work exactly like any other station's: set one to Local Demand and drones bring that item in from all over the planet, set it to Remote Demand and vessels fetch it from other systems, and the belt ports feed it as usual — the only difference is that nothing ever leaves again. Everything destroyed is recorded in the consumption column of the production panel, so you can see exactly what you are throwing away and how much. It produces nothing. Note: Space Warpers placed in a storage slot are not destroyed — that slot is what its own vessels draw on to warp.",
     "锂电池蓄电器": "Lithium-Ion Accumulator",
     "以钴酸锂为正极、石墨为负极的锂离子储能阵列。锂离子在两极之间往返，充得快、存得多——同样的体积里塞进数倍的电，还能几分钟内吃满。": "A lithium-ion storage array with a lithium cobalt oxide cathode and a graphite anode. Lithium ions shuttle between the electrodes, so it charges fast and holds far more: several times the energy in the same volume, and full in minutes.",
     "锂电池蓄电器（满）": "Lithium-Ion Accumulator (full)",
@@ -570,6 +572,17 @@
     "对产生设备": "Pair Production Facility",
     "彭宁阱复合室": "Penning Trap Recombination Chamber",
     "把两种反粒子放进同一个阱里，慢下来，让它们自己找到对方。成品是一团中性的反氢——不再带电，于是磁场按不住它，唯一还能把它和世界隔开的只剩真空本身。而那点真空不是泵维持的，是墙上那几块海绵维持的；海绵吃饱的那一刻，这间屋子就不再是安全的。": "Put both kinds of antiparticle in the same trap, slow them down, and let them find each other. The product is a cloud of neutral antihydrogen — no longer charged, so no magnetic field can hold it, and the only thing still separating it from the world is vacuum itself. That vacuum is not maintained by a pump but by the sponges on the wall; the moment those sponges are full, this room stops being safe.",
-    "反物质复合设备": "Antimatter Recombination Facility"
+    "反物质复合设备": "Antimatter Recombination Facility",
+    "资源搜索": "Resource Search",
+    "{0} 开关　Esc 关闭": "{0} to toggle   Esc to close",
+    "矿石或气体的名字，例如 白钨矿": "Ore or gas name, e.g. Scheelite",
+    "输入矿石或气体的名字": "Type an ore or gas name",
+    "没有找到这种资源": "No such resource in the index",
+    "{0}：{1} 颗星球": "{0}: {1} planets",
+    "　正在后台扫描 {0}/{1} 颗星球…": "   scanning {0}/{1} planets...",
+    "{0} 个矿脉    储量 {1}": "{0} veins    reserve {1}",
+    "气态    速率 {0}": "gas    rate {0}",
+    "（拖右边条翻页）": " (drag the bar to page)",
+    "　还匹配到另外 {0} 种，把名字打全一点": "   {0} more matched; type more of the name"
   }
 }
