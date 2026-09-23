@@ -41,6 +41,19 @@ namespace ProjectEden.Utils
         public bool proceduralModels;
 
         /// <summary>
+        /// 把**物理碰撞体的高度**压到和画出来的模型一样高。<b>默认开</b>。
+        ///
+        /// <para>不开的话，巨型建筑的碰撞体会原封不动继承被克隆的物流运输站——
+        /// 那是一座细高塔，而模型是矮胖的。低空飞过去会撞上一堵看不见的墙。</para>
+        ///
+        /// <para><b>这和「无碰撞」那个作弊开关无关，别指望它。</b> 作弊开关关的是
+        /// <c>ColliderPool</c>（Unity 物理，建造工具的射线用）；撞机甲的是另一套——
+        /// <c>PrefabDesc.colliders</c> → <c>PlanetPhysics</c> →
+        /// <c>PlayerController.HandleCollision</c>。</para>
+        /// </summary>
+        public bool fitCollidersToModel = true;
+
+        /// <summary>
         /// 连金属度/光滑度贴图（<c>_MS_Tex</c>）一起换成常量图。
         /// <b>默认关</b>：试过一次，结果是整座建筑完全不可见。
         /// </summary>

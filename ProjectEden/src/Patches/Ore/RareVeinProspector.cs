@@ -54,8 +54,49 @@ namespace ProjectEden.Patches
         /// <summary>上次有进展的时刻。扫描线程要是死了，挂起的请求永远不会回来。</summary>
         private static float _lastProgress;
 
-        /// <summary>多久没进展就认定扫描线程出事了。一颗星球零点几秒，30 秒足够宽。</summary>
-        private const float StallSeconds = 30f;
+        /// <summary>
+        /// 多久没进展就认定扫描线程出事了。原版一颗星球零点几秒，30 秒足够宽。
+        ///
+        /// <b>但这个数必须跟着行星半径走，不能是个常量。</b> 扫描的工作量
+        /// ∝ 顶点数 ∝ 半径²（<c>PlanetAuxData..ctor</c> @0015 把 <c>segment</c> 定成半径，
+        /// 而格数 ∝ segment²），所以 planet.json 把半径从 200 翻到 400 之后，
+        /// 同一颗星球要花 <b>4 倍</b>的时间——30 秒就从「足够宽」变成了会误报。
+        /// 实测正是如此：136 颗扫到 16 颗被判定「扫描线程出事了」，而它并没有出事。
+        ///
+        /// 这是 CLAUDE.md 里那条「按次数计的节流只在每次代价恒定时成立」的又一例：
+        /// 阈值的单位要和代价的单位一致，代价随世界规模涨，阈值就得跟着涨。
+        /// </summary>
+        private static float StallSeconds
+        {
+            get
+            {
+                int radius = PlanetRadiusPatches.Active ? PlanetRadiusPatches.Radius : VanillaRadius;
+
+                if (radius <= 0) radius = VanillaRadius;
+
+                float scale = (float)radius / VanillaRadius;
+
+                return 30f * scale * scale;
+            }
+        }
+
+        /// <summary>原版普通行星的半径。上面那个缩放的分母。</summary>
+        private const int VanillaRadius = 200;
+
+        /// <summary>
+        /// 把这个阈值是怎么算出来的写进日志。报了状态才分得清
+        /// 「线程真死了」和「只是这个数定小了」——上一版没有这一句，
+        /// 于是一条正确格式的警告说了一件假事，还看不出假在哪。
+        /// </summary>
+        private static string StallBasis()
+        {
+            if (!PlanetRadiusPatches.Active || PlanetRadiusPatches.Radius <= 0) return "";
+
+            float scale = (float)PlanetRadiusPatches.Radius / VanillaRadius;
+
+            return $"（阈值已按行星半径 {PlanetRadiusPatches.Radius} 放大：扫描量 ∝ 半径²，"
+                   + $"{scale:0.##}² = {scale * scale:0.#} 倍，30 秒 → {30f * scale * scale:0} 秒）";
+        }
 
         private static int _waitLogged;
 
@@ -179,7 +220,8 @@ namespace ProjectEden.Patches
                 ProjectEdenPlugin.Log.LogWarning(
                     $"稀有矿脉探矿：{StallSeconds:0} 秒没有任何一颗星球扫完，判定扫描线程出事了，停止探矿。"
                     + $"已扫 {_scanned}/{_total} 颗，挂起 {InFlight.Count} 颗。"
-                    + (string.IsNullOrEmpty(err) ? "游戏没有报错误信息" : "扫描线程的错误是：" + err));
+                    + (string.IsNullOrEmpty(err) ? "游戏没有报错误信息" : "扫描线程的错误是：" + err)
+                    + StallBasis());
 
                 Finish();
 

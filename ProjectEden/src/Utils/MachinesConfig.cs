@@ -219,6 +219,78 @@ namespace ProjectEden.Utils
         public float iconMinSaturation;
         public float iconValueScale;
 
+        // ── 自绘外观：程序化模型 + 自画图标 ──────────────────────
+
+        /// <summary>
+        /// 用<b>代码生成的模型</b>换掉克隆来的那个外观，填建模函数的名字
+        /// （见 <c>MegaBuildingMeshes.Apply</c> 里那张按名字分派的表，例如 <c>dustbin</c>）。
+        /// 留空就沿用源建筑的模型，只改色。
+        ///
+        /// <para><b>按名字分派而不是按物品号，这一点是有意的。</b> 巨型建筑那边按
+        /// <c>itemId</c> 分派没问题——它们的号钉死在 <c>megabuildings.json</c> 里；
+        /// 而 <c>machines.json</c> 的物品号由 <c>ProtoSlots</c> 解析、撞号会顺延，
+        /// 顺延之后按号分派会安静地退回原版外观，正是「每一步都成功、功能整个不在」那种。</para>
+        ///
+        /// <para><b>它只换外观，换不了占地。</b> 底盘、碰撞体、传送带接口全部来自被克隆的
+        /// 原版建筑（<c>ReadPrefab</c> 读的是 <c>resources.assets</c>），所以一座
+        /// 克隆自物流运输站的建筑，不管模型画多小，站的地方还是那么大。</para>
+        /// </summary>
+        public string modelShape;
+
+        /// <summary>
+        /// 模型**横向占几格**。填了它就按它算缩放，<see cref="modelScale"/> 不再生效。
+        ///
+        /// <para><b>比直接填缩放系数好，因为它是可推导的、不依赖任何单位换算。</b>
+        /// 源建筑有多少格写在 <c>PrefabDesc.dragBuildGridDistOverride</c> 里——它是个
+        /// <c>IntVector2</c>，原版把它直接喂给
+        /// <c>PlanetAuxData.SnapDotsByGridNonAlloc(…, IntVector2 gridDist, …)</c>，
+        /// 也就是拖拽建造时两座之间隔几**格**。于是
+        /// <c>缩放 = 目标格数 ÷ 源建筑格数</c>，<b>米和格的换算在这个比值里约掉了</b>，
+        /// 而那个换算恰恰是离线读不到的东西。</para>
+        ///
+        /// <para>源建筑那个值要是 0（原版有些建筑不填这个 override），就退回
+        /// <see cref="modelScale"/> 并打一行说明——不猜。</para>
+        ///
+        /// <para><b>它只管模型，不管占地。</b> 碰撞体和传送带接口仍然是源建筑的，
+        /// 所以「模型 3 格」不等于「能按 3 格排布」。</para>
+        /// </summary>
+        public int modelCells;
+
+        /// <summary>模型相对原版包围盒的缩放，留 0 用默认。<see cref="modelCells"/> 优先。</summary>
+        public float modelScale;
+
+        /// <summary>模型高度的额外倍率，留 0 = 1。矮胖的东西把它调小。</summary>
+        public float modelHeightScale;
+
+        /// <summary>
+        /// 把**占地**缩到几格：碰撞体、地基点、选中框、蓝图框、拖拽间距一起按同一个比例缩。
+        /// 留 0 = 不动。<b>只缩不放大</b>（已经不大于目标就跳过并说明）。
+        ///
+        /// <para>比例是推出来的：<c>k = 目标格数 ÷ 当前格数</c>，而当前格数 =
+        /// <c>建造碰撞体整宽 ÷ 一格弧长</c>，一格弧长是
+        /// <see cref="ProjectEden.Model.MegaBuildingMeshes.MetresPerCell"/>
+        /// （从 <c>PlanetGrid.SnapTo</c> 推的 2π/5，和行星半径无关）。</para>
+        ///
+        /// <para><b>传送带接口（<c>portPoses</c>）故意不缩，这是所有者拍的板。</b>
+        /// 接口缩了会落到「一格弧长 × k」的倍数上，而带子是按<b>整格</b>吸附的——
+        /// 对不上就再也接不上带子，而这件事离线验证不了。不缩的代价只是接口留在原来的位置、
+        /// 看着飘在建筑外面；带子照常接得上，建筑之间也确实能按目标格数挨着放。</para>
+        ///
+        /// <para><b>碰撞体数组必须先克隆再改。</b> <c>CloneModel</c> 里
+        /// <c>colliders</c> / <c>buildColliders</c> 是把源建筑那份<b>按引用</b>接过来的，
+        /// 就地改等于把原版物流运输站也一起缩了——和「材质数组是我们的、里面的材质不是」
+        /// 同一个坑，本仓库为那个坑记过一次。</para>
+        /// </summary>
+        public int footprintCells;
+
+        /// <summary>
+        /// 自画图标的文件名（不带扩展名，对应 <c>assets/icons/&lt;名字&gt;.png</c>）。
+        ///
+        /// 填了就走自画图标那条路，上面那四个 <c>icon*</c> 改色参数**一概不用**——
+        /// 那几个是「拿源建筑的图标改个色」用的，两条路只能走一条。
+        /// </summary>
+        public string iconName;
+
         // ── 建造这台机器的配方 ───────────────────────────────
 
         public int recipeId;

@@ -541,11 +541,6 @@ namespace ProjectEden
                 }
             }
 
-            // 换掉被画出来的几何。放在染色之后：材质已经是我们自己的副本了，
-            // 而占地 / 碰撞体 / 传送带接口下面还会从原版那份 desc 抄过来，不受影响。
-            if (Config.proceduralModels && modelPrefabDesc.lodMeshes != null)
-                Model.MegaBuildingMeshes.Apply(ref modelPrefabDesc, entry.itemId, entry.displayName);
-
             modelPrefabDesc.modelIndex = id;
             modelPrefabDesc.hasBuildCollider = desc.hasBuildCollider;
             modelPrefabDesc.colliders = desc.colliders;
@@ -560,6 +555,18 @@ namespace ProjectEden
             modelPrefabDesc.roughRadius = desc.roughRadius;
             modelPrefabDesc.barHeight = desc.barHeight;
             modelPrefabDesc.barWidth = desc.barWidth;
+
+            // 换掉被画出来的几何。**必须排在上面那批 `= desc.xxx` 之后，这一条是踩出来的。**
+            //
+            // 它原先在前面，理由写着「占地 / 碰撞体下面还会从原版抄过来，不受影响」——
+            // 那句话在 Apply 只换网格的年代是对的。现在 Apply 还会<b>按模型的实际高度
+            // 把碰撞体压矮</b>（见 FitColliderHeight），而上面那行
+            // `modelPrefabDesc.colliders = desc.colliders` 会把压好的副本<b>按引用顶回去</b>，
+            // 于是修复静默失效：日志照常打「已压到模型高度」，机甲照撞不误。
+            //
+            // 一般化：**一个「先算好再被覆盖」的顺序错误不会报错，只会让功能整个不在。**
+            if (Config.proceduralModels && modelPrefabDesc.lodMeshes != null)
+                Model.MegaBuildingMeshes.Apply(ref modelPrefabDesc, entry.itemId, entry.displayName);
 
             // **配了枢纽段的建筑既不是组装机也不是物流站。**
             //

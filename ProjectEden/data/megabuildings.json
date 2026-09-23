@@ -11,6 +11,8 @@
   "//tint": "**tint 是乘在自绘图集上的，不是给原版贴图上色的。** 这九个数最早是在「九座共用同一个原版网格、只能靠染色区分」的时代调的，那时候饱和度越高越好认；而现在每座都有自己的程序化网格和自己那张浅灰细节图集（主钢板 196,200,208），高饱和低明度的 tint 会把整张图集乘成近黑——实测九座里有六座主面亮度低于 110，报上来的症状就是「建模大多呈现为黑色」。现在的取值规则是**保住色相、饱和度封顶 0.45、明度托底 0.88**：识别靠色相，明暗留给图集自己的缝、铆钉和板边。",
   "//proceduralModels": "用代码生成的几何替掉克隆来的原版模型。copyFromModelId 是全局的，五座建筑克隆的是同一个模型，关掉这个开关就退回「同款不同色」。只换被画出来的网格；占地、碰撞体、传送带接口仍来自原版 prefab。",
   "proceduralModels": true,
+  "//fitCollidersToModel": "把**物理碰撞体的高度**压到和画出来的模型一样高。默认开。\n\n不开的话，巨型建筑的碰撞体原封不动继承被克隆的物流运输站——那是一座细高塔，而模型是矮胖的，于是**低空飞过去会撞上一堵看不见的墙**，画面上什么都没有。\n\n**别指望「无碰撞」那个作弊开关，它关的是另一套。** 撞机甲的这条链是枚举出来的：PrefabDesc.colliders → PlanetFactory.CreateEntityDisplayComponents → PlanetPhysics.AddColliderData → PlayerController.HandleCollision；而 cheats.json 的无碰撞关的是 ColliderPool（Unity 物理，建造工具的射线用）。两套互不相干。\n\n做法是整体等比压扁（y 乘 模型顶÷碰撞体顶），不是逐个裁顶：裁顶会把「整个盒子都在模型顶之上」的压成退化薄片，而 ColliderData 里还有 link / dataLen 这类可能互相引用的字段，删元素更危险。建筑的局部原点就在地面上，所以按 y 乘系数天然是「从地面往下压」。只压不抬。",
+  "fitCollidersToModel": true,
   "//modelScale": "程序化模型相对原版包围盒的缩放，1 = 撑满整个盒子。**包围盒不是占地面积**：原版物流运输站是细塔配细腿，盒子里大部分是空的，撑满会比原版看着大一大圈。觉得还是大就调小这个数。",
   "modelScale": 0.6,
   "//overrideMainTex": "把主贴图换成自绘图集（钢板/铆钉/格栅/发光带那套）。建筑如果变得看不见，把它和下面那个分别关掉，就能隔离出是哪张图的问题。",
@@ -357,8 +359,8 @@
       "//slot": "建造栏第 1 类第 12 槽。和第 11 槽一样超出界面的 10 个按钮，启动时会有一条 WARNING，靠滚动到得了——BuildMenuSlotGuardPatches 的那条提示说的就是这个。",
       "//singularity-vault": "**奇点储能厂：第十二座巨型建筑，也是第一座能量枢纽型的。** 它不生产任何东西——它把电从电网抽进电浆蓄能柜，或者把充满的柜子放回电网。",
       "//why-exchanger": "**为什么是枢纽不是发电机。** 发电机会把燃料吃掉；枢纽放完电把空壳还给你。一座每分钟吃 20 个柜子、一个不还的电厂不是电池，是材料黑洞。原版把「充电 → 搬走 → 放电」建模成枢纽（蓄电器那一对），这里照它走。组件模型允许同一台实体挂多个：CreateEntityLogicComponents 里 isPowerExchanger（IL 08A9）和 isPowerGen（059E）、isAssembler（1122）、isStation（14FE）都是独立的顺序 if。",
-      "//power": "60 GW = 1e9 J/tick。一块电浆蓄能柜 179.82 GJ，所以充满或放完正好 3 秒——20 块/分，一条传送带供得上。PrefabDesc.exchangeEnergyPerTick 是 Int64，这个量级毫无压力。",
-      "//not-free-energy": "**它不增加总发电量。** 放电 60 GW 的背后必须有人先充进去 60 GW（往返效率 1.00，和原版蓄电器一致）。这条线的意义是把电**打包运走**——DSP 里跨星球送电只能靠蓄电器，而原版一块 540 MJ 实在太碎。",
+      "//power": "1800 GW = 3e10 J/tick（1.12.12 由 60 GW 抬上来）。一块电浆蓄能柜 179.82 GJ，所以 6 tick（0.1 秒）一块，600 块/分；过载柜 12 tick，300 块/分。**传送带得跟得上**：每秒 10 进 10 出，否则它会安静地停在那里（InputUpdate @0042 的 fullCount >= 20）。具体数字和天花板见下面 exchanger.energyPerTick 那条注释。",
+      "//not-free-energy": "**它不增加总发电量。** 放电 1800 GW 的背后必须有人先充进去 1800 GW（往返效率 1.00，和原版蓄电器一致），也就是六十座氧化还原燃烧厂。这条线的意义是把电**打包运走**——DSP 里跨星球送电只能靠蓄电器，而原版一块 540 MJ 实在太碎。",
       "//recipeType": "**4（Assemble），而它在这里只有一个用途：让这座建筑本身做得出来。** 配了枢纽段之后 isAssembler 会被关掉（见 MegaBuildingRegistry 里那段注释），所以 assemblerRecipeType 对它没有意义；但同一个字段还决定**建造配方的 Type**，留 0 的话那条配方是 Type None——只能手搓，而这座建筑要 200 台蓄电器加 500 个能量矩阵，手搓不现实。填 4 就能进制造台。",
       "//no-assembler": "它不生产、不收发货：没有装配机组件也没有物流站组件，只有能量枢纽。这样点开它就是原版枢纽窗口（三个模式按钮在那儿），既不会弹空的制造面板，也不会有几个窗口抢同一次点击——那一场争抢上一版直接抛了 NullReferenceException。",
       "//no-audit": "整条储能线一个热值都没有：能量走 PrefabDesc.maxAcuEnergy 和这里的 exchangeEnergyPerTick，不是 ItemProto.HeatValue，**不进能量审计**——而那是对的，它消耗的是电网里真实存在的电。",
@@ -389,7 +391,8 @@
         "alsoServes": [
           "overload-vault"
         ],
-        "energyPerTick": 1000000000
+        "//energyPerTick": "充放功率，单位**焦/tick**（面板上的瓦 ÷ 60）。3e10 × 60 = 1800 GW（1.12.12 由 60 GW 抬上来，所有者决定）。\n\n**两个字段都是 Int64，所以这个数不接近位宽上限**：PrefabDesc.exchangeEnergyPerTick 和 PowerExchangerComponent.energyPerTick 都是 Int64（实测），而且 CalculateActualEnergyPerTick 全程没有一条 conv.i4。要是哪天它们是 Int32 就得小心——3e10 早就越过 2.147e9 了。\n\n**真正的天花板不是位宽，是「一 tick 最多换一个柜子」。** PowerExchangerComponent.InputUpdate 里**没有循环**：@0055 那句 currPoolEnergy -= maxPoolEnergy 每次调用只走一遍，换完之后 @0111 把本 tick 的抽取量夹成 maxPoolEnergy - currPoolEnergy。所以 energyPerTick 一旦超过 maxPoolEnergy（电浆柜 179.8 GJ ≈ 10,788 GW、过载柜 ≈ 21,576 GW）就不再更快，也不会浪费，只是白填一个大数。1800 GW 是电浆柜那条线的 1/6：6 tick 一个柜，10 个/秒。\n\n**还有两条会表现成「充电变慢」而不是报错的闸**：@0042 的 fullCount >= 20（内部只存 20 个满柜，所以带子必须每秒运走 10 个、送进 10 个），以及空柜带增产点时 CalculateActualEnergyPerTick 会返回 energyPerTick × (1 + accTableMilli[级])——本 mod 最高级 6 即 ×2.5 = 4500 GW，仍在天花板内。\n\n**改这个数必须连运行时对齐一起想**：energyPerTick **进存档**（Export @0082 / Import @0096 原样读回），而且原版没有像 StorageComponent 那样回头从 proto 重新推导。更要命的是本 mod 整条识别链都挂在它身上——GameData.Import 后置那句 `FindPair(pool[i].energyPerTick, …) == null → continue` 读的是组件里的旧值，所以光改配置不仅老厂功率不变，连它们的 maxPoolEnergy 修复和换档都会一起失灵。AlignRate 就是为这件事加的：它按**建筑的 protoId** 认，不按功率认，排在那道闸之前。\n\n对齐是**双向**的（调大调小都即时生效），依据是枚举写入口：SetEmpty / Import / PowerSystem.Import / NewExchangerComponent，**没有任何界面能写它**（UIPowerExchangerWindow._OnUpdate 只读来显示）。这正是 stations.json 里 energyMax 那一条的判据——有界面写入口的（充能滑条）才只抬一次，没有的就对齐。",
+        "energyPerTick": 30000000000
       },
       "recipeItemIds": [
         2206,

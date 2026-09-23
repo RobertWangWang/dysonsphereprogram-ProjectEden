@@ -4,6 +4,13 @@
   "//slotCapacity": "单个储物格容量。改 prefabDesc 只对新建的站点生效，已建成的由运行时补齐。",
   "slotCapacity": 10000000,
 
+  "//stationSlotCapacity": "**逐站点覆盖单格容量**，只动这里列出来的，没列的一律用上面那个全局 slotCapacity。\n\n为什么需要它：slotCapacity 是**全体生效**的——三个物流站、十六座巨型建筑、垃圾箱、还有全部气体采集器吃的是同一个数。巨型建筑的槽位是给制造台配料用的，跟着抬到十亿只会让第一座建成的建筑把全网的料吸干（催化剂槽当年就是这么栽的，症状是「我别的反应器全停了」，指向的地方离病因十万八千里）。所以「只抬三个物流站」只能逐个列。和 stationEnergy / stationDrones 同一个形状。\n\n**上限不是 max 那个 Int32，是 inc。** StationStore.max 是 Int32（21.47 亿），但同一个结构体里的 inc 也是 Int32，而它装的是**整格的增产点数**、随 count 成正比长——StationComponent.InputItem @0057-0061 是裸的 `inc += inc`，**一个夹子都没有**。所以真正的安全上限是 int.MaxValue ÷ 每件喷涂点数：\n\n  不喷涂        21.47 亿\n  原版 Mk.III（每件 4 点）  5.37 亿\n  本 mod 最高档（每件 6 点） 3.58 亿\n\n**越界是抛异常不是数字难看**：inc 绕成负数之后，喷涂等级是 inc / count，负下标查 Cargo.incTableMilli 直接越界。\n\n**所以这里取 3 亿（所有者决定），而不是 max 放得下的 20 亿。** 3 亿在「每件 6 点」那条线（3.579 亿）之下：满档喷涂时 inc 顶到 18 亿，离 Int32 上限还有 16% 余量，**喷不喷都安全**。填 20 亿只在「这三座站里的货永远不喷增产剂」时成立，而那是个没人能保证的前提——货是从物流网来的，谁都可能往上游放一台喷涂机。\n\n顺带核过的：count + localOrder + remoteOrder 那几个派生属性全是裸 Int32 加法（StationStore 的 7 个 get_*），但在途量由原版自己的记账收敛在 max + 单次运载量以内（运输机 1 万 / 运输船 100 万），20 亿之上还有约 1.4 亿余量，不会溢出。",
+  "stationSlotCapacity": [
+    { "itemId": 2103, "capacity": 300000000 },
+    { "itemId": 2104, "capacity": 300000000 },
+    { "itemId": 6531, "capacity": 300000000 }
+  ],
+
   "//stationMaxItemKinds": "储物格数量。原版本地站 4 格、星际站 5 格。超过 6 时必须由 StationExpandPatches 接管——原版的 AddItem 和四个供需查询被展开成 storage[0..5] 的硬编码判断，第 7 格往后货物会凭空消失。",
   "stationMaxItemKinds": 30,
 

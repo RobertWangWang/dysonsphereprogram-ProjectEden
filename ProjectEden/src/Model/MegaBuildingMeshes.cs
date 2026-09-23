@@ -970,9 +970,91 @@ namespace ProjectEden.Model
             k.AddRailing(new Vector3(0f, 0f, 0f), 1.06f * U, 1.06f * U, 0.22f * U, 0.16f * U, S.Hazard);
         }
 
-        internal static bool Apply(ref PrefabDesc desc, int itemId, string debugName)
+        // ── 垃圾箱：一只上宽下窄的翻斗，顶上一块半掀的盖 ────────────
+        //
+        // 造型母题是**翻斗（skip）**：上宽下窄的斜箱。这是现实里最容易一眼认出的
+        // 废料容器轮廓，而它恰好也说明了这台建筑在做什么——东西从上面进去，不出来。
+        //
+        // <b>刻意做得又矮又宽，这一条是有原因的而不是审美。</b> 它的**占地和星际物流
+        // 运输站一样大**（底盘、碰撞体、传送带口全是从 2104 克隆来的，改不动），
+        // 所以体量上必须压住：一只垃圾箱要是长得和物流站一样高，读起来就是另一座工厂，
+        // 而玩家的抱怨（「太大了」）说的正是这件事。真要连占地一起缩，那是另一码事——
+        // 见 <c>MachineRegistry</c> 里那条占地诊断。
+        //
+        // 盖子刻意往后偏一点并且抬起来，这样正面能看见斗口；全合上就读成一个箱子了。
+        private static void Dustbin(MeshKit k)
+        {
+            // 混凝土基座 + 一圈危险条：告诉玩家这是个「别站进去」的地方
+            k.AddBox(new Vector3(0f, 0.09f * U, 0f), new Vector3(2.00f * U, 0.18f * U, 2.00f * U),
+                     S.Concrete, S.Grating);
+
+            k.AddRailing(Vector3.zero, 0.92f * U, 0.92f * U, 0.18f * U, 0.15f * U, S.Hazard);
+
+            // 斗身：上宽下窄。整座建筑的轮廓全靠这一块
+            k.AddTaperedBox(new Vector3(0f, 0.18f * U, 0f),
+                            new Vector2(1.16f * U, 0.90f * U),
+                            new Vector2(1.52f * U, 1.22f * U),
+                            0.60f * U, S.PlateRivet, S.PlateDark);
+
+            // 两道横向加强筋：钢板焊的，不是一整块塑料
+            for (var i = 0; i < 2; i++)
+                k.AddBox(new Vector3(0f, (0.32f + 0.20f * i) * U, 0f),
+                         new Vector3((1.28f + 0.14f * i) * U, 0.05f * U, (1.00f + 0.12f * i) * U),
+                         S.Accent);
+
+            // 盖子：往后偏、略抬起，正面才看得见斗口
+            k.AddBox(new Vector3(0f, 0.84f * U, -0.10f * U),
+                     new Vector3(1.54f * U, 0.07f * U, 1.10f * U), S.PlateDark, S.PlateLight);
+
+            // 铰链：两个小墩子（MeshKit 的圆柱只有竖着的，横轴就用方块表达）
+            for (var sx = -1; sx <= 1; sx += 2)
+                k.AddBox(new Vector3(0.58f * U * sx, 0.80f * U, -0.62f * U),
+                         new Vector3(0.14f * U, 0.12f * U, 0.14f * U), S.Pipe);
+
+            // 投料溜槽：正面一段向下的斜口，"货从这里掉进去"
+            k.AddTaperedBox(new Vector3(0f, 0.60f * U, 0.72f * U),
+                            new Vector2(0.72f * U, 0.34f * U),
+                            new Vector2(0.94f * U, 0.50f * U),
+                            0.26f * U, S.Vent, S.Grating);
+
+            // 压实机壳 + 液压杆：说明「进去的东西被压掉了」
+            k.AddCylinder(new Vector3(0f, 0.78f * U, -0.86f * U), 0.26f * U, 0.34f * U, 12,
+                          S.PlateDark, S.PlateLight);
+            k.AddCylinder(new Vector3(0f, 1.12f * U, -0.86f * U), 0.09f * U, 0.20f * U, 8, S.Glow);
+
+            // 两侧的设备箱：工业感主要靠这一排
+            for (var sx = -1; sx <= 1; sx += 2)
+                k.AddGreebleRow(new Vector3(0.86f * U * sx, 0.30f * U, -0.42f * U),
+                                new Vector3(0.86f * U * sx, 0.30f * U, 0.42f * U),
+                                3, new Vector3(0.12f * U, 0.16f * U, 0.14f * U), S.Vent);
+        }
+
+        internal static bool Apply(ref PrefabDesc desc, int itemId, string debugName,
+                                   string shape = null, float scaleOverride = 0f, float heightOverride = 0f,
+                                   int cells = 0)
         {
             var kit = new MeshKit();
+
+            // <b>两条分派路径，按名字的那条是给 machines.json 用的。</b>
+            // 巨型建筑按 itemId 分派（它们的号钉死在 megabuildings.json 里）；
+            // machines.json 的建筑用名字，因为那边的物品号由 ProtoSlots 解析、撞号会顺延，
+            // 而顺延之后按号分派就会安静地退回原版外观——正是本仓库反复记的那种
+            // 「每一步都成功、功能整个不在」。
+            if (!string.IsNullOrEmpty(shape))
+            {
+                switch (shape)
+                {
+                    case "dustbin": Dustbin(kit); break;
+
+                    default:
+                        ProjectEdenPlugin.Log.LogWarning(
+                            $"{debugName} 配了 modelShape「{shape}」，但没有对应的建模函数，外观保持原版");
+
+                        return false;
+                }
+
+                return Finish(ref desc, kit, debugName, scaleOverride, heightOverride, null, cells);
+            }
 
             switch (itemId)
             {
@@ -995,15 +1077,65 @@ namespace ProjectEden.Model
                 default: return false;
             }
 
+            return Finish(ref desc, kit, debugName, scaleOverride, heightOverride,
+                          MegaBuildingRegistry.EntryOf(itemId));
+        }
+
+        /// <summary>
+        /// 两条分派路径的共同尾巴：定尺寸、生成网格、挂进 prefabDesc、换贴图。
+        ///
+        /// <b>抽出来是因为它不能有第二份。</b> 这里面有四件必须一起做对的事
+        /// （<c>mesh</c> / <c>meshes</c> / <c>lodMeshes</c> 三处都要换，<c>lodVertas</c>
+        /// 的**元素**要清空而不是把数组置空——<c>ObjectRenderer.Init</c> 会按下标取它），
+        /// 抄一份出来迟早有一处对不上，而对不上的表现是建筑不可见或者直接崩渲染。
+        /// </summary>
+        /// <summary>
+        /// 一个建造格子的弧长，单位米。<b>推出来的，不是量出来的，而且和行星半径无关。</b>
+        ///
+        /// <para>推导只用到两处原版 IL：</para>
+        /// <list type="number">
+        /// <item><c>PlanetGrid.SnapTo</c> @0025–0078：纬度先算成
+        /// <c>lat / 2π × segment</c>，再 <c>Round(×5) / 5</c> —— 所以纬度方向的量子是
+        /// <b>1/5 个 segment 单位</b>。</item>
+        /// <item><c>PlanetAuxData..ctor</c> @0015：<c>new PlanetGrid(type,
+        /// (int)(radius / 4f + 0.1f) * 4, …)</c>，也就是 <b><c>segment == radius</c></b>
+        /// （半径是 4 的倍数时严格相等，而本仓库的半径必须是 40 的倍数）。</item>
+        /// </list>
+        ///
+        /// <para>于是 <c>一格弧长 = radius × 2π ÷ (5 × segment) = 2π ÷ 5</c>——
+        /// <b>radius 约掉了</b>。这正好印证 CLAUDE.md 里那句「格子数 ∝ 半径²，
+        /// 而每格的物理尺寸不变」，也意味着开不开行星放大都不用改这个数。</para>
+        ///
+        /// <para><b>为什么非要这个常数：因为「几格」是玩家说话的单位，而模型缩放的单位是米。</b>
+        /// 两者的换算离线读不到（它藏在 <c>resources.assets</c> 的 prefab 里），
+        /// 唯一不靠猜的出路就是从网格本身推。</para>
+        /// </summary>
+        internal const float MetresPerCell = 1.2566371f;
+
+        private static bool Finish(ref PrefabDesc desc, MeshKit kit, string debugName,
+                                   float scaleOverride, float heightOverride, MegaBuildingEntry entry,
+                                   int cells = 0)
+        {
             Bounds reference = ReferenceBounds(ref desc);
 
-            MegaBuildingEntry entry = MegaBuildingRegistry.EntryOf(itemId);
+            // 横向参考尺寸：Place 用的是 min(refX, refZ)，这里必须用同一个，
+            // 否则算出来的「几格」和实际画出来的对不上
+            float refWidth = Mathf.Min(reference.size.x, reference.size.z);
 
-            float scale = entry != null && entry.modelScale > 0f
-                ? entry.modelScale
-                : MegaBuildingRegistry.Config.modelScale;
+            float scale = cells > 0 && refWidth > 0.01f
+                ? cells * MetresPerCell / refWidth
+                : scaleOverride > 0f
+                    ? scaleOverride
+                    : entry != null && entry.modelScale > 0f
+                        ? entry.modelScale
+                        // machines.json 那条路上 Config 可能是 null，别在这里空引用
+                        : MegaBuildingRegistry.Config?.modelScale ?? 0.6f;
 
-            float height = entry != null && entry.modelHeightScale > 0f ? entry.modelHeightScale : 1f;
+            float height = heightOverride > 0f
+                ? heightOverride
+                : entry != null && entry.modelHeightScale > 0f
+                    ? entry.modelHeightScale
+                    : 1f;
 
             kit.Place(reference, scale, height);
 
@@ -1024,11 +1156,17 @@ namespace ProjectEden.Model
                 for (var i = 0; i < desc.lodVertas.Length; i++)
                     desc.lodVertas[i] = null;
 
+            FitColliderHeight(ref desc, mesh.bounds, debugName);
+
             ApplyTextures(ref desc, debugName);
 
             ProjectEdenPlugin.Log.LogInfo(
-                $"巨型建筑「{debugName}」已换用程序化模型：{kit.VertexCount} 顶点 / {kit.TriangleCount} 三角形，" +
-                $"缩放系数 {scale:0.##}（高度上限 ×{height:0.##}）；" +
+                $"「{debugName}」已换用程序化模型：{kit.VertexCount} 顶点 / {kit.TriangleCount} 三角形，" +
+                $"缩放系数 {scale:0.###}（高度上限 ×{height:0.##}）" +
+                (cells > 0
+                    ? $"＝按「横向 {cells} 格」推出来的（一格 {MetresPerCell:0.###} 米，"
+                      + $"源建筑横向 {refWidth:0.##} 米 ≈ {refWidth / MetresPerCell:0.#} 格）"
+                    : "（直接填的系数）") + "；" +
                 $"原版包围盒 尺寸{reference.size} 中心{reference.center} 底{reference.min.y:0.##} 顶{reference.max.y:0.##}");
 
             return true;
@@ -1054,6 +1192,86 @@ namespace ProjectEden.Model
         /// 写一个不存在的属性 Unity 只会静默忽略，那就分不清「写了没生效」和「压根没这属性」。
         /// 首次调用把着色器名字和属性有无报一行，省得下次又靠猜。
         /// </summary>
+        /// <summary>
+        /// 把**物理碰撞体的高度**压到和画出来的模型一样高。
+        ///
+        /// <para><b>为什么需要：撞到伊卡洛斯的不是你看见的那座楼，是它克隆来的那座塔。</b>
+        /// 巨型建筑的模型是代码生成的，而 <c>colliders</c> 原封不动继承自被克隆的
+        /// 物流运输站——那是一座细高塔。于是低空飞过一片矮胖的巨型建筑会撞上一堵看不见的墙，
+        /// 而画面上什么都没有。</para>
+        ///
+        /// <para><b>撞的是哪一份数据是枚举出来的，不是猜的。</b>
+        /// <c>PrefabDesc.colliders</c> → <c>PlanetFactory.CreateEntityDisplayComponents</c>
+        /// → <c>PlanetPhysics.AddColliderData</c> → <c>PlayerController.HandleCollision</c>。
+        /// 注意这和 <c>ColliderPool</c>（Unity 物理，建造工具的射线用）<b>是两套系统</b>——
+        /// 所以「无碰撞」那个作弊开关关掉 <c>ColliderPool</c> 之后，机甲照撞不误。</para>
+        ///
+        /// <para><b>做法是整体等比压扁，不是逐个裁顶。</b> 裁顶会把「整个盒子都在模型顶之上」
+        /// 的那些压成退化的薄片，而 <c>ColliderData</c> 里还有 <c>link</c> / <c>dataLen</c>
+        /// 这类可能互相引用的字段，删元素更危险。等比压扁保结构、不会退化，
+        /// 而且建筑的局部原点就在地面上（本仓库为「包围盒底不是地面」栽过一次），
+        /// 所以按 y 乘一个系数天然是「从地面往下压」。</para>
+        ///
+        /// <para><b>数组必须先克隆。</b> <c>MegaBuildingRegistry.CopyModelProto</c>
+        /// 里 <c>colliders</c> 是从源建筑<b>按引用</b>接过来的，就地改等于把原版
+        /// 物流运输站在整个存档里一起压矮了。<c>ColliderData</c> 是值类型，
+        /// 所以 <c>Clone()</c> 就是真正的深拷贝。</para>
+        /// </summary>
+        private static void FitColliderHeight(ref PrefabDesc desc, Bounds model, string debugName)
+        {
+            if (MegaBuildingRegistry.Config?.fitCollidersToModel == false) return;
+
+            ColliderData[] src = desc.colliders;
+
+            if (src == null || src.Length == 0) return;
+
+            float top = 0f;
+
+            for (var i = 0; i < src.Length; i++)
+            {
+                float hi = src[i].pos.y + src[i].ext.y;
+
+                if (hi > top) top = hi;
+            }
+
+            float want = model.max.y;
+
+            // 只压不抬：这个修正是为「撞到看不见的墙」加的，抬高只会制造新的墙
+            if (top <= 0.01f || want >= top - 0.01f)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"「{debugName}」碰撞体高度 {top:0.##} 米已不高于模型 {want:0.##} 米，不动");
+
+                return;
+            }
+
+            float k = want / top;
+            var copy = (ColliderData[])src.Clone();
+
+            for (var i = 0; i < copy.Length; i++)
+            {
+                ColliderData c = copy[i];
+
+                c.pos.y *= k;
+                c.ext.y *= k;
+
+                copy[i] = c;
+            }
+
+            desc.colliders = copy;
+
+            // 选中框跟着一起矮，否则点击判定还停在塔顶那个高度上
+            Vector3 sel = desc.selectSize;
+
+            if (sel.y > 0f) desc.selectSize = new Vector3(sel.x, sel.y * k, sel.z);
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"「{debugName}」碰撞体已压到模型高度：{top:0.##} → {want:0.##} 米（×{k:0.###}，"
+                + $"{copy.Length} 个盒子等比压扁，选中框同步）。"
+                + "撞机甲的是 PrefabDesc.colliders → PlanetPhysics → PlayerController.HandleCollision，"
+                + "**和「无碰撞」作弊关掉的 ColliderPool 不是一套**，所以这条必须单独修");
+        }
+
         /// <summary>
         /// 原版材质上那张金属度/光滑度图。任取第一份有它的即可——九座共用同一个源建筑。
         /// </summary>

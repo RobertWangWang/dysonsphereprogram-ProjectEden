@@ -257,6 +257,11 @@ namespace ProjectEden.Patches
                 for (var i = 1; i < power.excCursor && i < pool.Length; i++)
                 {
                     if (pool[i].id != i) continue;
+
+                    // **必须排在下面那道闸之前。** 那道闸按 energyPerTick 认配对，
+                    // 而这里要修的恰恰就是 energyPerTick ——先过闸就永远轮不到这一句。
+                    AlignRate(factories[f], ref pool[i]);
+
                     if (FindPair(pool[i].energyPerTick, pool[i].emptyId) == null) continue;
 
                     RepairPoolEnergy(ref pool[i], "读档");
@@ -493,6 +498,81 @@ namespace ProjectEden.Patches
         /// 是不是本 mod 的巨型枢纽。按 <c>exchangeEnergyPerTick</c> 认，不按物品号——
         /// 物品号撞车时会顺延，而这个功率是配置里写死的一个很特别的数。
         /// </summary>
+        /// <summary>已经报过「充放功率对齐」的建筑。<b>每种建筑一次</b>，不是每座一次。</summary>
+        private static readonly System.Collections.Generic.HashSet<int> RateLogged =
+            new System.Collections.Generic.HashSet<int>();
+
+        /// <summary>
+        /// 把已建成的枢纽的<b>充放功率</b>对齐到配置值。
+        ///
+        /// <para><b>为什么需要：这是陷阱一。</b> <c>energyPerTick</c> 进存档
+        /// （<c>Export</c> @0082 / <c>Import</c> @0096），而 <c>Import</c> 是把存下来的数
+        /// 原样读回，<b>不像 <c>StorageComponent.Import</c> 那样回头从 proto 重新推导</b>。
+        /// 所以改了 <c>megabuildings.json</c> 只有新建的那些拿得到新值。</para>
+        ///
+        /// <para><b>为什么按 protoId 认，不按功率认</b>——这一条是这个修正存在的全部理由。
+        /// 本文件其余地方都用 <c>energyPerTick</c> 当键（<see cref="FindPair"/>、
+        /// <see cref="IsOurs"/>、换档那一处），那在功率没变过的时候没问题；可一旦配置值变了，
+        /// 存档里的老厂拿的是<b>旧</b>功率，于是它们在 <see cref="FindPair"/> 那里全部认不出来
+        /// —— 不光功率不变，连 <c>maxPoolEnergy</c> 的修复和换档<b>也一起失灵</b>，
+        /// 而且一个字都不报。用建筑的 protoId 当键就没有这个问题：它不随配置变。</para>
+        ///
+        /// <para><b>双向对齐，不是只抬。</b> 判据是枚举写入口：<c>SetEmpty</c> / <c>Import</c> /
+        /// <c>PowerSystem.Import</c> / <c>NewExchangerComponent</c>——<b>没有任何界面能写它</b>
+        /// （<c>UIPowerExchangerWindow._OnUpdate</c> 只读来显示）。所以不适用
+        /// 「配置值是默认值不是锁」那条（那条是给充能滑条那种<b>有</b>界面写入口的字段的），
+        /// 只抬不降会让这个配置项变成单向的——<c>droneCarries</c> 就是这么栽的。</para>
+        /// </summary>
+        private static void AlignRate(PlanetFactory factory, ref PowerExchangerComponent exc)
+        {
+            long want = ConfiguredRate(factory, exc.entityId, out int protoId);
+
+            if (want <= 0L || exc.energyPerTick == want) return;
+
+            long before = exc.energyPerTick;
+
+            exc.energyPerTick = want;
+
+            if (!RateLogged.Add(protoId)) return;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型能量枢纽：{LDB.items.Select(protoId)?.name ?? protoId.ToString()} 的充放功率"
+                + $" {before * 60 / 1e9:0.##} GW → {want * 60 / 1e9:0.##} GW（已建成的按配置对齐）。"
+                + "这个字段进存档而原版读档不重新推导，所以老厂只能这样补；"
+                + "没有界面能改它，所以调大调小都即时生效。这行每种建筑只报一次");
+        }
+
+        /// <summary>
+        /// 这座建筑在 <c>megabuildings.json</c> 里配的充放功率，0 = 不是我们的能量枢纽。
+        ///
+        /// 用配置里的 <c>itemId</c> 比对，和 <c>MegaThrottle</c> 认建筑是同一个口径。
+        /// </summary>
+        private static long ConfiguredRate(PlanetFactory factory, int entityId, out int protoId)
+        {
+            protoId = 0;
+
+            EntityData[] entities = factory?.entityPool;
+
+            if (entities == null || entityId <= 0 || entityId >= entities.Length) return 0L;
+
+            protoId = entities[entityId].protoId;
+
+            MegaBuildingEntry[] all = MegaBuildingRegistry.Config?.buildings;
+
+            if (all == null || protoId <= 0) return 0L;
+
+            foreach (MegaBuildingEntry entry in all)
+            {
+                if (entry == null || entry.itemId != protoId) continue;
+
+                MegaExchangerEntry exc = entry.exchanger;
+
+                return exc != null && exc.energyPerTick > 0L ? exc.energyPerTick : 0L;
+            }
+
+            return 0L;
+        }
+
         private static bool IsOurs(PrefabDesc desc)
         {
             MegaBuildingEntry[] all = MegaBuildingRegistry.Config?.buildings;

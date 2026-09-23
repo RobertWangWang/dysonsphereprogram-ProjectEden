@@ -230,8 +230,16 @@ namespace ProjectEden.Utils
         /// 稀有槽本来就有「母星系专用概率」这一档（<c>RareSettings[i*4+1]</c>），
         /// 所以这是原版就支持的事，填 0 即可；普通矿脉位没有这一档，
         /// 要排除母星系得靠生成时拦截，见 OreBirthSystemPatches。
+        ///
+        /// <b>可空是刻意的：<c>null</c>（没写这个字段）和显式写 <c>false</c> 必须分得开。</b>
+        /// 之前是裸 <c>bool</c>，于是「没配」默认成了 false，而 normal 模式那条
+        /// 「配了 false 但这一档不存在」的提醒就对**每一个**普通矿脉位的矿都要打一遍——
+        /// 冰矿脉是第一个 normal 模式的矿，所以它第一次暴露出来。行为一直是对的，
+        /// 报的那句话是假的，而一句假的提醒比没有提醒更贵。
+        /// 和 megabuildings.json 里那几个亮度旋钮改成 <c>float?</c> 是同一族：
+        /// <b>哨兵值不能和合法取值撞车</b>。
         /// </summary>
-        public bool birthSystem;
+        public bool? birthSystem;
 
         /// <summary>rare 模式：非母星系里，一颗星球出现这种矿的概率。原版稀有矿大致 0.03 ~ 0.6</summary>
         public float chance;
@@ -338,11 +346,41 @@ namespace ProjectEden.Utils
         /// </summary>
         public string oreIcon;
 
+        /// <summary>
+        /// 让这条矿脉<b>直接产出一个已经存在的物品</b>，而不是新注册一个矿石。
+        /// 写 <c>vanilla:名字</c>（例如 <c>vanilla:水</c>）。
+        ///
+        /// <para><b>为什么要有它：有些矿脉挖出来的东西游戏里本来就有。</b>
+        /// 冰矿脉挖出来就该是水，而不是「冰矿石」再加一条「冰 → 水」的配方——
+        /// 那条配方除了多占一个物品格位和一次点击，什么也没提供。</para>
+        ///
+        /// <para>填了它就<b>不注册任何新物品</b>：不占物品 ID、不占合成面板格位、
+        /// 不参与图标改色（改色会把<b>原版那个物品</b>的图标也换掉，这一点必须挡住）。
+        /// 矿脉的 <c>MiningItem</c> 直接指向解析出来的那个号。</para>
+        ///
+        /// <para>按<b>名字</b>解析而不是写号：原版 proto 全在 <c>resources.assets</c> 里、
+        /// 离线枚举不了，手写号码写错不报错、只会安静地让矿脉产出别的东西。
+        /// 解析到的号会打进日志。</para>
+        ///
+        /// <para>和 <see cref="hasIngot"/> 互斥（指向原版物品就谈不上「它的锭」），
+        /// 配在一起会大声失败。</para>
+        /// </summary>
+        public string oreVanillaRef;
+
         public int stackSize;
 
         // ── 矿脉 ─────────────────────────────────────────────
 
         public string veinName;
+
+        /// <summary>
+        /// 矿脉的自制图标：<c>assets/icons/&lt;veinIcon&gt;.png</c>（<b>480×480</b>，透明底）。
+        /// 填了就直接用这张，不再拿铁矿脉的图标改色。
+        ///
+        /// <para><b>注意尺寸和矿石图标不是一回事。</b> 矿脉那张是 480×480 的<b>矿簇图</b>
+        /// （在地面标签和行星面板里用），矿石是 80×80 的物品图标；混用会在面板里对不齐。</para>
+        /// </summary>
+        public string veinIcon;
 
         /// <summary>矿脉编号，同时是 VeinData.type。必须连续，见类注释</summary>
         public int veinId;

@@ -397,10 +397,34 @@ namespace ProjectEden.Patches.UI
         // ── 点一行：把星图飞过去 ───────────────────────────────
 
         /// <summary>
-        /// <b>先聚焦恒星，再聚焦行星，而且第二步是尽力而为。</b>
-        /// <c>UIStarmap.planetUIs</c> 只在「已经进到那个星系视角」时才填得满，
-        /// 所以直接找行星的 UI 往往找不到；而 <c>starUIs</c> 一直是全的。
-        /// 先把镜头带到恒星，玩家就能看到那个星系，行星 UI 这时通常也在了。
+        /// 点一行 → 星图飞到那颗行星。
+        ///
+        /// <para><b>这一整条是照抄原版自己的「跳过去」，不是模拟点击。</b>
+        /// <c>UIControlPanelStationInspector.OnAstro2AstroSettingButtonClick</c>
+        /// （控制面板里物流站那个「定位到这颗星」按钮）就是这个语义，实现是四步：
+        /// 开星图 → <c>SetViewStar</c> → <c>StarmapCamera.SetViewTarget</c> → 清 focus 四件套。
+        /// 枚举过整个程序集，<b><c>StarmapCamera.SetViewTarget</c> 是 <c>viewPlanet</c> /
+        /// <c>viewStar</c> / <c>viewPlayer</c> 仅有的写入口</b>（另两处是它自己的
+        /// <c>SyncToStarmap</c> 和 <c>DisablePositionLock</c>），所以「镜头飞过去」只有这一条路。</para>
+        ///
+        /// <para><b>上一版用 <c>OnStarClick</c> + <c>OnPlanetClick</c> 模拟点击，而那漏了中间一步。</b>
+        /// 两个 <c>OnXxxClick</c> 确实也调 <c>SetViewTarget</c>（@0140 / @00FC），所以看着像是对的；
+        /// 真正缺的是 <c>SetViewStar</c>——<b>它同时是 <c>planetUIs</c> 被填满的地方</b>
+        /// （@005F–007D：<c>RecycleCurrentPlanetUIs()</c> 之后
+        /// <c>planetUIs = new UIStarmapPlanet[star.planetCount]</c> 再逐个创建）。
+        /// 不调它，<c>planetUIs</c> 要么是空的、要么还是上一个星系的，于是第二步那个
+        /// <c>foreach</c> 找不到目标行星、<c>break</c> 不了，镜头就停在恒星上。
+        /// 老注释把这件事写成「行星 UI 这时通常也在了」，<b>那是描述症状，不是原因</b>。</para>
+        ///
+        /// <para><b>距离是原版算的，不是拍的</b>：<c>realRadius × 0.00025 × 6</c>，
+        /// 最近最远都传这个值（IL @008D–00C0），所以镜头稳定停在「这颗星占满视野」的距离上。</para>
+        ///
+        /// <para><b><c>SetViewStar</c> 的第一句是 <c>if (!active) star = null;</c></b>，
+        /// 所以星图没真的开起来时调它等于「退出星系视角」——那会表现成「点了一下，
+        /// 星图开了，却停在银河系尺度」。<c>UIGame.OpenStarmap</c> → <c>FadeIn</c> →
+        /// <c>ManualBehaviour._Open</c> @0010 是<b>同步</b>写 <c>active = true</c> 的，
+        /// 所以正常情况下够了；但 <c>_Open</c> 在 <c>inited</c> 为假时会直接 <c>ret</c>
+        /// 什么都不做，那一支必须报出来，不能静默跳过。</para>
         /// </summary>
         private static void FocusPlanet(int row)
         {
@@ -408,32 +432,63 @@ namespace ProjectEden.Patches.UI
 
             PlanetData planet = RowPlanets[row];
 
-            if (planet == null) return;
+            if (planet == null || planet.star == null) return;
 
             UIGame game = UIRoot.instance?.uiGame;
             UIStarmap map = game?.starmap;
 
             if (game == null || map == null) return;
 
-            if (!game.starmap.active) game.OpenStarmap();
+            if (!map.active) game.OpenStarmap();
 
-            if (map.starUIs != null && planet.star != null)
-                foreach (UIStarmapStar su in map.starUIs)
-                    if (su != null && su.star == planet.star)
-                    {
-                        map.OnStarClick(su);
+            // OpenStarmap 是同步的，回来还没 active 只可能是 inited 为假。
+            // 这一支不报就会变成「点了没反应」——本仓库反复付过这笔钱
+            if (!map.active)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"资源搜索窗：想跳到 {planet.displayName}，但星图打不开"
+                    + "（UIStarmap 还没 inited，ManualBehaviour._Open 会直接返回）。这次不跳");
 
-                        break;
-                    }
+                return;
+            }
 
-            if (map.planetUIs != null)
-                foreach (UIStarmapPlanet pu in map.planetUIs)
-                    if (pu != null && pu.planet == planet)
-                    {
-                        map.OnPlanetClick(pu);
+            // 进到那颗恒星的星系视角。planetUIs 也是在这一步才被填成这个星系的
+            map.SetViewStar(planet.star, false);
 
-                        break;
-                    }
+            StarmapCamera cam = map.screenCameraController;
+
+            if (cam == null)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    "资源搜索窗：UIStarmap.screenCameraController 是空的，镜头没法移动。"
+                    + "已经切到那个星系，但不会自动飞过去");
+
+                return;
+            }
+
+            double dist = planet.realRadius * 0.00025 * 6.0;
+
+            cam.SetViewTarget(planet, null, null, null, VectorLF3.zero, dist, dist, true, false);
+
+            // 原版跳转之后是**清空** focus 而不是选中：focus 是「鼠标选中的高亮」，
+            // 跟镜头是两回事，留着旧值会让光标面板指着上一个目标
+            map.focusPlanet = null;
+            map.focusStar = null;
+            map.focusHive = null;
+            map.focusEnemyId = 0;
+
+            // 原版最后一句是 planetDetail.OnTabButtonClick(**1**)（IL @00E4–00F4），
+            // 这里**故意传 0**，而这个差别是读了那个方法才发现的：
+            //   tab 1 @004F–007A → 关 baseInfoGroupGo、开 uiRoutePanel.RefreshEntries()
+            //                      ——那是**物流路线**页，不是资源页
+            //   tab 0 @000F–004E → 开 baseInfoGroupGo，关路线和待办
+            //                      ——矿脉分布就在这一页
+            // 原版那个调用点是物流站检视器里的「星际配送设置」按钮，跳过去当然是要看路线；
+            // **一个资源搜索窗要的是矿**。照抄调用序列是对的，但要分清哪几步属于「跳转」、
+            // 哪几步是那个调用点自己的事——这里就是后者。
+            UIPlanetDetail detail = game.planetDetail;
+
+            if (detail != null) detail.OnTabButtonClick(0);
         }
 
         // ── 搭窗口 ──────────────────────────────────────────────
@@ -482,9 +537,12 @@ namespace ProjectEden.Patches.UI
             MakeLabel(_root, "title", font, I18N.Tr("资源搜索"), 17, TextAnchor.MiddleLeft,
                 new Color(0.92f, 0.96f, 1f), new Vector2(14f, -10f), new Vector2(300f, 24f));
 
+            // 给右上角那个叉腾出位置，所以比标题少靠右一点
             MakeLabel(_root, "hint", font, string.Format(I18N.Tr("{0} 开关　Esc 关闭"), HotkeyText), 12, TextAnchor.MiddleRight,
-                new Color(0.92f, 0.96f, 1f, 0.45f), new Vector2(-14f, -12f), new Vector2(240f, 20f),
+                new Color(0.92f, 0.96f, 1f, 0.45f), new Vector2(-38f, -12f), new Vector2(240f, 20f),
                 rightAligned: true);
+
+            BuildCloseButton(font);
 
             BuildInput(font);
 
@@ -504,6 +562,54 @@ namespace ProjectEden.Patches.UI
                 $"资源搜索窗：已建好（{HotkeyText} 开关）。控件是从零搭的，没有克隆原版窗口");
 
             return true;
+        }
+
+        /// <summary>
+        /// 右上角的关闭按钮。
+        ///
+        /// <para><b>用真的 <c>Button</c>，而滚动条那两根用的是自己量鼠标</b>——两种做法在这个
+        /// 文件里并存是有理由的，不是不一致：<see cref="BuildScrollbar"/> 的注释说，射线能不能
+        /// 落到一根新控件上取决于父链上那些 <c>CanvasGroup</c> 怎么配，隔着一层猜不出来。
+        /// <b>但这件事已经被行按钮测过了</b>——点一行能跳星图，说明这条父链上的射线是通的，
+        /// 所以这里照抄 <see cref="BuildRow"/> 的做法，不必再手量一次鼠标。
+        /// （反过来滚动条要的是「按住不放一直拖」，那是 <c>Button</c> 给不了的，所以它留着。）</para>
+        ///
+        /// <para>Esc 关窗依然在，这个按钮是给「手在鼠标上」的那一半时间用的：
+        /// <c>InputField</c> 拿着焦点时玩家的手本来就在键盘上，但翻完几页之后往往不是。</para>
+        /// </summary>
+        private static void BuildCloseButton(Font font)
+        {
+            var go = new GameObject("close", typeof(RectTransform), typeof(Image), typeof(Button));
+
+            go.transform.SetParent(_root, false);
+
+            var trs = (RectTransform)go.transform;
+
+            trs.anchorMin = new Vector2(1f, 1f);
+            trs.anchorMax = new Vector2(1f, 1f);
+            trs.pivot = new Vector2(1f, 1f);
+            trs.anchoredPosition = new Vector2(-8f, -8f);
+            trs.sizeDelta = new Vector2(24f, 24f);
+
+            go.GetComponent<Image>().color = new Color(1f, 1f, 1f, 0.08f);
+
+            // 用 × (U+00D7) 而不是 ✕ (U+2715)：前者在 Latin-1 补充区，任何字体都有；
+            // 后者是杂项符号区，游戏那套中文字体不一定收，缺字形时画出来是个空框，
+            // 而那和「按钮没建出来」在截图上分不开
+            MakeText(trs, "x", font, TextAnchor.MiddleCenter, new Color(0.92f, 0.96f, 1f, 0.75f), 16)
+                .text = "×";
+
+            var button = go.GetComponent<Button>();
+
+            // 悬停/按下的反馈走 Button 自带的 ColorTint，targetGraphic 就是同一个 GameObject
+            // 上那张 Image。颜色是乘上去的，所以底色留得很淡，高亮时才看得出来
+            ColorBlock colors = button.colors;
+
+            colors.highlightedColor = new Color(1f, 0.55f, 0.55f, 1f);
+            colors.pressedColor = new Color(1f, 0.35f, 0.35f, 1f);
+            button.colors = colors;
+
+            button.onClick.AddListener(Close);
         }
 
         private static void BuildInput(Font font)

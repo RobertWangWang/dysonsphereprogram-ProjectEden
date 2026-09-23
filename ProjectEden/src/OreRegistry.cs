@@ -192,6 +192,44 @@ namespace ProjectEden
 
                 var ore = new Ore { Entry = entry };
 
+                // 指向原版物品的矿脉（例如冰矿脉产水）：**一个新物品都不注册**。
+                // 不占物品 ID、不占格位、不改图标——尤其是图标，改色那条路会把
+                // **原版那个物品**的图标一起换掉，全存档生效。
+                if (!string.IsNullOrEmpty(entry.oreVanillaRef))
+                {
+                    int vanillaId = FindItemIdByRef(entry.oreVanillaRef);
+
+                    if (vanillaId <= 0)
+                    {
+                        ProjectEdenPlugin.Log.LogError(
+                            $"矿种「{entry.veinName}」的 oreVanillaRef「{entry.oreVanillaRef}」解析不出物品，"
+                            + "整条跳过。它要写成 vanilla:原版物品的中文名（比的是 Proto.Name 原始键）");
+
+                        continue;
+                    }
+
+                    if (entry.hasIngot)
+                    {
+                        ProjectEdenPlugin.Log.LogError(
+                            $"矿种「{entry.veinName}」同时配了 oreVanillaRef 和 hasIngot——"
+                            + "指向原版物品就谈不上「它的锭」，整条跳过");
+
+                        continue;
+                    }
+
+                    ore.OreItemId = vanillaId;
+                    ore.OreIconPath = LDB.items.Select(vanillaId)?.IconPath ?? ironOre.IconPath;
+
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"{entry.veinName}：产物直接用原版的「{entry.oreVanillaRef.Substring(8)}」"
+                        + $"（物品 {vanillaId}），不注册新矿石、不占格位、不改它的图标");
+
+                    CloneVeinModel(ore);
+                    Ores.Add(ore);
+
+                    continue;
+                }
+
                 ore.OreItemId = ResolveItemId(entry.oreItemId, entry.oreName);
                 ore.OreGrid = ResolveGridIndex(entry.oreGridIndex, entry.oreName, ProtoSlots.GridKind.Item);
 
@@ -1388,8 +1426,50 @@ namespace ProjectEden
         /// 电磁矩阵（6001）不放就是这么来的，改多少次配置都没用。
         /// 这种冲突只表现为「图标串了」，不核对几乎查不出来。
         /// </summary>
+        /// <summary>
+        /// 自制矿脉图标的路径，<b>并且先确认那张 80px 的伴生图真的在</b>；不在就退回铁矿脉的图标。
+        ///
+        /// <para><b>矿脉图标走的是两条独立的路，这一条是崩溃换来的。</b>
+        /// <c>VeinProto.Preload</c> @005A 读 <c>IconPath</c> 填 <c>_iconSprite</c>，
+        /// @0069 读 <c>IconPath + "-80px"</c> 填 <c>_iconSprite80px</c>——
+        /// <b>两次 <c>Resources.Load</c>，两个文件</b>。只放前一张的话第二个是 null，
+        /// 而 <c>IconSet.Create</c> @033C 紧接着就是
+        /// <c>get_iconSprite80px().get_texture()</c>，当场空引用。</para>
+        ///
+        /// <para><b>而那个崩溃的堆栈里没有本 mod 的名字</b>：它报在
+        /// <c>IconSet.Create</c> 上，点名的是 CommonAPI 和 LDBTool（两者都在那条路径上有补丁），
+        /// 本 mod 的贡献只是一个 null <b>数据</b>、不是代码。和 <c>DescFields</c>
+        /// 那次一模一样——所以这里宁可多一次 <c>Resources.Load</c>，
+        /// <b>把一个指向别人的崩溃换成开机时的一行 ERROR</b>。</para>
+        ///
+        /// <para>只在注册时各矿种跑一次，<c>TextureResourcesPatches</c> 已经前置了
+        /// <c>Resources.Load</c>，所以这时候就问得到答案。</para>
+        /// </summary>
+        private static string VeinIconPath(OreEntry entry, string fallback)
+        {
+            string custom = IconPathOf(entry.veinIcon);
+
+            if (custom == null) return fallback;
+
+            if (Resources.Load<Sprite>(custom + "-80px") != null) return custom;
+
+            ProjectEdenPlugin.Log.LogError(
+                $"{entry.veinName} 配了 veinIcon「{entry.veinIcon}」，但找不到配套的 80px 那张"
+                + $"（需要 assets/icons/{entry.veinIcon}-80px.png）。"
+                + "**矿脉图标要两张**：VeinProto.Preload 分别读 IconPath 和 IconPath + \"-80px\"，"
+                + "而 IconSet.Create 会拿后者 .texture 去拼图集——少一张就是当场空引用，"
+                + "而且崩溃的堆栈里只有 CommonAPI 和 LDBTool，看不到本 mod。"
+                + "这次已退回铁矿脉的图标，游戏照常能开；补上那张 png 重新编译即可");
+
+            return fallback;
+        }
+
         private static void VerifyIds(Ore ore)
         {
+            // 指向原版物品的矿脉没有注册过任何东西，这里没什么可核对的——
+            // 硬核对会拿「冰矿脉」去比原版「水」的名字，报一条假错
+            if (!string.IsNullOrEmpty(ore.Entry.oreVanillaRef)) return;
+
             VerifyId(ore.OreItemId, ore.Entry.oreName);
 
             if (ore.HasIngot) VerifyId(ore.IngotItemId, ore.Entry.ingotName);
@@ -1491,7 +1571,9 @@ namespace ProjectEden
                 ID = ore.VeinId,
                 Name = ore.Entry.veinName,
                 Description = ore.Entry.oreName,
-                IconPath = iron.IconPath,
+                // 配了自制矿脉图标就指到那张 PNG，Preload 会自己读出来；
+                // 没配就沿用铁矿脉那张，由 TintIcons 改色
+                IconPath = VeinIconPath(ore.Entry, iron.IconPath),
                 IconTag = iron.IconTag,
                 // 用克隆并染过色的模型；克隆失败时退回铁矿脉的模型，至少看得见
                 ModelIndex = ore.VeinModelId > 0 ? ore.VeinModelId : iron.ModelIndex,
@@ -1663,8 +1745,10 @@ namespace ProjectEden
                 themes++;
             }
 
-            // 普通矿脉位没有「母星系」那一档概率，那是稀有槽独有的
-            if (place != null && !place.birthSystem)
+            // 普通矿脉位没有「母星系」那一档概率，那是稀有槽独有的。
+            // 判据是 == false 不是 !birthSystem：那个字段是 bool?，null 表示压根没配，
+            // 而「没配」不该挨这句提醒（见 OrePlacement.birthSystem 上的注释）
+            if (place != null && place.birthSystem == false)
                 ProjectEdenPlugin.Log.LogWarning(
                     $"{ore.Entry.veinName} 配了 birthSystem: false，但普通矿脉位没有母星系那一档概率" +
                     "（RareSettings[i*4+1] 是稀有槽独有的），这条会被忽略。要排除母星系请改用 mode: rare");
@@ -1738,7 +1822,9 @@ namespace ProjectEden
                 // birthSystem: false 于是把「母星系之外」写成了 0，
                 // 四种自定义稀有矿因此**只在母星系刷**，出了母星系一颗都没有。
                 // 症状是玩家开新档跑遍外面报「没找到」，而注册、主题、矿脉表全对。
-                settings[slot * 4 + 0] = place.birthSystem ? chance : 0f;
+                // == true 而不是直接取值：字段是 bool?，没配等同 false——
+                // 原版稀有矿本来就不在母星系刷，这个默认是对的
+                settings[slot * 4 + 0] = place.birthSystem == true ? chance : 0f;
                 settings[slot * 4 + 1] = chance;
                 settings[slot * 4 + 2] = place.extraChance;
                 settings[slot * 4 + 3] = place.richness > 0f ? place.richness : 0.5f;
@@ -1758,7 +1844,7 @@ namespace ProjectEden
                 ProjectEdenPlugin.Log.LogInfo(
                     $"{ore.Entry.veinName}已写入 {themes} 个星球主题（稀有槽，出现概率 {place.chance:0.###}，" +
                     $"追加概率 {place.extraChance:0.###}，储量系数 {place.richness:0.##}）；" +
-                    (place.birthSystem ? "母星系照常刷" : "母星系不刷") + "；只对还没生成过的星球生效");
+                    (place.birthSystem == true ? "母星系照常刷" : "母星系不刷") + "；只对还没生成过的星球生效");
         }
 
         /// <summary>
@@ -1877,18 +1963,28 @@ namespace ProjectEden
             // 矿石：配了自制图标就跳过——IconPath 已经指到那张 PNG，
             // Preload 会自己把 _iconSprite 读出来，这里再覆盖就把它盖掉了。
             // 矿脉图标不受影响：它染的是铁矿脉那张 480×480 的矿簇图，另一条路。
-            if (string.IsNullOrEmpty(e.oreIcon))
+            //
+            // **指向原版物品的矿脉更要跳过，而且这一条是会闯祸的那种**：
+            // ore.OreItemId 这时是原版的号（比如水 1000），照着往下写就是把
+            // **原版那个物品的图标**换成改色的铁矿石，全存档、所有地方一起变。
+            if (string.IsNullOrEmpty(e.oreIcon) && string.IsNullOrEmpty(e.oreVanillaRef))
             {
                 ItemProto oreItem = LDB.items.Select(ore.OreItemId);
 
                 if (oreItem != null) oreItem._iconSprite = oreIcon;
             }
 
-            VeinProto ironVein = LDB.veins.Select(IronVeinId);
-            Sprite veinIcon = Tint(ironVein?._iconSprite, e) ?? oreIcon;
             VeinProto vein = LDB.veins.Select(ore.VeinId);
 
-            if (vein != null) vein._iconSprite = veinIcon;
+            // 矿脉：配了自制图标同样跳过，AddVeinProto 已经把 IconPath 指到那张 PNG，
+            // Preload 会自己读出来；这里再染一次就把它盖掉了
+            if (string.IsNullOrEmpty(e.veinIcon))
+            {
+                VeinProto ironVein = LDB.veins.Select(IronVeinId);
+                Sprite veinIcon = Tint(ironVein?._iconSprite, e) ?? oreIcon;
+
+                if (vein != null) vein._iconSprite = veinIcon;
+            }
 
             // 锭：配了自制图标就什么都不做——IconPath 已经指到那张 PNG，
             // Preload 会自己把 _iconSprite 读出来，这里再覆盖反而把它盖掉

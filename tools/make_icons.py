@@ -734,6 +734,7 @@ def _pal(base):
 # 所以那个颜色 = 图集主钢板 × tint。图标直接用它，看到的就是建成之后的样子。
 
 _MEGA_JSON = pathlib.Path(__file__).resolve().parent.parent / "ProjectEden" / "data" / "megabuildings.json"
+_MACHINES_JSON = pathlib.Path(__file__).resolve().parent.parent / "ProjectEden" / "data" / "machines.json"
 
 # BuildingTexture.PlateLight —— 图集里占面积最大的那一格。改那边要同步改这里
 _PLATE = (196, 200, 208)
@@ -742,6 +743,13 @@ _MEGA_TINT = {}
 
 
 def _load_mega_tints():
+    """建筑物品号 -> tint 三元组。**两份配置一起读。**
+
+    megabuildings.json 用 tintR/G/B 三个标量键，machines.json 用一个 tint 数组——
+    同一个事实两种拼写。只读前者的话，machines.json 里那些自画图标的建筑
+    会在 building_color 那里 KeyError，而那正是本仓库记过的
+    「同一个数换个键名就漏掉」那一类（模型号 / 建造栏槽位 / 合成面板格位，三次）。
+    """
     if _MEGA_TINT:
         return _MEGA_TINT
 
@@ -749,6 +757,12 @@ def _load_mega_tints():
 
     for b in json.loads(_MEGA_JSON.read_text(encoding="utf-8"))["buildings"]:
         _MEGA_TINT[b["itemId"]] = (b["tintR"], b["tintG"], b["tintB"])
+
+    for m in json.loads(_MACHINES_JSON.read_text(encoding="utf-8"))["machines"]:
+        tint = m.get("tint")
+
+        if tint and len(tint) >= 3:
+            _MEGA_TINT[m["itemId"]] = (tint[0], tint[1], tint[2])
 
     return _MEGA_TINT
 
@@ -2017,6 +2031,126 @@ def _sieve(body, pore_fill, pore_edge, pore_gloss, side_pore, lumps=()):
         for ox, oy, k in ((0, 0, 1.0), (lr * 0.75, lr * 0.35, 0.72), (-lr * 0.6, lr * 0.5, 0.6)):
             d.append(dw.Circle(lx + ox, ly + oy, lr * k, fill="#14100e",
                                stroke="#2b2420", stroke_width=1.1))
+
+    return d
+
+
+def ice_vein():
+    """冰矿脉：**三块冰堆 + 两根立起来的冰棱**，底下一圈霜。
+
+    <b>识别点是那两根竖直的棱，不是颜色。</b> 这套图标里已经有一堆蓝白色的东西
+    （水、硫酸、各种流体），光靠「浅蓝」在 80px 下根本分不出来；而<b>竖直的尖棱</b>
+    在整套里是独一份——矿石都是堆在地上的块，没有立起来的。
+
+    <b>棱要一高一矮、不对称。</b> 两根等高会读成一副括号或者一个门；
+    差开之后才读得出「从冰堆里长出来的」。
+
+    颜色刻意<b>不饱和</b>：冰是近白的浅青，真拧到饱和蓝就成了水或者能量块。
+    亮度拉开三档（顶面近白、左面浅青、右面灰青），冰的通透感全靠这个落差，
+    而不是靠透明度——SVG 的透明度在 80px 缩图里基本看不出来。
+
+    底下那圈霜是<b>唯一说明它在冷环境里</b>的元素。去掉之后，这张图和一堆
+    碎玻璃没区别。
+    """
+    import random
+
+    d = canvas()
+    rng = random.Random(20260923)
+
+    top, left, right, edge = "#f2fbff", "#b9dcea", "#7fb0c6", "#3c5c6b"
+    frost = "#dff2f9"
+
+    # 底下那圈霜：先画，被冰堆压住
+    d.append(dw.Ellipse(0, 26, 42, 42 * 0.42, fill=frost, fill_opacity=0.55))
+
+    g = dw.Group(transform="translate(0, 4) scale(1.02)")
+
+    # 两根冰棱先画，让冰堆压住它们的根部——「长出来的」靠这个压叠关系
+    # 高的那根刻意不顶到画布边：80px 缩图里贴边会被切掉尖，而尖正是识别点
+    for cx, cy, h, w, rot in ((-15, -10, 36, 12, -7), (14, -6, 24, 9, 9)):
+        sub = dw.Group(transform=f"translate({cx}, {cy}) rotate({rot})")
+        sub.append(dw.Lines(0, -h, w, -h * 0.34, w * 0.66, 12, -w * 0.66, 12, -w, -h * 0.34,
+                            close=True, fill=top, stroke=edge, stroke_width=1.8,
+                            stroke_linejoin="round"))
+        # 棱的右半压暗一档，不然是一片死白
+        sub.append(dw.Lines(0, -h, w, -h * 0.34, w * 0.66, 12, 0, 12,
+                            close=True, fill=left, stroke=edge, stroke_width=1.8,
+                            stroke_linejoin="round"))
+        g.append(sub)
+
+    # 三块冰堆。坐标沿用矿石那套的不对称摆法：左小右大，后排先画
+    _chunk(g, -2, -6, 0.96, -5, top, left, right, edge, rng)
+    _chunk(g, -26, 17, 0.58, 13, top, left, right, edge, rng)
+    _chunk(g, 25, 15, 0.68, -18, top, left, right, edge, rng)
+
+    # 大块顶面一道高光。冰要比矿石亮一档，否则和石头分不开
+    g.append(dw.Lines(-12, -15, -3, -20, 3, -17, -6, -12,
+                      close=True, fill="#ffffff", fill_opacity=0.62))
+
+    d.append(g)
+
+    return d
+
+
+def dustbin():
+    """垃圾箱：**上宽下窄的翻斗 + 一块掀开的盖**，斗口里一道向下的箭头。
+
+    <b>识别点是「上宽下窄」这个轮廓，不是盖子。</b> 这套图标里已经有一堆矮胖罐
+    （熔岩冷却厂的池、催化反应器的再生器），正立方体或圆柱一律糊成一团；
+    倒梯形是唯一一个在 80px 下还能一眼分出来的剪影，而且它恰好就是现实里
+    翻斗/料斗的形状——造型本身在说明这东西装废料。
+
+    <b>盖子必须画成掀开的。</b> 合上就读成一个箱子（和储物仓撞脸），
+    掀开之后才有「往里扔」这个动作。盖子往后偏一点，正面才露得出斗口。
+
+    <b>斗口里那道向下的箭头是这张图唯一的文字性元素，而它是必要的。</b>
+    没有它，一只翻斗和「一个装东西的容器」分不开——而这台建筑的意思恰恰相反：
+    东西只进不出。箭头朝下、穿过口沿，读作「掉进去」。
+
+    主色跟着 machines.json 的 tint 走（工业废料那种发暗的橄榄绿），
+    所以图标和建成后的颜色天生同步——九个手写十六进制值就是这么分家的。
+    """
+    d = canvas()
+    p, dark = building_pal(6687)
+    hazard = "#e8b13a"
+
+    # 基座：一块薄板，给倒梯形一个落脚点
+    _prism(d, 0, 40, 40, 6, dark)
+
+    # 斗身：上宽下窄。等距下用一个四边形正面 + 一个侧面就够读
+    top_w, bot_w, top_y, bot_y = 36, 22, -4, 34
+
+    d.append(dw.Lines(-top_w, top_y, top_w, top_y, bot_w, bot_y, -bot_w, bot_y,
+                      close=True, fill=p[1], stroke=p[3], stroke_width=1.8,
+                      stroke_linejoin="round"))
+
+    # 顶面菱形：斗口
+    d.append(dw.Ellipse(0, top_y, top_w, top_w * ISO, fill=dark[0],
+                        stroke=p[3], stroke_width=1.8))
+    d.append(dw.Ellipse(0, top_y, top_w - 6, (top_w - 6) * ISO, fill=dark[3]))
+
+    # 两道横向加强筋：钢板焊的，不是一块塑料
+    for t in (0.34, 0.66):
+        y = top_y + (bot_y - top_y) * t
+        w = top_w + (bot_w - top_w) * t
+        d.append(dw.Line(-w, y, w, y, stroke=p[3], stroke_width=2.0))
+
+    # 底沿一条危险条：告诉玩家这是个工业设施，不是家具
+    d.append(dw.Line(-bot_w, bot_y - 3, bot_w, bot_y - 3,
+                     stroke=hazard, stroke_width=3.2))
+
+    # 掀开的盖子：往后偏、左高右低，读作「铰在后面掀起来」。
+    # 刻意收窄并整体后移——伸出斗口太多会盖住轮廓，而轮廓才是这张图的识别点
+    d.append(dw.Lines(-top_w + 4, top_y - 20, top_w - 14, top_y - 28,
+                      top_w - 8, top_y - 21, -top_w + 10, top_y - 13,
+                      close=True, fill=p[0], stroke=p[3], stroke_width=1.8,
+                      stroke_linejoin="round"))
+
+    # 斗口里那道向下的箭头：只进不出。起点压在盖子下沿，别穿过整块盖板
+    d.append(dw.Line(0, top_y - 18, 0, top_y + 6, stroke=hazard, stroke_width=5.0,
+                     stroke_linecap="round"))
+    d.append(dw.Lines(-11, top_y - 6, 0, top_y + 9, 11, top_y - 6,
+                      close=True, fill=hazard, stroke="none"))
 
     return d
 
@@ -3654,6 +3788,13 @@ if __name__ == "__main__":
     render(refinery_plant(), "refinery-plant")
     # 第十二座。识别点是「夹」这个动作——扶壁内倾并在柱顶交汇，拉直就退回「又一座塔」
     render(singularity_vault(), "singularity-vault")
+
+    # 垃圾箱。识别点是上宽下窄的翻斗轮廓 + 斗口里那道向下的箭头（只进不出）
+    render(dustbin(), "dustbin")
+
+    # 冰矿脉。**这是矿脉图标，用 480 那张**（矿簇图，和 80px 的物品图标不是一回事）。
+    # 识别点是两根竖起来的冰棱——整套里只有它立着，别的矿都是堆在地上的块
+    render(ice_vein(), "ice-vein")
 
     # 提纯线的耗材
     render(electrolyte(), "electrolyte")

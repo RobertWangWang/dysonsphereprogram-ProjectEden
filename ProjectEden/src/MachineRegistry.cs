@@ -381,7 +381,15 @@ namespace ProjectEden
                     continue;
                 }
 
-                var machine = new Machine { Entry = entry, SourceIconPath = source.IconPath };
+                var machine = new Machine
+                {
+                    Entry = entry,
+                    // 自画图标那条路直接把路径钉在这里，下游三处（物品 / 满变体 / 建造配方）
+                    // 全都读它，就不用每处各判一次
+                    SourceIconPath = string.IsNullOrEmpty(entry.iconName)
+                        ? source.IconPath
+                        : "Assets/projecteden/" + entry.iconName,
+                };
 
                 machine.ItemId = ProtoSlots.ResolveItemId(entry.itemId, entry.displayName);
                 machine.ModelId = ProtoSlots.ResolveModelId(entry.modelId, entry.displayName);
@@ -501,6 +509,156 @@ namespace ProjectEden
         /// ——源建筑本来就是一台组装机，除了 assemblerRecipeType 之外全部原样继承：
         /// 速度、功耗、传送带槽位、碰撞体都不用自己配。
         /// </summary>
+        /// <summary>
+        /// 把占地缩到 <c>footprintCells</c> 格：碰撞体、地基点、粗略尺寸、选中框、蓝图框、
+        /// 拖拽间距一起按同一个比例缩。
+        ///
+        /// <para><b>传送带接口故意不缩。</b> 接口缩了会落到「一格 × k」的倍数上，
+        /// 而带子是按<b>整格</b>吸附的——对不上就再也接不上带子，而这件事离线验证不了。
+        /// 不缩的代价只是接口留在原来的位置、看着飘在建筑外面。</para>
+        ///
+        /// <para><b>数组一律先克隆。</b> <c>colliders</c> / <c>buildColliders</c> 是
+        /// <see cref="CloneModel"/> 从源建筑<b>按引用</b>接过来的，就地改等于把原版
+        /// 物流运输站也一起缩了。<c>ColliderData</c> 是值类型，所以 <c>Clone()</c>
+        /// 就是真正的深拷贝。</para>
+        /// </summary>
+        private static void ScaleFootprint(PrefabDesc desc, MachineEntry e)
+        {
+            if (desc == null || e.footprintCells <= 0) return;
+
+            float width = desc.buildCollider.ext.x * 2f;
+
+            if (width <= 0.01f)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"{e.displayName} 配了 footprintCells={e.footprintCells}，但源建筑的建造碰撞体是 0，"
+                    + "推不出当前几格宽，占地不动");
+
+                return;
+            }
+
+            float cur = width / Model.MegaBuildingMeshes.MetresPerCell;
+            float k = e.footprintCells / cur;
+
+            // 只缩不放大：这个旋钮是为「太大了」加的，放大只会让它挡住别的建筑
+            if (k >= 0.999f)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"{e.displayName} 占地已经是 {cur:0.#} 格，不大于目标 {e.footprintCells} 格，不缩");
+
+                return;
+            }
+
+            desc.buildCollider = Shrink(desc.buildCollider, k);
+
+            if (desc.buildColliders != null)
+            {
+                var copy = (ColliderData[])desc.buildColliders.Clone();
+
+                for (var i = 0; i < copy.Length; i++) copy[i] = Shrink(copy[i], k);
+
+                desc.buildColliders = copy;
+            }
+
+            if (desc.colliders != null)
+            {
+                var copy = (ColliderData[])desc.colliders.Clone();
+
+                for (var i = 0; i < copy.Length; i++) copy[i] = Shrink(copy[i], k);
+
+                desc.colliders = copy;
+            }
+
+            if (desc.landPoints != null)
+            {
+                var copy = (UnityEngine.Vector3[])desc.landPoints.Clone();
+
+                // 地基点也只缩水平：y 是它相对地面的高度偏移
+                for (var i = 0; i < copy.Length; i++)
+                    copy[i] = new UnityEngine.Vector3(copy[i].x * k, copy[i].y, copy[i].z * k);
+
+                desc.landPoints = copy;
+            }
+
+            desc.roughRadius *= k;
+            desc.roughWidth *= k;
+            desc.blueprintBoxSize *= k;
+            desc.dragBuildDist *= k;
+
+            // 选中框同样只缩水平：它的高度由 FitColliderHeight 按模型压
+            desc.selectSize = new UnityEngine.Vector3(
+                desc.selectSize.x * k, desc.selectSize.y, desc.selectSize.z * k);
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"{e.displayName} 占地已缩：{cur:0.#} 格 → {e.footprintCells} 格（比例 {k:0.###}）。"
+                + "碰撞体 / 地基点 / 选中框 / 蓝图框 / 拖拽间距都按这个比例缩了，"
+                + "**传送带接口没缩**——接口缩了会落到非整格的位置上，带子就再也接不上了；"
+                + "代价是接口留在原来的位置，看着飘在建筑外面");
+        }
+
+        /// <summary>
+        /// 把一个碰撞体在**水平方向**按 <paramref name="k"/> 缩小，<b>高度不动</b>。
+        ///
+        /// <para>高度归 <c>MegaBuildingMeshes.FitColliderHeight</c> 管——它按模型的实际
+        /// 包围盒去压。两处都改 y 的话就是乘两遍，碰撞体会比模型还矮，
+        /// 表现是「从桶顶飞得进去」。<b>占地是横向的事，高度是纵向的事，分开。</b></para>
+        ///
+        /// <para><c>ColliderData</c> 是值类型，所以按值进出。</para>
+        /// </summary>
+        private static ColliderData Shrink(ColliderData c, float k)
+        {
+            c.pos = new UnityEngine.Vector3(c.pos.x * k, c.pos.y, c.pos.z * k);
+            c.ext = new UnityEngine.Vector3(c.ext.x * k, c.ext.y, c.ext.z * k);
+            c.radius *= k;
+
+            return c;
+        }
+
+        /// <summary>
+        /// 把这座建筑的**占地参数**打一行出来。自绘模型的建筑各报一次。
+        ///
+        /// <para><b>为什么要有这一行：「模型小了」和「站的地方小了」是两件事，
+        /// 而玩家说「太大」时说的往往是后者。</b> 模型能换，占地换不了——
+        /// 底盘、碰撞体、传送带接口全部来自被克隆的原版建筑，
+        /// 而这些值住在 <c>resources.assets</c> 里，<b>离线一个都读不到</b>。
+        /// 真要缩占地，只能先有这一行把实际数字量出来，再决定按什么比例缩
+        /// （而且缩了之后传送带接口 <c>portPoses</c> 必须跟着一起缩，
+        /// 否则接口会飘在建筑外面）。</para>
+        ///
+        /// <para>没有这一行的话，下一轮还是只能靠猜——而这个仓库已经为
+        /// 「离线读不到就别猜」付过好几次账了。</para>
+        /// </summary>
+        private static void ReportFootprintOnce(PrefabDesc desc, string name)
+        {
+            if (desc == null) return;
+
+            int ports = desc.portPoses?.Length ?? 0;
+            int cols = desc.colliders?.Length ?? 0;
+
+            string buildExt = desc.hasBuildCollider
+                ? $"{desc.buildCollider.ext}"
+                : desc.buildColliders != null && desc.buildColliders.Length > 0
+                    ? $"{desc.buildColliders[0].ext}（共 {desc.buildColliders.Length} 个）"
+                    : "无";
+
+            // 建造碰撞体的半长 → 整宽 → 格。用的是 MegaBuildingMeshes 里那个推出来的
+            // 常数（一格 2π/5 米），所以「模型几格」和「占地几格」是同一把尺
+            float cells = desc.buildCollider.ext.x * 2f / Model.MegaBuildingMeshes.MetresPerCell;
+            IntVector2 grid = desc.dragBuildGridDistOverride;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"{name} 占地参数：**建造碰撞体约 {cells:0.#} 格宽**"
+                + $"（{desc.buildCollider.ext.x * 2f:0.##} 米 ÷ {Model.MegaBuildingMeshes.MetresPerCell:0.###} 米/格）；"
+                + $"dragBuildGridDistOverride {grid.x}×{grid.y}（是 0 就说明源建筑没填这个 override，"
+                + "别拿它当格数）；"
+                + $"粗略 半径 {desc.roughRadius:0.##} / 宽 {desc.roughWidth:0.##}"
+                + $" / 高 {desc.roughHeight:0.##}；建造碰撞体 {buildExt}；物理碰撞体 {cols} 个；"
+                + $"传送带接口 {ports} 个；选中框 {desc.selectSize}；蓝图框 {desc.blueprintBoxSize}。"
+                + "这一行是**缩完之后**的末态：横向由 footprintCells 缩、纵向由 "
+                + "MegaBuildingMeshes.FitColliderHeight 按模型高度压，"
+                + "**只有 portPoses 故意没动**（缩了会落到非整格的位置上，带子就接不上了）");
+        }
+
         private static void CloneModel(Machine machine, ItemProto source)
         {
             ModelProto oriModel = LDB.models.Select(source.ModelIndex);
@@ -558,6 +716,18 @@ namespace ProjectEden
             modelDesc.roughWidth = desc.roughWidth;
             modelDesc.roughRadius = desc.roughRadius;
             modelDesc.barHeight = desc.barHeight;
+
+            // 自绘模型：只换外观，占地一概不动（理由见 MachineEntry.modelShape）
+            if (!string.IsNullOrEmpty(machine.Entry.modelShape) && modelDesc.lodMeshes != null)
+            {
+                Model.MegaBuildingMeshes.Apply(ref modelDesc, machine.ItemId, machine.Entry.displayName,
+                    machine.Entry.modelShape, machine.Entry.modelScale,
+                    machine.Entry.modelHeightScale, machine.Entry.modelCells);
+
+                ScaleFootprint(modelDesc, machine.Entry);
+
+                ReportFootprintOnce(modelDesc, machine.Entry.displayName);
+            }
 
             if (machine.IsStation) ApplyStation(modelDesc, machine.Entry.station);
             else if (machine.IsAccumulator) ApplyAccumulator(modelDesc, desc, machine);
@@ -631,7 +801,8 @@ namespace ProjectEden
                 Type = source.Type,
                 GridIndex = grid,
                 StackSize = source.StackSize,
-                IconPath = source.IconPath,
+                // 「满」变体和本体共用同一张图（machine.SourceIconPath 两条路都已选好）
+                IconPath = machine.SourceIconPath,
                 IsFluid = false,
                 IsEntity = true,
                 CanBuild = true,
@@ -1341,10 +1512,13 @@ namespace ProjectEden
                 Name = e.displayName,
                 Description = e.description,
                 Type = source.Type,
+                // ↓ 下面那个 IconPath 读的是 machine.SourceIconPath：
+                //   配了 iconName 就是自画那张，否则是源建筑的
                 GridIndex = machine.Grid,
                 StackSize = source.StackSize,
-                // 图标先用源建筑的原图，PostAddData 里再换成改色版本
-                IconPath = source.IconPath,
+                // 配了 iconName 就是自画那张，否则先用源建筑的原图、
+                // PostAddData 里再换成改色版本（machine.SourceIconPath 已经替两条路选好了）
+                IconPath = machine.SourceIconPath,
                 IsFluid = false,
                 IsEntity = true,
                 CanBuild = true,
@@ -1466,6 +1640,41 @@ namespace ProjectEden
                 e.displayName + "（配方）");
         }
 
+        /// <summary>
+        /// 装自画的图标。物品、建造配方、以及「满」变体都要装上——
+        /// 少装一处的表现是「面板里有图、合成面板里是白的」，看着像加载失败。
+        /// </summary>
+        private static void ApplyDrawnIcon(Machine machine, MachineEntry e)
+        {
+            string path = "Assets/projecteden/" + e.iconName;
+            var icon = Resources.Load<Sprite>(path);
+
+            if (icon == null)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"{e.displayName} 配了 iconName「{e.iconName}」，但 {path} 取不到图——"
+                    + "检查 assets/icons/ 下有没有这个 .png，以及它有没有被当成嵌入资源编进 DLL"
+                    + "（改完 assets 必须重新编译，运行中的游戏读的是 DLL 里那一份）");
+
+                return;
+            }
+
+            ItemProto item = LDB.items.Select(machine.ItemId);
+            RecipeProto recipe = machine.RecipeId > 0 ? LDB.recipes.Select(machine.RecipeId) : null;
+
+            if (item != null) item._iconSprite = icon;
+            if (recipe != null) recipe._iconSprite = icon;
+
+            if (machine.FullItemId > 0)
+            {
+                ItemProto full = LDB.items.Select(machine.FullItemId);
+
+                if (full != null) full._iconSprite = icon;
+            }
+
+            ProjectEdenPlugin.Log.LogInfo($"{e.displayName} 用的是自画图标 {e.iconName}.png");
+        }
+
         // ── LDB 建表之后：核对 ID、图标改色 ──────────────────
 
         internal static void OnPostAddData()
@@ -1488,10 +1697,25 @@ namespace ProjectEden
             ReportTintOnce();
         }
 
-        /// <summary>图标由源建筑的图标改色而来，不需要美术资源。</summary>
+        /// <summary>
+        /// 图标：配了 <c>iconName</c> 就用自画的那张，否则拿源建筑的图标改色。
+        ///
+        /// <b>两条路只能走一条，而且自画那条要自己把 sprite 装上。</b>
+        /// 改色那条是直接拿源物品**已经加载好的** <c>_iconSprite</c> 去改，所以不需要
+        /// 任何预加载；自画那条只有一个路径字符串，得自己 <c>Resources.Load</c>
+        /// （<c>TextureResourcesPatches</c> 拦的就是这个前缀）。少了这一步的表现是
+        /// <b>图标一片空白</b>——本仓库为「漏了 Preload 就是白图标」记过一次。
+        /// </summary>
         private static void TintIcon(Machine machine)
         {
             MachineEntry e = machine.Entry;
+
+            if (!string.IsNullOrEmpty(e.iconName))
+            {
+                ApplyDrawnIcon(machine, e);
+
+                return;
+            }
 
             ItemProto source = LDB.items.Select(e.copyFromItemId);
 

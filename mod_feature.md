@@ -349,7 +349,36 @@ Both share the same speed-up logic as the advanced mining machine:
 ### Planetary / Interstellar Logistics Stations
 
 - **30 storage slots** (vanilla 4 / 5), with paging and a scrollbar added to the panel
-- **10,000,000 per slot**
+- **300,000,000 per slot** (raised from 10,000,000 in 1.12.12, **for these three stations only** — mega
+  buildings, the Dustbin and orbital collectors stay at 10,000,000; `stationSlotCapacity` in `stations.json`
+  sets it per station)
+
+> **Why 300 million and not the 2 billion that `max` would hold — the ceiling is not the capacity, it is the
+> proliferator points.** `StationStore.max` is an Int32 and 2 billion uses 93% of it, which fits. But `inc` in
+> the same struct — **the slot's total proliferator points** — is also an Int32, it grows in proportion to the
+> item count, and `StationComponent.InputItem` does a bare `inc += inc` with **no clamp at all**. So the real
+> safe ceiling is "Int32 max ÷ points per item":
+>
+> | Points per item | Safe slot capacity |
+> |---|---:|
+> | 0 (not sprayed) | 2,147,483,647 |
+> | 4 (vanilla Mk.III proliferator) | **536,870,911** |
+> | 6 (this mod's top grade) | **357,913,941** |
+>
+> **Overflowing it throws rather than just looking wrong**: once `inc` wraps negative, the spray level is
+> `inc / count`, and a negative index into the proliferator table goes straight out of bounds.
+>
+> **300 million sits below the strictest of those lines**: fully sprayed, `inc` tops out at 1.8 billion, still
+> 16% short of the Int32 ceiling — so it is safe **whether or not the goods are sprayed**. 2 billion would only
+> hold if the goods in these three stations were never sprayed, and nobody can promise that: the goods arrive
+> from the logistics network, and anyone can put a spray coater upstream.
+>
+> Three things checked and found safe: the seven derived properties (`count + localOrder + remoteOrder` and
+> friends) are bare Int32 arithmetic, but vanilla's own bookkeeping keeps the in-flight amount within "cap + one
+> carry", nowhere near the limit at this scale; the statistics panel accumulates into
+> `ProductStat.storageCount`, which is **Int64** and converts with `conv.i8` before adding; and this mod's own
+> transfer code (virtual logistics, lab feeding, hub drain-back) computes in `long` and clamps back to `int`.
+
 - **All three stations unified: max charging power 20 GW, draggable to 100 GW on the panel** (vanilla 0.06 GW)
   **and max energy capacity 1000 GJ**
 - **1500 berths for planetary Logistics Drones** (vanilla: 50 on the planetary station, 100 on the interstellar one)
@@ -558,7 +587,7 @@ Both share the same speed-up logic as the advanced mining machine:
 > |---|---|---|---|
 > | How much fits in one **inventory / chest** slot | `ItemProto.StackSize` | `inventoryStackSize` | 10,000 |
 > | How many layers a pile on a **belt** carries | `Cargo.stack` | `stationPilerLevel` | 5000 |
-> | How much fits in one **logistics station** slot | `StationStore.max` | `slotCapacity` | 10,000,000 |
+> | How much fits in one **logistics station** slot | `StationStore.max` | `slotCapacity` / `stationSlotCapacity` | 300,000,000 for the three stations, 10,000,000 elsewhere |
 
 > **It cannot be limited to the inventory alone, and that is structural.** The whole game has exactly one source for
 > this number, `ItemProto.StackSize`, so the inventory, storage chests, the delivery package and the mecha's ammo and
@@ -757,10 +786,31 @@ applying. The startup log prints the **complete ingredient list before and after
 | **Chromium** (vein 20) | Regular vein spot, lava / volcanic ash | Chromite | Ethylene carbothermic reduction |
 | **Vanadium** (vein 21) | Rare slot, very low chance, never in the home system | V-Ti Magnetite | **Aluminothermic** (carbon cannot touch it), plus a synthetic fallback via residue extraction |
 | **Tungsten** (vein 22) | Rare slot, never in the home system | Scheelite | **Three-step chain** ending in tungsten carbide, below |
+| **Ice** (vein 27) | Regular vein spot, **Ice Field Gelisol / Frozen Tundra only** (the two Ice-type themes) | **Vanilla Water** | None — what you mine is water |
 
 > **There are two placement modes.** A "regular vein spot" adds another vein to the planet and is laid down by
 > density, just like iron and copper. A "rare slot" uses vanilla's kimberlite mechanic — a whole planet either has
 > it or does not, and you have to go looking across systems. Cobalt, vanadium and tungsten are all the latter.
+
+> **The ice vein is the only one that yields a vanilla item directly.** All three miners (Fixed-Rate Miner, Mining
+> Machine, Advanced Mining Machine) produce **Water** from it, with no recipe in between.
+>
+> **Why not "Ice Ore" plus an ice → water recipe**: that recipe would cost an item grid cell, a click and a
+> machine, and provide nothing — what the player wants is water. So the config says
+> `oreVanillaRef: "vanilla:水"` and **registers no new item at all**: no item ID, no replicator cell, and
+> crucially **it does not touch vanilla Water's icon** (the ore-recolour path would have replaced that item's icon
+> everywhere in the save, which is specifically guarded against).
+>
+> The justification needs no invention: surface water ice on a frozen planet **is** water in solid form, so mining
+> it yields water with no chemical change at all — which is exactly how lunar and Martian polar ice mining is
+> planned in reality.
+>
+> Its density is **0.9×** iron's, i.e. near-ubiquitous on such planets. That is deliberate: water there should be
+> "everywhere" rather than precious — its value is in **saving a water pump and a long pipe run**, not in scarcity.
+>
+> **Its icon is hand-drawn at 480×480** (not a recoloured iron vein) — the recognisable part is the two upright ice
+> shards; nothing else in the icon set stands up, every other ore is a pile on the ground. The 3D model is still a
+> recoloured clone of the iron vein.
 
 Appearance comes from three sources — **vanilla assets recoloured at runtime**, **hand-drawn icons**, and the
 mega buildings' **code-generated 3D meshes and textures**.
@@ -1602,31 +1652,66 @@ Takes in products you no longer want and destroys them. Nothing ever comes back 
 | | |
 |---|---|
 | Build cost | **1 Iron Ingot + 1 Copper Ingot**, the same as the Fixed-Rate Miner |
-| What it is | A logistics station (cloned from the Interstellar Logistics Station) |
+| What it is | A **planetary** logistics station (cloned from the Planetary Logistics Station; it was the interstellar one until 1.12.12) |
+| Appearance | A **procedurally generated model, 3 grid cells wide**: a tapered skip with a propped-open lid; the icon is drawn too |
 | Storage slots | 30 slots, ten million each — same as any other station here |
-| Intake | Belt ports / Logistics Drones / Logistics Vessels, all three vanilla |
+| Intake | Belt ports / Logistics Drones, both vanilla. **No vessels** |
 | Output | **None.** Whatever arrives is gone the same tick |
 | Statistics | Everything destroyed is recorded in the **consumption** column of the production panel |
 
 **It is configured exactly like an ordinary station**: pick a slot, choose the item you don't want, and set it to
-**Local Demand** — drones will bring that item in from all over the planet and it will be destroyed. Set it to
-**Remote Demand** and vessels fetch it from other systems. Belt ports feed it as usual. The only difference is
-that nothing ever leaves again.
+**Local Demand** — drones will bring that item in from all over the planet and it will be destroyed. Belt ports
+feed it as usual. The only difference is that nothing ever leaves again.
 
 > **Why a station rather than a small bin.** In this mod the waste does not pile up next to a machine — it piles
-> up in the logistics network: a mega building's byproducts go straight into its slots, and goods move between
-> planets on vessels. So what "recycle the products I don't need" was missing was never a container; it was a way
-> to **bring the waste in**. A station already has three of those, so the dustbin needs no feeding logic of its own.
+> up in the logistics network: a mega building's byproducts go straight into its slots. So what "recycle the
+> products I don't need" was missing was never a container; it was a way to **bring the waste in**. A station
+> already has two of those (belt ports and drones), so the dustbin needs no feeding logic of its own.
+
+> **1.12.12 changed the source building from the Interstellar to the Planetary Logistics Station, for size.**
+> On an interstellar station's chassis it really was too big, and **the footprint follows the building it is
+> cloned from and cannot be changed** (chassis, colliders and belt ports all live in `resources.assets`, where
+> none of them can be read offline). So the fix was not to shrink the model but to clone a building that is
+> small to begin with.
+>
+> The cost, stated plainly: **there are no vessels any more, so it cannot collect across systems.** That is not
+> much of a loss — waste is produced locally and destroyed locally, and shipping rubbish between stars only to
+> throw it away is pointless. If you need to dump things on another planet, put another one there.
 
 > **It produces nothing, and that is deliberate.** Giving it an output would open a "waste → some resource" route,
 > and waste is unlimited in a 10000× factory — that is a something-from-nothing hole. It is also why the building
 > needs no balance caveats at all: destroying things can only ever make you poorer.
 
-> **Space Warpers put into a slot are not destroyed.** A vanilla interstellar station draws warpers **out of its
-> storage slots** one per tick into its warper count (`StationComponent.InternalTickRemote` scans `storage` for
-> them). Clearing that slot along with the rest would leave the dustbin's own vessels permanently short of warpers,
-> and the symptom you would see is "it fetches from other systems very slowly" — nowhere near the cause. So that
-> one slot is left alone.
+> **Space Warpers in a slot are skipped — the guard is kept, but it no longer applies here.** A vanilla
+> interstellar station draws warpers **out of its storage slots** one per tick into its warper count
+> (`StationComponent.InternalTickRemote` scans `storage` for them); clearing that slot along with the rest would
+> leave such a station permanently short of warpers, and the symptom would be "it fetches from other systems very
+> slowly" — nowhere near the cause. Now that the dustbin is a planetary station it has no vessels and that path
+> never runs. The guard keys on the item id and costs one integer compare per slot, and it becomes necessary
+> again the moment anyone clones an interstellar dustbin in the config.
+
+> **The shape is generated in code, not the vanilla station recoloured.** The motif is a **skip** — a tapered
+> box, wide at the top, with a lid propped open — the most recognisable waste-container silhouette there is, and
+> one that states what the building does: things go in at the top and never come out. The icon uses the same
+> motif (a downward arrow into the mouth of the skip), and its colour is derived from the `tint` in
+> `machines.json`, so icon and built building are in sync by construction.
+
+> **The model's size is given in grid cells, not as a scale factor** (`modelCells` in `machines.json`, currently
+> 3). That matters, because "how big is 3 cells" cannot be worked out offline — bounding boxes are in metres,
+> cells are cells, and the conversion lives in `resources.assets`. The way out is **not to compute it**: how many
+> cells wide the source building is sits in `PrefabDesc.dragBuildGridDistOverride` (vanilla's own drag-build
+> spacing), so `scale = target cells ÷ source cells` and **the metres cancel**. Changing the source building
+> therefore needs no re-tuning here.
+
+> **The footprint is 3 cells too** (`footprintCells`). The source building's build collider measures 10 m =
+> **8 cells**, so the colliders, land points, select box, blueprint box and drag spacing are all scaled by
+> `3 ÷ 8 ≈ 0.377` — which means two of them really can be placed 3 cells apart.
+>
+> ⚠️ **Only the belt ports are left alone, deliberately.** Scaling those 12 ports would land them on multiples
+> of "one cell × 0.377", while belts snap to **whole cells** — miss, and **belts can never connect again**,
+> which is not something that can be verified offline. So they stay where they were, at the 8-cell radius:
+> visually floating outside the building, but belts still connect. If that bothers you, set `footprintCells`
+> to 0 and the footprint goes back to 8 cells with the ports flush against it.
 
 > **Where it is in the build bar**: the same category as the vanilla logistics stations. That category may be out
 > of visible buttons, so scroll the child row sideways if you don't see it.
@@ -2391,6 +2476,18 @@ likely land on the previous tab and show nothing).
 They used to clone one vanilla model (the logistics station) and differ only by colour — five of the same
 building in five paints. Each one's geometry is now **generated in code**, with a silhouette of its own:
 
+> **Since 1.12.12 the colliders are squashed down to the model's real height as well.** Before that they were
+> inherited verbatim from the cloned logistics station — a tall, slender tower — while the models are low and
+> wide, so **flying low over them hit an invisible wall** with nothing on screen to explain it.
+>
+> **The "no collision" cheat does not help, because it is a different system**: that switch disables
+> `ColliderPool` (Unity physics, used by the build tools' raycasts), while what the mecha collides with is
+> `PrefabDesc.colliders` → `PlanetPhysics` → `PlayerController.HandleCollision`. The two never meet — which is
+> why this survived as long as it did.
+>
+> The colliders are squashed uniformly (never raised); the switch is `fitCollidersToModel` in
+> `megabuildings.json`.
+
 | Building | Shape |
 |---|---|
 | Sky Assembly Plant | three tapering tiers + a central column |
@@ -2499,11 +2596,12 @@ veins and how much reserve each one holds**. Click a row to fly the map there.
 
 | | |
 |---|---|
-| Hotkey | `Ctrl + F` toggles it, `Esc` closes it |
+| Hotkey | `Ctrl + F` toggles it, `Esc` closes it, and there is an `×` in the top right |
 | What it finds | Ores and gas-giant gases, **in Chinese or English** (both 铁 and `iron` find Iron Ore); a numeric item ID works too |
 | Display | Follows the game's language automatically |
 | Ordering | Each resource's planet list is sorted by **vein count, most first** |
 | Paging | A draggable scrollbar on the right — no mouse wheel |
+| Clicking a row | Opens the star map, switches to that system, **flies the camera to that planet**, and turns the planet detail panel to its vein page |
 
 **Results are ranked by match quality, not by rarity**: exact match > prefix match > substring match, and among
 those the closer the length the higher. The first version ranked by "fewest planets = rarest = what you must be
@@ -4667,13 +4765,34 @@ and pure probability makes "extremely rare" and "absent this whole run" the same
 ### The Singularity Vault Station: the twelfth mega building
 
 A plasma vault holds **179.8 GJ** (333× a vanilla full accumulator) and an overload vault **359.6 GJ**;
-the Singularity Vault Station is what charges and discharges them: **60 GW, exactly 3 seconds per vault**
-either way — 20 a minute, which one belt can keep up with.
+the Singularity Vault Station is what charges and discharges them: **1800 GW** (raised from 60 GW in
+1.12.12) — **6 ticks (0.1 s)** per plasma vault either way and 12 ticks for an overload vault, so **600 a
+minute** (300 for overload vaults).
 
-**It does not add generating capacity.** Discharging 60 GW requires that someone charged 60 GW in first
+**It does not add generating capacity.** Discharging 1800 GW requires that someone charged 1800 GW in first
 (round trip 1.00, as vanilla). What it buys is that **shipping power between stars becomes practical** —
 in DSP electricity only crosses planets inside accumulators, and vanilla's 540 MJ apiece is far too
-granular. The charging side needs 60 GW, i.e. **two redox combustion plants**.
+granular. The charging side needs 1800 GW, i.e. **sixty redox combustion plants**.
+
+> **Raising it further buys nothing: the ceiling is "at most one vault per tick".** Vanilla's
+> `PowerExchangerComponent.InputUpdate` contains **no loop** — the vault-conversion step runs once per call —
+> and after converting it clamps the energy drawn this tick to "how much is still needed to fill one more
+> vault". So past **10,788 GW** (plasma) / **21,576 GW** (overload) it is neither faster nor wasteful, just a
+> large number doing nothing. 1800 GW is one sixth of the plasma line.
+
+> **Two limits present as "charging got slower" rather than as an error.** First, it holds **only 20 full
+> vaults** internally, so the belts must **carry away 10 full vaults and deliver 10 empty ones every second**
+> — fall behind on either and it simply stops, silently. Second, **spraying the empty vaults multiplies the
+> rate again** (vanilla scales by `1 + accTable[level]`); this mod's top level is ×2.5, i.e. 4500 GW, still
+> inside the ceiling.
+
+> **Changing that number also moves the plants you have already built** — no rebuild needed.
+> `energyPerTick` is a save field and vanilla's `Import` reads the stored value back verbatim without
+> re-deriving it, so this mod aligns it once after loading. **Keying that alignment on the building rather
+> than on the rate is the whole subtlety here**: everywhere else this mod uses the rate as the key for "which
+> vault tier does this station serve", so the moment the rate changes, every already-built station in the save
+> stops being recognised — and then not only the rate but the **tier switch** and the **per-vault capacity
+> repair** silently stop working too.
 
 The whole line carries **no heat value at all**: energy never passes through a recipe, it is drawn from
 the grid by the exchanger. That is exactly how vanilla's accumulator works, which is why the energy

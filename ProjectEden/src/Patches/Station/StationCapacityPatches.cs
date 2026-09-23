@@ -126,12 +126,19 @@ namespace ProjectEden.Patches
                 foreach (int itemId in Config.itemIds)
                     Apply(itemId);
 
-            // 巨型建筑本身也是物流站，一并放大
+            // 巨型建筑本身也是物流站，一并放大。
+            //
+            // <b>这一路是「把整张表都过一遍」，所以里头本来就可能有不是物流站的。</b>
+            // 奇点储能厂只挂能量枢纽组件，没有物流站段（它不收发货），于是必然落进
+            // Apply 里那句「不是物流站」的分支。那不是缺陷，是这台建筑的设计，
+            // 所以这一路传 optional: true，降成 Info。
+            // 另外两路（stations.json 的 itemIds、machines.json 的 kind: station）
+            // 是**点着名要求**它是物流站的，那边落进同一个分支就是真的配错了，保持 WARNING。
             MegaBuildingsConfig mega = MegaBuildingRegistry.Config;
 
             if (mega?.buildings != null && mega.stationEnabled)
                 foreach (MegaBuildingEntry entry in mega.buildings)
-                    Apply(entry.itemId);
+                    Apply(entry.itemId, optional: true);
 
             // machines.json 里 kind 为 station 的新建筑同理：它们就是物流站，
             // 储量 / 格数 / 充能功率跟着这里走，不用在那边重复配一遍
@@ -174,7 +181,9 @@ namespace ProjectEden.Patches
 
                 if (model?.prefabDesc == null || !model.prefabDesc.isStation)
                 {
-                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是物流站或没有 prefabDesc，充能功率 / 能量容积未改");
+                    ProjectEdenPlugin.Log.LogWarning(
+                        (item != null ? $"「{item.Name}」({entry.itemId})" : $"物品 {entry.itemId}")
+                        + " 不是物流站或没有 prefabDesc，充能功率 / 能量容积未改");
                     continue;
                 }
 
@@ -244,7 +253,9 @@ namespace ProjectEden.Patches
 
                 if (model?.prefabDesc == null || !model.prefabDesc.isStation)
                 {
-                    ProjectEdenPlugin.Log.LogWarning($"物品 {entry.itemId} 不是物流站或没有 prefabDesc，运输机停放数未改");
+                    ProjectEdenPlugin.Log.LogWarning(
+                        (item != null ? $"「{item.Name}」({entry.itemId})" : $"物品 {entry.itemId}")
+                        + " 不是物流站或没有 prefabDesc，运输机停放数未改");
                     continue;
                 }
 
@@ -265,14 +276,45 @@ namespace ProjectEden.Patches
             }
         }
 
-        private static void Apply(int itemId)
+        /// <summary>
+        /// 这座建筑每一格该有多大：<c>stationSlotCapacity</c> 里单独指定的优先，
+        /// 否则用全局的 <c>slotCapacity</c>。
+        ///
+        /// <b>注册时和运行时引导必须调同一个方法。</b> 两处各算各的，就会出现
+        /// 「新建的站点是一个数、老站点被引导成另一个数」这种只在旧存档上发作的差异——
+        /// 而引导那一侧还拿这个值去比对「这一格是不是还停在原版默认上」，判据会一起错。
+        /// </summary>
+        private static int CapacityFor(int itemId)
+        {
+            StationSlotEntry[] list = Config?.stationSlotCapacity;
+
+            if (list != null)
+                foreach (StationSlotEntry entry in list)
+                    if (entry != null && entry.itemId == itemId && entry.capacity > 0)
+                        return entry.capacity;
+
+            return Config?.slotCapacity ?? 0;
+        }
+
+        /// <param name="optional">
+        /// 调用方是「整表扫一遍」而不是点名要求：落进「不是物流站」分支属于正常，报 Info 就够了。
+        /// </param>
+        private static void Apply(int itemId, bool optional = false)
         {
             ItemProto item = LDB.items.Select(itemId);
             ModelProto model = item != null ? LDB.models.Select(item.ModelIndex) : null;
 
             if (model?.prefabDesc == null || (!model.prefabDesc.isStation && !model.prefabDesc.isCollectStation))
             {
-                ProjectEdenPlugin.Log.LogWarning($"物品 {itemId} 不是物流站或没有 prefabDesc，储物格容量未改");
+                // 带上名字：光一个号码要回头翻四个配置文件才知道说的是谁。
+                // 取 Name（原始键）不是 name（译名）——日志是中文的，而译名在英文客户端下是英文
+                string who = item != null ? $"「{item.Name}」({itemId})" : $"物品 {itemId}";
+
+                if (optional)
+                    ProjectEdenPlugin.Log.LogInfo($"{who} 没有物流站组件，跳过储物格容量——这台建筑本来就不收发货");
+                else
+                    ProjectEdenPlugin.Log.LogWarning($"{who} 不是物流站或没有 prefabDesc，储物格容量未改");
+
                 return;
             }
 
@@ -283,7 +325,9 @@ namespace ProjectEden.Patches
             // 「这一格还停在原版值上」和「玩家自己调过了」。
             if (before > 0) VanillaSlotMax[itemId] = before;
 
-            model.prefabDesc.stationMaxItemCount = Config.slotCapacity;
+            int capacity = CapacityFor(itemId);
+
+            model.prefabDesc.stationMaxItemCount = capacity;
 
             // 巨型建筑的格数由 megabuildings.json 单独控制，这里只改配置列出的物流站
             bool isMega = MegaBuildingRegistry.Config?.buildings != null
@@ -301,7 +345,8 @@ namespace ProjectEden.Patches
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"{item.name} 储物格：{beforeKinds} → {model.prefabDesc.stationMaxItemKinds} 格，" +
-                $"单格容量 {before} → {Config.slotCapacity}");
+                $"单格容量 {before} → {capacity}"
+                + (capacity != Config.slotCapacity ? "（stationSlotCapacity 单独指定）" : ""));
         }
 
         /// <summary>
@@ -331,7 +376,6 @@ namespace ProjectEden.Patches
 
             EntityData[] entityPool = factory.entityPool;
             PowerConsumerComponent[] consumerPool = factory.powerSystem?.consumerPool;
-            int capacity = Config.slotCapacity;
 
             // 引导做完之后就别再每 tick 扫一遍全星球了（理由见 Settled 的注释）
             int cursor = __instance.stationCursor;
@@ -375,6 +419,11 @@ namespace ProjectEden.Patches
                     Bootstrapped.TryAdd((factory.planetId, i), 0))
                 {
                     VanillaSlotMax.TryGetValue(protoId, out int vanillaMax);
+
+                    // 逐站点的容量。**必须按这座建筑的 protoId 取，不能用全局值**——
+                    // stationSlotCapacity 单独指定过的站点，注册时写进 prefabDesc 的是
+                    // 那个数，这里要是还用全局值，新建的和老站点就会是两个容量
+                    int capacity = CapacityFor(protoId);
 
                     for (var s = 0; s < station.storage.Length; s++)
                     {
@@ -512,6 +561,16 @@ namespace ProjectEden.Patches
 
         public int slotCapacity;
 
+        /// <summary>
+        /// <b>逐站点覆盖单格容量</b>，只动这里列出来的，其余一律用 <see cref="slotCapacity"/>。
+        ///
+        /// <para>为什么需要它：<c>slotCapacity</c> 是<b>全体生效</b>的——三个物流站、
+        /// 十六座巨型建筑、垃圾箱、还有全部气体采集器都吃同一个数。想只抬物流站
+        /// （巨型建筑的槽位是给制造台配料用的，抬到十亿只会让一台建筑把全网的料吸干），
+        /// 只能逐个列。和 <see cref="stationEnergy"/> / <see cref="stationDrones"/> 同一个形状。</para>
+        /// </summary>
+        public StationSlotEntry[] stationSlotCapacity;
+
         /// <summary>储物格数量。超过 6 需要 StationExpandPatches 一并接管。</summary>
         public int stationMaxItemKinds;
 
@@ -626,6 +685,29 @@ namespace ProjectEden.Patches
         /// 模型 ID / 建造栏槽位 / 合成面板格位栽过三次。</para>
         /// </summary>
         public StationDroneEntry[] stationDrones;
+    }
+
+    /// <summary>
+    /// 单座物流站的<b>单格容量</b>覆盖值。
+    ///
+    /// <para><b>上限不是 <c>StationStore.max</c> 那个 Int32，而是 <c>StationStore.inc</c>。</b>
+    /// 那一格的增产点数是<b>整格的总点数</b>，随 <c>count</c> 成正比长，而
+    /// <c>StationComponent.InputItem</c> @0057–0061 是裸的 <c>inc += inc</c>，
+    /// <b>一个夹子都没有</b>。所以安全上限是 <c>int.MaxValue ÷ 每件喷涂点数</c>：
+    /// 不喷涂 21.47 亿、原版 Mk.III（每件 4 点）5.37 亿、本 mod 最高档（每件 6 点）
+    /// <b>3.58 亿</b>。</para>
+    ///
+    /// <para><b>越界的后果是抛异常，不是数字难看。</b> <c>inc</c> 绕成负数之后，
+    /// 喷涂等级是 <c>inc / count</c>——负下标去查 <c>Cargo.incTableMilli</c>
+    /// 直接越界。所以要填大数，先确认这种货<b>不会被喷涂</b>。</para>
+    /// </summary>
+    [Serializable]
+    internal class StationSlotEntry
+    {
+        public int itemId;
+
+        /// <summary>这座建筑每一格的容量上限。见类注释里那张「安全上限」表。</summary>
+        public int capacity;
     }
 
     /// <summary>单座物流站能停几架行星内物流运输机。</summary>

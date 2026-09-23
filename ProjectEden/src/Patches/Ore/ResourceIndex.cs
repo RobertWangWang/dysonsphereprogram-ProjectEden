@@ -49,8 +49,26 @@ namespace ProjectEden.Patches.Ore
 
         private const float PollSeconds = 0.4f;
 
-        /// <summary>多久没进展就认定扫描线程出事了。一颗星球零点几秒，30 秒足够宽。</summary>
-        private const float StallSeconds = 30f;
+        /// <summary>
+        /// 多久没进展就认定扫描线程出事了。<b>跟着行星半径走，理由见
+        /// <see cref="RareVeinProspector"/> 里同名成员的注释</b>——扫描工作量 ∝ 半径²，
+        /// 半径翻倍就是 4 倍时间，固定 30 秒会把「慢」误判成「死」。
+        /// </summary>
+        private static float StallSeconds
+        {
+            get
+            {
+                int radius = PlanetRadiusPatches.Active ? PlanetRadiusPatches.Radius : VanillaRadius;
+
+                if (radius <= 0) radius = VanillaRadius;
+
+                float scale = (float)radius / VanillaRadius;
+
+                return 30f * scale * scale;
+            }
+        }
+
+        private const int VanillaRadius = 200;
 
         private static bool _running;
         private static float _nextPoll;
@@ -183,7 +201,10 @@ namespace ProjectEden.Patches.Ore
                 ProjectEdenPlugin.Log.LogWarning(
                     $"资源索引：{StallSeconds:0} 秒没有任何一颗星球扫完，判定扫描线程出事了，停止建索引。"
                     + $"已扫 {_scanned}/{_total} 颗，挂起 {InFlight.Count} 颗。"
-                    + (string.IsNullOrEmpty(err) ? "游戏没有报错误信息" : "扫描线程的错误是：" + err));
+                    + (string.IsNullOrEmpty(err) ? "游戏没有报错误信息" : "扫描线程的错误是：" + err)
+                    + (PlanetRadiusPatches.Active && PlanetRadiusPatches.Radius > 0
+                        ? $"（阈值已按行星半径 {PlanetRadiusPatches.Radius} 放大，扫描量 ∝ 半径²）"
+                        : ""));
 
                 Finish();
 
