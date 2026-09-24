@@ -1,0 +1,15 @@
+{
+  "//": "科技树相关。目前只有一条：**用元数据买断科技时，把没解锁的前置一并买断**。单独一个文件、不并进别的配置，理由和 cargoprobe.json / abnormality.json / planet.json 一样——JsonHelper 的磁盘覆盖是整文件生效的，为了翻一个布尔值去影子掉一份内容配置，以后对内嵌那份的每一次修改都会被静默忽略。",
+
+  "//how": "改这里：BepInEx/config/ProjectEden/tech.json（不存在就新建，内容照抄本文件）。改完重开游戏即可，不用重新编译。",
+
+  "//buyoutCascade-它做什么": "原版的规则是「前置没解锁就不能买断」，两道闸：GameHistoryData.BuyoutTech @0056，以及 UITechNode.OnBuyoutButtonClick @001D（弹「存在未解锁的前置科技」然后直接 return）。开着这一条，点深处科技的买断按钮时会**按拓扑序先把没解锁的前置逐级买断**，然后再买目标。\n\n**省的是点击次数，不是代价**：闭包里每一级都走原版的 BuyoutTech，各付各的元数据。原版另有 UnlockTechUnlimitedWithAllPre 能白送整条链，这里刻意不用它。",
+
+  "//buyoutCascade-前置是怎么算的": "**照抄 HasPreTechUnlocked 的判据，不按名字猜。** 那个方法的循环是 `for (j = 0; j < 2; j++)`，j == 0 取 TechProto.PreTechs、**j == 1 取 PreTechsImplicit**，两张表里的每一条都要 techStates[x].unlocked。只走 PreTechs 会漏掉隐式前置，而后果不是报错——是原版那道闸照样拦着，表现为「点了没反应」。",
+
+  "//buyoutCascade-付不起会怎样": "**停在那一级，已经买到的保留，不回滚。** 这一点和「配方做到一半」不同：中途停下不会浪费任何元数据，玩家实实在在拿到了那几级科技，只是没够到目标。所以代码里**不做「全有或全无」的预检**——那反而会在余额刚好够前几级时什么都不给。日志会打出停在哪一级。\n\n顺带一条：按钮上那个「元数据不足」的判据被换成了算整条链的版本，但它读的是**当前余额**，而级联是边买边扣，所以「此刻每一条都付得起」不等于「顺序买完还付得起」。真正的判定在买的那一刻逐级做。",
+
+  "//依赖": "元数据系统本身受原版的「数据异常」判定管——PropertyLogic.get_active 会查 NothingAbnormal()。本 mod 装了内容就必然触发那个判定，所以元数据默认是被卡住的；abnormality.json 里那个**默认开着**的开关就是解这个的。那个关掉的话，元数据系统整个不可用，这一条自然也无从谈起。",
+
+  "buyoutCascade": true
+}

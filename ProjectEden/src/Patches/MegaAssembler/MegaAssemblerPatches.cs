@@ -169,6 +169,10 @@ namespace ProjectEden.Patches
             // 所以「压料」和「烧料」在同一台机器上，中间不经过传送带。
             RedoxBurnerPatches.Burn(factory, ref component);
 
+            // 第二台「又造又烧」的建筑。两个 Burn 各自先比 recipeId 再做事，
+            // 所以并排调用不会互相干扰——一台机器不可能同时跑两条配方
+            Patches.Fusion.FusionBurnerPatches.Burn(factory, ref component);
+
             MegaTickProfiler.AddOther(tOther);
         }
 

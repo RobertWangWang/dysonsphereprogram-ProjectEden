@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.12.15";
+        public const string VERSION = "1.12.16";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -92,6 +92,11 @@ namespace ProjectEden
             CheatsConfig = JsonHelper.Load<Patches.CheatsConfig>("cheats");
             AbnormalityConfig = JsonHelper.Load<Patches.AbnormalityConfig>("abnormality");
             CargoProbeConfig = JsonHelper.Load<Patches.CargoProbeConfig>("cargoprobe");
+
+            // 科技级联买断（tech.json，默认开）。直接塞给补丁类自己持有——
+            // 它只有一个开关，没必要再在 Plugin 上挂一个静态字段
+            Patches.Tech.TechBuyoutCascadePatches.Config =
+                JsonHelper.Load<Patches.Tech.TechConfig>("tech");
             // 行星放大（planet.json，默认关）。自己 Load：倍率要在这里就吸附成合法
             // 半径并算出 precision/segment，开机状态行才报得出「实际会按哪组数跑」
             Patches.PlanetRadiusPatches.Load();
@@ -161,6 +166,7 @@ namespace ProjectEden
             Patches.BeltThroughputProbe.Report();
             Patches.UI.ResourceSearchWindow.Report();
             Patches.QualityCraftPatches.Report();
+            Patches.Tech.TechBuyoutCascadePatches.Report();
             Patches.QualityRepairPatches.Report();
             Patches.QualityCraftFlowPatches.Report();
             Patches.QualityCraftOut.Report();
@@ -340,6 +346,15 @@ namespace ProjectEden
             // 而且它会把原版那张只建一次的 itemStackCount 静态表重建一遍，
             // 所以必须等最后一个 proto 落地——和 RefreshFluidList 是同一族的时序要求。
             LDBTool.PostAddDataAction += Patches.ItemStackSizePatches.OnPostAddData;
+
+            // 聚变线按**配方名**从 LDB 反查出两个号（JSON 里钉的号撞车时会被解析器顺延，
+            // 而顺延之后按写死的号比对，表现是「功耗没变、一度电不发」且不报错）。
+            // 必须排在所有注册器之后：它读的是 LDB 的末态，不是自己写进去的那一份。
+            // **必须排在 OreRegistry.OnPostAddData 之后**：不然本 mod 自己那十四种矿
+            // 还没进主题表，缩放只作用在原版那几种上——而且不会报任何错，只是效果少一半
+            LDBTool.PostAddDataAction += Patches.VeinScalingPatches.Apply;
+
+            LDBTool.PostAddDataAction += Patches.Fusion.FusionRegistry.Resolve;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，

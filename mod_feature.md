@@ -724,7 +724,7 @@ Research mode has no products and takes no part in shipping.
 
 | Building | Coverage | Connection distance |
 |---|---:|---:|
-| **Satellite Substation** | 26.5 → **2000 m** | 53.5 (untouched) |
+| **Satellite Substation** | 26.5 → **2000 m** | 53.5 → **2000 m** |
 | **Tesla Tower** | 10.5 → **30 m** | 22.5 → **60 m** |
 
 > The vanilla figures in those columns are **measured** — the startup log prints them — not quoted from a table.
@@ -732,18 +732,33 @@ Research mode has no products and takes no part in shipping.
 **One Satellite Substation covers a whole planet.** Where 2000 comes from: `OnNodeAdded` / `OnConsumerAdded`
 project both positions onto a sphere of radius `realRadius + 0.2` and then compare a **straight-line 3-D distance**
 (not an arc), so planet-wide coverage needs `≥ 2 × planet radius`. With bigger planets on (radius 400) that is
-≥ 800.4, so 2000 still has 2.5× headroom; the break-even radius is 999.8. Its **connection distance stays vanilla** —
-one of them is enough, so there is no network to form.
+≥ 800.4, so 2000 still has 2.5× headroom; the break-even radius is 999.8.
+
+**Its connection distance is now 2000 too, and that fixes a correctness problem rather than a comfort one.** The
+old value left it at vanilla's 53.5, reasoned as "one is enough, so there is no network to form" — which missed
+that **coverage is not connectivity**. Two nodes share a power network through `conns` (lines), not through
+overlapping coverage circles. So two satellite substations on one planet produced **two disjoint grids** that did
+not share generation or load, while both visibly covered the whole planet. To a player that reads as "it is
+covered but the power will not flow". With both ranges at 2000, a planet's substations actually form one grid.
 
 **The Tesla Tower entry exists for bigger planets.** Once the surface area is 4× larger, vanilla's coverage needs 4×
 the towers to blanket a world. At 30 m the covered area is 8.2× vanilla's, so blanketing an enlarged planet now takes
 *half* as many towers as blanketing a vanilla one. The connection distance is set to twice the coverage so two towers
 can still link across a full coverage gap without leaving a hole.
 
-**Raising the connection distance has a real cost, and it should be stated:** `line_arragement_for_add_node`'s wiring
-work grows with the **square of node density**, so a dense field of towers is a measurable expense. That is why the
-substation entry leaves it at 0; if the tower field feels heavy, drop `connectDistance` to 30–40 (anything at or above
-the coverage radius still forms a connected network).
+**Raising the connection distance has a real cost, and the shape of that cost is measured.**
+`PowerSystem.line_arragement_for_add_node` has **three nested loops** (backward branches spanning 349 / 303 / 17
+instructions) over `List<PowerNetworkStructures.Node>.Count` — **O(n²), run once per node added.**
+
+But it matters *what* it is quadratic in: **those loops walk the node list regardless of `connectDistance`**, which
+only decides how many pairs actually connect. So the direct cost does not move; what moves is that **networks
+merge**, and a merged network has a larger `n` — which is what feeds the n². Two things make that a good trade for
+the substation: `Node.conns` / `.lines` are `List<>` with **no cap** (nothing truncates or overflows; it is just
+more memory and more line rendering), and the expense sits on the **build path**, not the tick path.
+
+What does deserve caution is the **Tesla Tower**, which is built in the hundreds — which is why its connection
+distance is only twice its coverage rather than planet-wide. If a dense tower field feels heavy, drop *its*
+`connectDistance` to 30–40 (anything at or above the coverage radius still forms a connected network).
 
 Substations that are already built have their coverage rebuilt on load, and consumers reconnect.
 
@@ -798,6 +813,7 @@ applying. The startup log prints the **complete ingredient list before and after
 | **Vanadium** (vein 21) | Rare slot, very low chance, never in the home system | V-Ti Magnetite | **Aluminothermic** (carbon cannot touch it), plus a synthetic fallback via residue extraction |
 | **Tungsten** (vein 22) | Rare slot, never in the home system | Scheelite | **Three-step chain** ending in tungsten carbide, below |
 | **Ice** (vein 27) | Regular vein spot, **Ice Field Gelisol / Frozen Tundra only** (the two Ice-type themes) | **Vanilla Water** | None — what you mine is water |
+| **Sulfur Trioxide** (vein 28) | Regular vein spot, **volcanic ash / ash gelisol / black stone salt flat only** | Sulfur Trioxide | No ingot; one step with water gives **sulfuric acid** (0.5 s, vanilla chemical plant), below |
 
 > **There are two placement modes.** A "regular vein spot" adds another vein to the planet and is laid down by
 > density, just like iron and copper. A "rare slot" uses vanilla's kimberlite mechanic — a whole planet either has
@@ -822,6 +838,24 @@ applying. The startup log prints the **complete ingredient list before and after
 > **Its icon is hand-drawn at 480×480** (not a recoloured iron vein) — the recognisable part is the two upright ice
 > shards; nothing else in the icon set stands up, every other ore is a pile on the ground. The 3D model is still a
 > recoloured clone of the iron vein.
+
+> **The sulfur trioxide vein: its distribution rule is its chemistry.** `SO₃ + H₂O → H₂SO₄` is the real last step
+> of the contact process (the absorption tower); this vein treats the roasting and catalytic oxidation ahead of it
+> as work the geology already did. And **no SO₃ mineral could exist on Earth** — it melts at 16.9 °C and hydrates
+> instantly on contact with any moisture. Taken together those two facts say it can only survive somewhere **cold
+> and dry**, while its source is volcanic (SO₂ oxidised at altitude). Hence the themes: **volcanic ash** (the
+> source), **ash gelisol** (volcanic *and* cold, the best fit of all), and **black stone salt flat** (dry, and an
+> evaporite to begin with) — and **lava is deliberately excluded**, because there SO₃ would only ever be a gas.
+>
+> **"Fast" is not a knob either; it is the reaction.** SO₃ hydration is extremely fast and strongly exothermic
+> (ΔH ≈ −130 kJ/mol). The industrial difficulty has never been making it go but **stopping it going too hard** — a
+> real absorption tower dissolves SO₃ into concentrated acid to make oleum and dilutes that, precisely because
+> adding it straight to water throws an uncontrollable acid mist. The 0.5 s is written from the chemistry.
+>
+> **It is cheaper per unit of acid than the other three routes, and they do not become dead content because of
+> it**: the contact route consumes sulfur from residue hydrodesulfurisation, the gypsum route consumes the gypsum
+> the tungsten chain throws off, and vanilla's consumes refined oil. **Those are outlets for waste, not sources of
+> acid**; this one is "open a mine specifically for sulfuric acid".
 
 Appearance comes from three sources — **vanilla assets recoloured at runtime**, **hand-drawn icons**, and the
 mega buildings' **code-generated 3D meshes and textures**.
@@ -4807,8 +4841,8 @@ different map of ores**. So these two veins carry their own generator, seeded fr
 
 | Mineral | Where | Chance per system | Use |
 |---|---|---|---|
-| **Accretion Glass** | black holes + neutron stars | 0.5, 2 spots | → ionised glass → the plasma vault's chamber wall |
-| **Horizon Core** | **black holes only** | 0.35, 1 spot | → core stabiliser → the only way into the overload tier |
+| **Accretion Glass** | black holes + neutron stars | 0.5, 2 spots | → ionised glass → the plasma vault's chamber wall; → super-magnetic rings |
+| **Horizon Core** | **black holes only** | 0.35, 1 spot | → core stabiliser → the only way into the overload tier; → super-magnetic rings |
 
 **The difference in distribution is not a balance knob**: accretion glass is flung from an accretion
 disc, and both black holes and neutron stars have those; a horizon core is dense matter pinned by tidal
@@ -4816,6 +4850,35 @@ fields near the horizon, and **only a black hole has a horizon**.
 
 Both are **guaranteed on the first planet of a qualifying system** — black holes are rare enough already,
 and pure probability makes "extremely rare" and "absent this whole run" the same thing to a player.
+
+**Since 1.12.16 the two ores share a third outlet: vanilla's super-magnetic ring.** In a particle
+collider, `Unipolar Magnet ×4 + Accretion Glass ×2 + Horizon Core ×1 → Super-magnetic Ring ×10`
+(10 seconds).
+
+Each of the three inputs answers one hard constraint on a magnet, rather than being there to
+make up the numbers:
+
+- **The monopole is the field source.** An ordinary magnetic ring gets its field from circulating
+  current, which is limited by ohmic loss and conductor cross-section; a monopole is a true source
+  of ∇·B ≠ 0, so a ring of them is a static field that **needs no current at all**.
+- **The horizon core is the structural member.** The real ceiling on field strength is magnetic
+  pressure `P = B²/2μ₀` — 100 T is already 4 GPa (past any steel) and 1000 T is 400 GPa (past any
+  known material). So "how strong can it be" is the same question as "what will take that hoop
+  stress", and degenerate dense matter is the only answer.
+- **The accretion glass is the matrix.** It does not conduct yet holds plasma steady (see ionised
+  glass above), and the monopoles have to be sealed in a non-conducting matrix or eddy currents in
+  the housing bleed the field away.
+
+**It competes with the Horizon Evaporator for ore, and that is deliberate.** That recipe takes
+`Accretion Glass ×6 + Horizon Core ×1 + Unipolar Magnet ×2`, and the horizon core is the scarcest
+thing in the game (black holes only, one spot each). So this is not a free shortcut but a real
+trade — **antimatter or magnetic rings**. What it sells is "you never have to build the magnet and
+coil chain again", and the price is giving up part of the scarcest ore. Vanilla's own
+super-magnetic ring recipe is **untouched; the two coexist** (the same shape as vanilla's own
+graphene / graphene (advanced) pair).
+
+> The ×10 yield and the 10 seconds are **balance knobs** in `ores.json`; **the ratio is not** — it
+> follows from the three points above. Retune the first two.
 
 > ⚠️ **This does not work with GalacticScale installed.** It replaces vein generation wholesale, so the
 > five methods this mod rewrites are never called. The startup log says so outright rather than leaving
@@ -5075,6 +5138,53 @@ Saturated Getter ×3   → Porous Getter ×2 + Hydrogen ×1    (Redox Chemical P
 
 Regeneration returns fewer than it consumed (3 → 2), so it is a **lossy** loop, not a perpetual one.
 
+### The fusion line: the seventeenth mega building, 200 GW
+
+The antimatter line sells "store electricity and ship it between systems"; this one sells
+**the electricity itself**. Three steps:
+
+```
+10 Deuterium ──(particle collider, 100x power while running this)──> 5 Tritium + 5 Hydrogen
+Deuterium x20 + Tritium x20 + Tungsten Ingot x2 ──> D-T Fuel Rod x1 ──> Mega Fusion Power Station, 200 GW
+```
+
+**The first step is a real branch of a real reaction.** `D + D → T + p` is one of the two D-D
+branches (the other is `D + D → ³He + n`, roughly 50/50 each), so "10 deuterium → 5 tritium +
+5 protium" is stoichiometrically exact. **Protium does not become a new item — it is vanilla
+hydrogen**: protium is ¹H, one proton and no neutrons, which is precisely what vanilla's
+Hydrogen already is. Minting a second, identical item would be dead content by this mod's own
+dominance rule, and that new item would have had no downstream at all.
+
+**The second step's ratio is derived too**: the D-T reaction is equimolar, hence 20 : 20.
+The tungsten is cladding — the plasma-facing layer of a real fusion device is tungsten (the ITER
+divertor): the highest melting point and the best sputtering resistance available.
+
+**The third step's efficiency is derived; the power is a knob.** η = 0.40: about 80% of what D-T
+releases rides on 14.1 MeV neutrons, which carry no charge, pass straight through the field,
+bury themselves in the blanket as heat, and then drive the most ordinary steam cycle there is —
+which is where real estimates of fusion plant gross efficiency sit. It is lower than the Redox
+Combustion Plant's 0.636 because that one burns a chemical flame and can feed a high-temperature
+gas turbine directly. **The 200 GW figure is the owner's number.**
+
+> **The 100× power draw is not decoration — it is the energy gate for the whole line.** The
+> Micro Particle Collider normally draws 45 MW; running D-D fusion it draws **4.5 GW**. Tritium
+> comes from nowhere else, so fusion's net output has to pay that back first. It is implemented
+> as a postfix on `AssemblerComponent.SetPCState` keyed on `recipeId` that **re-runs vanilla's own
+> formula with the permillage scaled**, rather than editing the result — vanilla's overload takes
+> the idle draw and ignores the permillage entirely when the machine is not producing, so
+> "only 100× while actually running" is a branch it already has and needs no extra test.
+
+**This is the second building here that is both an assembler and a generator**, shaped exactly
+like the Redox Combustion Plant: it presses its own fuel rods and burns them without a belt, and
+only the surplus reaches the storage slots. Building it costs **Cemented Carbide ×2000 + Energy
+Matrix ×1000 + Structure Matrix ×1000**.
+
+> **The energy audit will report a positive delta on that recipe, and it is right to.** The whole
+> point of fusion is that the products' nuclear binding energy exceeds the reactants', while the
+> audit's combustibility model only computes `heat value × count` and cannot express a mass
+> defect. So the rod recipe carries an `energyNote` stating the reason — by this repo's rule,
+> **the hole is the one you cannot write a reason for**.
+
 ## XXXVII. Bigger planets: twice the radius, four times the buildable area (on by default)
 
 One switch (`enabled` in `planet.json`, **on by default since 1.12.1**) and one multiplier
@@ -5177,11 +5287,79 @@ logistics moves goods directly between storage slots), so that cost barely exist
 With **GalacticScale 2** installed this switch disables itself and says why in the log — GS2
 already decides each planet's radius, and two things writing the same number only fight.
 
+### Tech buyout cascade (`tech.json`'s `buyoutCascade`, on by default)
+
+Vanilla refuses to let you buy a tech out with metadata while its prerequisites are unresearched.
+With this on, clicking buyout on a deep tech **buys out its missing prerequisites first, in
+topological order**, and then buys the target.
+
+> **What it saves is clicks, not cost.** Every tech in the closure goes through vanilla's own
+> `BuyoutTech` and pays its own metadata. Vanilla also has `UnlockTechUnlimitedWithAllPre`, which
+> would hand the whole chain over for free — **that is deliberately not used here.**
+
+**The prerequisite predicate is copied, not guessed from the name.** `HasPreTechUnlocked` loops
+`for (j = 0; j < 2; j++)`, taking `TechProto.PreTechs` on `j == 0` and **`PreTechsImplicit` on
+`j == 1`**, and every entry of both must be `unlocked`. Walking only `PreTechs` would miss
+implicit prerequisites — and the consequence is not an error but vanilla's own gate still
+refusing, i.e. **"the button does nothing"**.
+
+**If you run out: it stops at that tech, keeps what it already bought, and does not roll back.**
+This is unlike a half-finished craft — stopping partway **wastes no metadata at all**; you really
+did get those techs, you just did not reach the target. So there is deliberately no all-or-nothing
+pre-check, which would hand you nothing in the case where your balance covers the first few
+levels. The log names the tech it stopped on.
+
+> **One dependency**: the metadata system itself is gated by vanilla's "abnormal data"
+> determination (`PropertyLogic.get_active` consults `NothingAbnormal()`). Any content mod trips
+> that determination, so the **on-by-default** switch in `abnormality.json` is what makes metadata
+> usable at all; turn that off and this feature has nothing to work with.
+
+### Veins scale with the area too (`planet.json`'s `veinScaling`, on by default)
+
+**This corrects a measured imbalance; it is not a buff.**
+
+`PlanetAlgorithm.GenerateVeins` reads `PlanetData.radius` **six times**, and **not one of them
+feeds the vein count**: the read at IL 0089 is `2.1 / radius` (shrinking each vein's *angular*
+size so its physical size stays constant), and the other five are height/ocean rejection tests.
+The count comes only from `ThemeProto.VeinSpot[i]`, a fixed integer per theme.
+
+> So once the radius doubles, **the same number of veins is spread over four times the area and
+> the density quietly falls to a quarter**. The planet really did get emptier.
+
+Three knobs, **three derivations, not one picked number**:
+
+| Knob | Derivation | At area ×4 |
+|---|---|---|
+| **Count** | Vanilla's numbers were written for radius 200; multiplying by the area ratio restores what they meant | `VeinSpot × 4` (rounded up) |
+| **Variety** | The **species–area relationship** `S = cA^z` — an empirical law from island biogeography (z measured at 0.25–0.35), and geological provinces behave the same way: a larger planet samples more ore-forming environments | `4^0.25 = 1.41`, i.e. **+41% types**; a theme with 6 ores gains 2 |
+| **Rare-vein chance** | **Poisson**: with an ore-forming rate λ per unit area, `P(at least one) = 1 − e^(−λA)`; solving for λA₀ from p₀ and substituting kA₀ gives `p = 1 − (1−p₀)^k` | cobalt 0.25 → **0.68**, tungsten 0.09 → 0.31, vanadium 0.06 → 0.22 |
+
+The Poisson form has two properties that remove every special case: the result is **always below
+1** (no clamping needed), and **p₀ = 0 stays 0** — which is exactly `RareSettings[i*4+0]`, the
+"never in the home system" slot. This repo once had those two slots the wrong way round and made
+four rare ores spawn *only* in the home system, so that slot must never be special-cased here.
+
+**How the added types are chosen**: candidates are taken **only from types that already appear on
+some other theme** — nothing is invented that neither vanilla nor this mod meant to place
+anywhere — and they are sorted by **how widespread they are elsewhere**, descending (an ore found
+everywhere is the one most likely to occur here as a minor deposit; an ore found only on lava
+should not turn up on an ice field). Their density is 0.35× that theme's **iron**, the same anchor
+`OreRegistry.ExtendThemes` uses — **they are minor occurrences, not main deposits, and a planet
+should still have a speciality**.
+
+> **Only affects planets that have not been generated yet** (including unvisited ones in an
+> existing save); planets you have already been to keep their baked vein data. **It does nothing
+> with GalacticScale installed** — that replaces vein generation wholesale, so `ThemeProto` is
+> never read; the startup log says so. Every theme's before/after type count and spot count is
+> logged.
+>
+> Offline replay: `python tools/sim_veinscale.py`.
+
 ## Config Quick Reference
 
 | File | What it controls |
 |---|---|
-| `megabuildings.json` | The sixteen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, **the global tick divider `globalTickDivider`**, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
+| `megabuildings.json` | The seventeen mega buildings, the tab, speed, built-in logistics station, replicator page count, batch settlement, **the global tick divider `globalTickDivider`**, plus the per-building throttle and the "built in a black hole system" bonus for the four antimatter buildings |
 | `catalyst.json` | Catalyst bed: charge size, how long it lasts, catalyst slot capacity, debug switch |
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), **per-station drone berths** (`stationDrones`, the single writer of that number in this repo), carry capacity (drone / vessel / **courier** configured separately), **base-speed multipliers for both craft** (`droneSpeedMultiplier` / `courierSpeedMultiplier`, applied to the base value, leaving the tech multiplier alone), stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
@@ -5204,6 +5382,9 @@ already decides each planet's radius, and two things writing the same number onl
 | `redox.json` | Redox Combustion Plant: the reductant and oxidiser candidate lists with their per-item oxygen balance, the three grain tiers' heat values and density thresholds, and the oxidiser-ratio slider's range |
 | `lens.json` | Living Lens: power multiplier, photon multiplier (the two are independent), heal rate, and which vanilla catalyst counts as "the other lens" |
 | `abnormality.json` | **Suppresses the "abnormal data" determination**, on by default: the false positive any content mod trips unavoidably. With it off, achievements and metadata stay greyed out for good. A file of its own, same reason as `cargoprobe.json` |
+| `planet.json` | Bigger planets (radius multiplier, **on by default**), the spawn-point diagnostic probe, and **`veinScaling`** — vein count / variety / rare-vein chance scale with the area, each from its own derivation |
+| `tech.json` | One switch, **`buyoutCascade`** (**on by default**): buying a tech out with metadata first buys out its unresearched prerequisites in topological order, each paying its own metadata |
+| `blueprintprobe.json` | Developer only: per-stage timing and gate dumps for the blueprint paste path. Off by default |
 | `cargoprobe.json` | One developer switch: the shader `inc` probe. Off by default, and a file of its own so flipping one bool does not shadow all of `stations.json` |
 
 > Before adding an item or recipe to `ores.json`, read the standard in section XII — **properties are derived from

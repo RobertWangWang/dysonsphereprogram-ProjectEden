@@ -362,6 +362,13 @@ def chromite_ore():
     return ore("#7a5e49", "#573f30", "#3d2b20", "#231811")
 
 
+# 三氧化硫：**明黄，而纯 SO₃ 其实是白的**——取的是火山硫矿场的样子（总有共沉积的单质硫），
+# 不是纯品的样子。gloss 提到 0.4：它是针状结晶丛，比石膏那种块状矿反光得多，
+# 而这也正是 80px 下把它和石膏矿（暖奶油、低反光）分开的那条线。
+def sulfur_trioxide_ore():
+    return ore("#ecd749", "#c7ab2b", "#98811b", "#5a4b0c", gloss=0.40)
+
+
 # 钒钛磁铁矿：本体就是磁铁矿，所以是**灰黑**不是蓝黑——
 # 蓝留给钴，两种矿在 80px 下才分得开
 def vanadium_ore():
@@ -3692,6 +3699,115 @@ def pair_production_chamber():
     return d
 
 
+def tritium():
+    """氚：**核里三颗，两颗是中子**——同位素的差别只在这里，所以图上只画这个。
+
+    原版的氢和重氢都是分子式那一路的画法，这张刻意走**核**的画法：
+    一圈电子轨道 + 核心三颗球，1 质子（暖）+ 2 中子（冷灰）。
+    读者不需要认识「氚」这个字，数一下核里几颗球就知道它比重氢多一颗。
+    淡蓝的晕是它自己衰变打出来的电子激发残余气体——描述里写的就是这个。
+    """
+    d = canvas()
+
+    # 衰变辉光：氚唯一的可见特征，也是它和另外两种同位素的识别键
+    d.append(dw.Circle(0, 0, 30.0, fill="#8fd9ff", fill_opacity=0.13, stroke="none"))
+
+    # 电子轨道：一个氢核只配一个电子，所以只画一圈
+    d.append(dw.Ellipse(0, 0, 30.0, 30.0 * ISO, fill="none",
+                        stroke="#6fa8c4", stroke_width=1.6, stroke_opacity=0.75))
+    d.append(dw.Circle(30.0, 0, 3.0, fill="#cfefff", stroke="#3d6f88", stroke_width=1.2))
+
+    # 核：1 质子 + 2 中子。质子暖色、中子冷灰，位置摆成一个小三角
+    for cx, cy, fill, edge in ((0.0, -6.2, "#e2705c", "#7d2f22"),
+                               (-6.0, 4.4, "#b9c0c9", "#5a636d"),
+                               (6.0, 4.4, "#b9c0c9", "#5a636d")):
+        d.append(dw.Circle(cx, cy, 7.4, fill=fill, stroke=edge, stroke_width=1.5))
+
+    return d
+
+
+def dt_fuel_rod():
+    """氘氚燃料棒：**一根钨壳管，壳比芯重要**。
+
+    和另外两张燃料棒的分界点：铀燃料棒是**三根细管成束**（链式反应要成百上千根），
+    精炼油燃料棒是单根粗棒配观察窗（暖琥珀色）。这一张也是单根，
+    但壳画成**深冷灰的钨**、芯是青蓝的等离子色，两条颜色轴都和精炼油那张相反。
+    顶端两颗点是氘和氚，等量——D-T 是等摩尔反应，图上也画成一样大。
+    """
+    d = canvas()
+
+    tung = _pal("#6b7079")          # 钨：比钛合金包壳深一档，画出「重」
+    core = _pal("#5fc8e6")
+
+    # 主体：钨壳管
+    _cyl(d, 0, -26, 11.0, 54, tung, cap_gloss=0.22)
+
+    # 观察窗：露出里面的芯。窄长条，和精炼油那张的圆窗刻意不同形
+    d.append(dw.Path(fill=core[1], stroke=tung[3], stroke_width=1.3)
+             .M(-5.2, -12).L(5.2, -12).L(5.2, 18).L(-5.2, 18).Z())
+    d.append(dw.Path(fill="#d7f4ff", fill_opacity=0.55)
+             .M(-5.2, -12).L(5.2, -12).L(5.2, -6).L(-5.2, -6).Z())
+
+    # 两道箍：钨壳要焊死，氚会穿过几乎所有金属
+    for y in (-4.0, 22.0):
+        d.append(dw.Path(fill=tung[2], stroke=tung[3], stroke_width=1.1)
+                 .M(-12.5, y).L(12.5, y).L(12.5, y + 4.4).L(-12.5, y + 4.4).Z())
+
+    # 顶塞上的两颗：氘和氚，等量。一暖一冷，但大小一样
+    d.append(dw.Circle(-4.6, -26, 3.2, fill="#cfe9ff", stroke="#3d6f88", stroke_width=1.1))
+    d.append(dw.Circle(4.6, -26, 3.2, fill="#8fd9ff", stroke="#2f6478", stroke_width=1.1))
+
+    return d
+
+
+def fusion_plant():
+    """巨型聚变发电站：**躺平的环，而且是环本身在发光**。
+
+    这一页上已经有两个环，所以区分度要写清楚：
+    观微对撞机是**立着的大环**（加速器），彭宁阱复合室是**躺平的环 + 中心悬一点东西**（阱）。
+    这一张是躺平的环、**中心是一根柱子**（中心螺线管）、而且**发光的是环本身**——
+    等离子体在环里跑，不在环心停着。外圈立着的那些小块是环向场线圈，
+    托卡马克的外形特征全在它们身上。
+
+    主色跟着 megabuildings.json 的 tint 走，所以图标和建成后的颜色天生同步。
+    """
+    d = canvas()
+
+    p, dark = building_pal(6702)
+    coil = _pal("#79808c")
+
+    # 底座
+    _prism(d, 0, 33, 42, 9, dark)
+
+    # 环向场线圈：先画后半圈，让环压在它们前面
+    for a in (200, 230, 260, 290, 310, 340):
+        r = math.radians(a)
+        gx, gy = math.cos(r) * 26.0, math.sin(r) * 26.0 * ISO
+
+        d.append(dw.Rectangle(gx - 3.2, gy - 12.0, 6.4, 18.0,
+                              fill=coil[1], stroke=coil[3], stroke_width=1.1))
+
+    # 等离子体环：**这张图唯一发光的东西**
+    d.append(dw.Ellipse(0, 4, 26.0, 26.0 * ISO, fill="none",
+                        stroke="#bff0ff", stroke_width=9.0, stroke_opacity=0.28))
+    _ring(d, 0, 4, 26.0, 5.0, p)
+
+    # 中心螺线管：托卡马克唯一竖着的大件，也是和彭宁阱那张的分界点
+    _cyl(d, 0, -20, 7.0, 34, coil, cap_gloss=0.3)
+    d.append(dw.Ellipse(0, -20, 8.4, 8.4 * ISO, fill=p[0], fill_opacity=0.9,
+                        stroke=dark[3], stroke_width=1.2))
+
+    # 前半圈线圈：压在环前面
+    for a in (20, 50, 80, 110, 140, 160):
+        r = math.radians(a)
+        gx, gy = math.cos(r) * 26.0, math.sin(r) * 26.0 * ISO
+
+        d.append(dw.Rectangle(gx - 3.2, gy - 12.0, 6.4, 18.0,
+                              fill=coil[1], stroke=coil[3], stroke_width=1.1))
+
+    return d
+
+
 def penning_trap():
     """彭宁阱复合室：**一只躺平的环，中心悬着一点反氢**。
 
@@ -3900,3 +4016,13 @@ if __name__ == "__main__":
     render(magnetic_separator(), "magnetic-separator")
     render(pair_production_chamber(), "pair-production-chamber")
     render(penning_trap(), "penning-trap")
+
+    # 聚变线：氚走「核」的画法（数核里几颗球就知道是哪种同位素），
+    # 燃料棒的壳是钨（深冷灰）、芯是等离子青，两条颜色轴都和精炼油那根相反；
+    # 发电站是这一页第三个环，靠「躺平 + 中心是柱子 + 发光的是环本身」和另外两个区分
+    # 三氧化硫：一条直通硫酸的普通矿
+    render(sulfur_trioxide_ore(), "sulfur-trioxide-ore")
+
+    render(tritium(), "tritium")
+    render(dt_fuel_rod(), "dt-fuel-rod")
+    render(fusion_plant(), "fusion-plant")

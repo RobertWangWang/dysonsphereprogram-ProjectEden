@@ -1029,6 +1029,79 @@ namespace ProjectEden.Model
                                 3, new Vector3(0.12f * U, 0.16f * U, 0.14f * U), S.Vent);
         }
 
+        /// <summary>
+        /// 巨型聚变发电站（6702）。**托卡马克是一个躺平的环，不是塔**——
+        /// 所以这一座的识别键是「又宽又矮」，和综合化学厂那种细高个刚好相反。
+        /// 看得见的三层由内到外：中心螺线管 → 等离子体环（发光）→ 环向场线圈，
+        /// 最外面再挂一圈包层模块和两台汽轮机——**发电的是后者**，
+        /// 中子穿过磁场打进包层变成热，然后走最普通的蒸汽循环。
+        /// </summary>
+        private static void FusionPlant(MeshKit k)
+        {
+            // 底座：宽、薄。托卡马克的占地基本就是环的外径
+            k.AddBox(new Vector3(0f, 0.09f * U, 0f), new Vector3(2.5f * U, 0.18f * U, 2.5f * U),
+                     S.Concrete, S.Grating);
+
+            const float ringY = 0.60f * U;
+            const float major = 0.78f * U;
+
+            // 中心螺线管：环的中轴。它是托卡马克唯一竖着的大件
+            k.AddCylinder(new Vector3(0f, 0.18f * U, 0f), 0.20f * U, 0.86f * U, 16, S.PlateRivet);
+            k.AddCylinder(new Vector3(0f, 1.04f * U, 0f), 0.24f * U, 0.10f * U, 16, S.Accent);
+
+            // 等离子体环：细一档、发光。整座建筑的视觉焦点，也是唯一亮的东西
+            k.AddTorus(new Vector3(0f, ringY, 0f), major, 0.13f * U, 32, 8, S.Glow);
+
+            // 真空室：套在等离子体外面，粗一档、不发光
+            k.AddTorus(new Vector3(0f, ringY, 0f), major, 0.21f * U, 32, 8, S.PlateLight);
+
+            // 环向场线圈：16 个，竖着骑在环上。**它们才是托卡马克的外形特征**——
+            // 没有这一圈，那个环看起来只是一根管子
+            for (var i = 0; i < 16; i++)
+            {
+                float a = i * Mathf.PI * 2f / 16f;
+                float cx = Mathf.Cos(a) * major;
+                float cz = Mathf.Sin(a) * major;
+
+                // 线圈本体：一块竖板，骑在环的外侧
+                k.AddBox(new Vector3(cx * 1.12f, ringY, cz * 1.12f),
+                         new Vector3(0.16f * U, 0.62f * U, 0.16f * U), S.PlateDark, S.Accent);
+
+                // 线圈脚：撑到底座上，顺便把环托起来
+                k.AddBox(new Vector3(cx * 1.24f, 0.30f * U, cz * 1.24f),
+                         new Vector3(0.10f * U, 0.42f * U, 0.10f * U), S.PlateRivet);
+            }
+
+            // 包层模块：挂在环外侧的八块。用百叶面——它是换热的那一层，不是结构
+            for (var i = 0; i < 8; i++)
+            {
+                float a = i * Mathf.PI * 2f / 8f + Mathf.PI / 16f;
+
+                k.AddBox(new Vector3(Mathf.Cos(a) * (major + 0.34f * U), ringY - 0.10f * U,
+                                     Mathf.Sin(a) * (major + 0.34f * U)),
+                         new Vector3(0.26f * U, 0.30f * U, 0.26f * U), S.Vent, S.Hazard);
+            }
+
+            // 汽轮机两台：躺着的圆柱，摆在环外。**这一段和火电厂没有区别**，
+            // 建筑描述里那句话说的就是它
+            for (var sx = -1; sx <= 1; sx += 2)
+            {
+                k.AddBox(new Vector3(1.02f * U * sx, 0.34f * U, 0.72f * U),
+                         new Vector3(0.44f * U, 0.32f * U, 0.22f * U), S.Pipe, S.PlateLight);
+
+                k.AddCylinder(new Vector3(1.02f * U * sx, 0.50f * U, 0.72f * U),
+                              0.09f * U, 0.34f * U, 10, S.PlateDark);
+            }
+
+            // 冷却管：从包层绕到汽轮机那一侧，给底座加点层次
+            k.AddGreebleRow(new Vector3(-1.05f * U, 0.26f * U, -0.80f * U),
+                            new Vector3(1.05f * U, 0.26f * U, -0.80f * U),
+                            5, new Vector3(0.16f * U, 0.18f * U, 0.16f * U), S.Pipe);
+
+            // 走道栏杆：贴着底座边。有它才像是人能上去的电站
+            k.AddRailing(Vector3.zero, 1.18f * U, 1.18f * U, 0.18f * U, 0.13f * U, S.Grating);
+        }
+
         internal static bool Apply(ref PrefabDesc desc, int itemId, string debugName,
                                    string shape = null, float scaleOverride = 0f, float heightOverride = 0f,
                                    int cells = 0)
@@ -1074,6 +1147,7 @@ namespace ProjectEden.Model
                 case 6684: MagneticSeparator(kit); break;
                 case 6685: PairProductionChamber(kit); break;
                 case 6686: PenningTrap(kit); break;
+                case 6702: FusionPlant(kit); break;
                 default: return false;
             }
 

@@ -171,8 +171,19 @@ Check ($vBlock.Count -eq 0) "re-derived twin check reported no problems"
 # Read the expected count out of the preloader itself rather than repeating it here.
 # Two hand-kept copies of one number always separate; the only question is when - and this
 # check exists precisely to catch a payload list that drifted.
-$expected = $pre.GetType("ProjectEden.Preloader.QualityFieldAdder").GetField("ExpectedFields",
-    [Reflection.BindingFlags]"NonPublic,Static,Public").GetRawConstantValue()
+# ExpectedFields is an expression-bodied PROPERTY (it sums two counts from the analyzer),
+# not a const field -- GetField returns null and the whole script dies on the next call with
+# "You cannot call a method on a null-valued expression", which reads like a transform failure
+# and is not one. Same trap this repo already records for AccessTools against the game:
+# check field-vs-property before reflecting. Resolve both, so it survives either shape.
+$expMember = $adderT.GetProperty("ExpectedFields", [Reflection.BindingFlags]"NonPublic,Static,Public")
+if ($expMember) {
+    $expected = $expMember.GetValue($null)
+} else {
+    $expField = $adderT.GetField("ExpectedFields", [Reflection.BindingFlags]"NonPublic,Static,Public")
+    if (-not $expField) { throw "QualityFieldAdder.ExpectedFields is neither a property nor a field" }
+    $expected = if ($expField.IsLiteral) { $expField.GetRawConstantValue() } else { $expField.GetValue($null) }
+}
 Check ($vFound.Count -eq $expected) "twin field count is $expected (got $($vFound.Count))"
 
 # 3. Cargo specifically - this is the one whose struct size the GPU path cares about
@@ -441,8 +452,14 @@ if (Test-Path $plugin) {
     # three wrappers - InsertAtHead, PickAtRearCore x2 - are gated by hand and must
     # be re-checked by hand. They are the only delegate-bound calls in the mod;
     # if a second such mechanism ever appears, this check goes blind for it too.
+    # NOTE this list is keyed by METHOD NAME, so a pure rename stales it silently -- and
+    # that already happened: Drain/TopUp became DrainAll/Move in 1.10.1 while this assertion
+    # was dead (1.9.0 turned ExpectedFields into a property, the script threw on the null
+    # at that point, and every check below it stopped running for eight days). Both sites
+    # were re-read by hand afterwards and are correctly gated. Same family as the repo's
+    # recurring "select by name, miss by name": when you rename a gated call site, grep here.
     $declared = @(
-        "HubCourierPatches::Drain", "HubCourierPatches::TopUp",
+        "HubCourierPatches::DrainAll", "HubCourierPatches::Move",
         "InstantBuildPatches::Pay",
         # Returning a mega building's leftovers to the mecha on a recipe change.
         # This one WRITES the real quality (both ends have quality slots).
