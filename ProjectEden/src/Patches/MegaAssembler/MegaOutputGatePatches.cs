@@ -3,6 +3,7 @@
 // 按 GPL-3.0 发布，详见仓库根目录的 LICENSE 与 NOTICE。
 // Released under GPL-3.0; see LICENSE and NOTICE at the repository root.
 
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -132,6 +133,99 @@ namespace ProjectEden.Patches
                 + $"原版按配方类型把每 tick 的结算数卡在 装配 10 / 其余 20，"
                 + $"现在巨型建筑一律放到 {cycles}——装配类 ×{cycles / 10.0:0.#}、其余 ×{cycles / 20.0:0.#}。"
                 + "普通装配机拿的仍是原值。冶铸熔炉走的是另一条加法闸，本来就没被它卡住，没有改。");
+        }
+
+        private static readonly ConcurrentDictionary<int, byte> _stallReported =
+            new ConcurrentDictionary<int, byte>();
+
+        /// <summary>
+        /// 上一次结算<b>被产出闸拒绝过</b>吗——也就是「产物出不去，这台机器本该停着」。
+        ///
+        /// <para><b>为什么需要问这个：产出闸的拒绝路径会留下一个过期的标记，而我们的节流
+        /// 恰好会去读它。</b> 重读 IL（不是从注释里抄的）：</para>
+        /// <code>
+        /// 0101: if (time &lt; timeSpend) goto 0383      ← Hold / Suppress 把 time 压成负数，走的就是这条
+        /// 0129: replicating = false                   ← **先**抹标记
+        /// 0138-02E8: 产出闸，拒绝时 `ldc.i4.0 ; ret`   ← **再**判闸，既不恢复标记也不扣 time
+        /// 0375: time -= timeSpend
+        /// 0383: if (replicating) goto 0555            ← 这里读到的是那个过期的 false
+        /// 038E: 扣一整份原料
+        /// 054E: replicating = true
+        /// </code>
+        ///
+        /// <para><b>纯原版是自洽的</b>：拒绝时 <c>time</c> 没被扣，所以下一次调用照样从 0101
+        /// 进结算块、再被拒一次，**永远走不到 0383**。那个过期的 false 没有读者。</para>
+        ///
+        /// <para><b>而 <see cref="MegaThrottle.Hold"/> 把 <c>time</c> 写成
+        /// <c>-speedOverride - 1</c> 正好就是通往 0383 的那条路。</b> 于是产物槽满的巨型建筑
+        /// 每个压制 tick 都会<b>为一个产物永远发不出去的周期再扣一次料</b>——
+        /// 原料凭空消失、产量一件不涨，而且<b>一个字都不报</b>。
+        /// <c>globalTickDivider</c> 默认 2，所以每座巨型建筑每隔一 tick 就来一次；
+        /// 离线复现（<c>tools/sim_throttle.py</c>）：7000 tick 白吃 <b>3379</b> 份原料，约 29 份/秒。
+        /// 玩家报的就是这个：「物流站属性存满了产物，巨型建筑还是会继续生产，不会停止」。</para>
+        ///
+        /// <para><b>修法是「不插手」，不是「把标记补回去」。</b> 这一 tick 不压、不放、不补跑，
+        /// 原版自己那一次调用就会照原版的方式重新被拒——也就是原版在产物出不去时的正确行为。
+        /// 补写 <c>replicating = true</c> 同样能止住扣料，但它会让 <see cref="MegaThrottle.Release"/>
+        /// 继续往 <c>extraTime</c> 里推增产进度，而 <c>RewindExtra</c> 每次倒回一整个
+        /// <c>extraSpeed</c>、一个周期却只该分到 <c>share</c>（远小于 extraSpeed），于是每个放行
+        /// tick 净掉一次差额；<c>extraTime</c> 是<b>存档字段</b>，那个负值会永久留下并让
+        /// <c>MegaBatchSettle.CanBatch</c> 把这台永久踢出批量结算（同一个坑在
+        /// <c>RewindExtra</c> 上实际发作过：生产设施 14 ms 变 210 ms）。离线量到的漂移是
+        /// −6.7e11。**不写字段就没有这一类后果**，所以选不插手。</para>
+        ///
+        /// <para><b>判据是实测末态，不是复现闸门条件</b>——复现会随原版多一道闸而失准
+        /// （钻头那条教训）。「!replicating 且 time ≥ timeSpend」只有闸拒绝这一种收尾会留下：
+        /// 缺料留下的是 <c>time == 0</c>（IL 03E6）、刚建好的是 0、被压住的是约 −1、
+        /// 正常跑着的 <c>replicating</c> 恒为 true。</para>
+        ///
+        /// <para><b>烧料那两座不受影响。</b> <c>MegaTick</c> 只跳过节流和补跑周期，
+        /// <c>RedoxBurnerPatches.Burn</c> / <c>FusionBurnerPatches.Burn</c> 照常跑——
+        /// 对它们来说燃料舱<b>就是</b>产物的出口，跳掉就等于把这两座永久锁死。</para>
+        /// </summary>
+        internal static bool SettleRefused(PlanetFactory factory, ref AssemblerComponent component)
+        {
+            // 正常跑着的机器这个标记恒为 true（IL 054E 在扣料之后置上），
+            // 所以绝大多数调用在这一句就返回，tick 路径上不多花钱。
+            if (component.replicating) return false;
+
+            RecipeExecuteData data = component.recipeExecuteData;
+
+            if (data == null || component.recipeId <= 0 || data.timeSpend <= 0) return false;
+
+            if (component.time < data.timeSpend) return false;
+
+            ReportStallOnce(factory, component.entityId);
+
+            return true;
+        }
+
+        /// <summary>
+        /// 事件行：**按建筑类型各报一次**，不是全局一次——十七种巨型建筑里只报最先撞上的
+        /// 那一种，剩下的是好是坏在日志里查不到（<c>MegaStationPatches</c> 的储物格转储栽过同一条）。
+        /// 组装机 tick 跑在 <c>_assembler_parallel</c> 上，所以用 <c>ConcurrentDictionary</c> 领号。
+        ///
+        /// <b>这一行是这个功能的「它决定了什么」。</b> 没有它，「产物槽满时真的停了」和
+        /// 「这段代码根本没进 DLL」在日志里长得一模一样——本仓库为这条付过七次账。
+        /// </summary>
+        private static void ReportStallOnce(PlanetFactory factory, int entityId)
+        {
+            EntityData[] pool = factory?.entityPool;
+
+            if (pool == null || entityId <= 0 || entityId >= pool.Length) return;
+
+            int protoId = pool[entityId].protoId;
+
+            if (!_stallReported.TryAdd(protoId, 0)) return;
+
+            string name = LDB.items.Select(protoId)?.name ?? protoId.ToString();
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"巨型建筑产出闸：「{name}」的产物出不去（物流槽位和传送带都满了），"
+                + "这一 tick 起停产——不压制、不补跑周期，交给原版自己拒绝结算。"
+                + "**期间一份原料都不会再扣**：1.12.16 及以前这里每 2 个 tick 白吃一份、"
+                + "约 29 份/秒，而且一个字都不报。把产物取走就自己恢复。"
+                + "这一行每种建筑只打一次。");
         }
 
         /// <summary>

@@ -65,7 +65,81 @@ namespace ProjectEden.Patches
 
             Dump(rows);
             CheckSpeed(rows);
+            CheckResearchDrain();
         }
+
+        /// <summary>
+        /// 研究模式每种矩阵的<b>实际</b>消耗率，以及现在的存量上限够撑几秒。
+        ///
+        /// <para><b>为什么要每局实测而不是写在注释里。</b> 这条公式的两个输入都读不到：
+        /// <c>TechProto.ItemPoints</c> 在 resources.assets 里，<c>GameHistoryData.techSpeed</c>
+        /// 在存档里。<c>tools/sim_labstock.py</c> 只能按一段范围扫，真值只有运行时知道。
+        /// 而 <c>lab.json</c> 里 <c>researchStorage</c> 那一段的推导正是建立在这两个数上——
+        /// 不打出来的话，那段注释就是一句无人核对的主张。</para>
+        ///
+        /// <para>公式逐条来自 IL：<c>InternalUpdateResearch</c> @000A 把每 tick 的哈希预算
+        /// 定为 <c>(int)(research_speed + 2f)</c>，而 <c>research_speed</c> 由
+        /// <c>FactorySystem.GameTickLabResearchMode</c> @00B3 传的是
+        /// <c>(float)GameHistoryData.techSpeed</c>；一次哈希吃掉 <c>matrixPoints[j]</c> 个
+        /// 放大单位（@0208），<c>matrixServed</c> 是「个数 × 3600」。
+        /// <c>matrixPoints</c> 由 <c>GameHistoryData.Import</c> @03C0 填成
+        /// <c>TechProto.ItemPoints[k]</c>，下标是 <c>Items[k] - 6001</c>。</para>
+        ///
+        /// <para><b>无论如何都打一行</b>：只在「有科技在研究」时才打的话，
+        /// 「现在没点科技」和「这段代码没进 DLL」在日志里长得一模一样。</para>
+        /// </summary>
+        private static void CheckResearchDrain()
+        {
+            GameHistoryData history = GameMain.history;
+
+            if (history == null)
+            {
+                ProjectEdenPlugin.Log.LogInfo(
+                    "研究模式消耗核对：现在还没有存档（GameMain.history 为空），"
+                    + "这一行在进入存档后由存量上限那条自检再打一次。");
+
+                return;
+            }
+
+            int techSpeed = history.techSpeed;
+            int hashesPerTick = techSpeed + 2;
+            LabConfig cfg = ProjectEdenPlugin.LabConfig;
+            int cap = cfg?.researchStorage ?? 0;
+
+            if (cap <= 0) cap = 10;      // 0 = 保持原版
+
+            // 当前在研科技的每种矩阵单价。没在研究就按 1 报个基准值，并说明是基准。
+            int[] points = LabComponent.matrixPoints;
+            var maxPoints = 0;
+
+            if (points != null)
+                foreach (int p in points)
+                    if (p > maxPoints) maxPoints = p;
+
+            bool researching = maxPoints > 0;
+            int ip = researching ? maxPoints : 1;
+
+            // 件/秒 = ItemPoints × 哈希/tick × 60 / 3600
+            double perSec = ip * hashesPerTick * 60.0 / MatrixScaleForLog;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"研究模式消耗核对：techSpeed = {techSpeed} → 每 tick {hashesPerTick} 次哈希；"
+                + $"单价 ItemPoints = {ip}（{(researching ? "当前在研科技的最大值" : "没有在研科技，按基准 1 估")}）"
+                + $" → 每种矩阵 {perSec:0.###} 件/秒。"
+                + $"存量上限 {cap} 件够撑 {(perSec > 0 ? cap / perSec : double.PositiveInfinity):0.#} 秒，"
+                + $"而虚拟补料间隔是 {(cfg?.supplyIntervalTicks ?? 10) / 60.0:0.##} 秒。");
+
+            // 上限撑不过一个补料间隔才是真问题；撑得过就只是「囤多少」的偏好。
+            double interval = (cfg?.supplyIntervalTicks ?? 10) / 60.0;
+
+            if (perSec > 0 && cap / perSec < interval * 2)
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"  ⚠ 存量上限 {cap} 件只够撑 {cap / perSec:0.##} 秒，不到补料间隔的两倍——"
+                    + "研究站会在两次补料之间断料。把 lab.json 的 researchStorage 调大，"
+                    + $"或把 supplyIntervalTicks 调小。（推导见 tools/sim_labstock.py）");
+        }
+
+        private const int MatrixScaleForLog = 3600;
 
         // ── 采集 ──────────────────────────────────────────────
 

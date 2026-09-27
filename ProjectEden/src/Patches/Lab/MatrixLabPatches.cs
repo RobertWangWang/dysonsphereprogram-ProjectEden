@@ -60,6 +60,16 @@ namespace ProjectEden.Patches
 
         private const int MatrixScale = 3600;
 
+        /// <summary>
+        /// 原版的搬运速率：<c>UpdateOutputToNext</c> 里那十二处 <c>36000</c>，也就是
+        /// <b>10 个/tick/格</b>。它是<b>速率</b>，和 <see cref="_matrixCapScaled"/>
+        /// 那个<b>容量</b>不是一回事——详见 <c>ApplyTransferRate</c>。
+        /// </summary>
+        private const int VanillaTransferScaled = 36000;
+
+        /// <summary>生效中的搬运速率，已经乘好 3600。</summary>
+        private static int _transferRateScaled = VanillaTransferScaled;
+
         // ── proto 阶段 ────────────────────────────────────────
 
         /// <summary>proto 就绪后调用：改 prefabDesc，新建的研究站直接带上这个速度。</summary>
@@ -67,6 +77,7 @@ namespace ProjectEden.Patches
         {
             _speed = 0;
             _matrixCapScaled = 0;
+            _transferRateScaled = VanillaTransferScaled;
 
             if (Config == null) return;
 
@@ -123,6 +134,66 @@ namespace ProjectEden.Patches
             _matrixCapScaled = wanted * MatrixScale;
 
             ProjectEdenPlugin.Log.LogInfo($"研究模式每种矩阵存量上限：10 → {wanted}");
+
+            ApplyTransferRate(wanted);
+        }
+
+        /// <summary>
+        /// 堆叠研究站往上层搬矩阵的<b>速率</b>。
+        ///
+        /// <para><b>它和容量是两回事，而 1.12.17 及以前把两者混成了一个数。</b>
+        /// CLAUDE.md 早就记着「<c>UpdateOutputToNext</c> 里那十二个 36000 是每 tick 的
+        /// 搬运速率，不是存量上限」，而那个转译器偏偏把它们换成了
+        /// <c>researchStorage × 3600</c>。</para>
+        ///
+        /// <para><b>速率等于容量的后果是「一 tick 搬空」。</b> 发货方写死「本层只留 2 个」
+        /// （IL 0141 的 <c>7200</c> = 2 × 3600），停不停<b>只</b>由收货方的 <c>needs</c> 决定
+        /// （IL 0124 那句 <c>next.needs[0] == 6001</c> 是唯一的闸）。所以只要速率 ≥ 容量，
+        /// 下层每 tick 都会把存货一次性全推上去、自己永远停在 2 个——上层填满之前，
+        /// 整座塔的货都在最顶上。玩家报的就是这个：
+        /// 「矩阵研究站叠加到一起建造时……所有科研用的矩阵都跑到最上层去了」。</para>
+        ///
+        /// <para><b>默认回到原版的 10 个/tick。</b> 那是 600 个/秒，而研究模式每种矩阵
+        /// 每秒最多吃 <c>ItemPoints × (techSpeed + 2) / 60</c> 个——原版能达到的 techSpeed
+        /// 量级下那是零点几个。转译器仍然跑、仍然断言十二处，只是写回同一个常量：
+        /// 这样游戏更新挪了那几处会当场失败，而不是静默失准。</para>
+        /// </summary>
+        private static void ApplyTransferRate(int capItems)
+        {
+            int rate = Config?.researchTransferRate ?? 0;
+
+            if (rate <= 0)
+            {
+                _transferRateScaled = VanillaTransferScaled;
+
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"堆叠研究站矩阵搬运速率：保持原版 {VanillaTransferScaled / MatrixScale} 个/tick/格" +
+                    $"（{VanillaTransferScaled / MatrixScale * 60} 个/秒）。"
+                    + "**这是速率不是容量**——两者相等就等于一 tick 搬空，下层永远停在 2 个、"
+                    + "货全堆在最上层，那正是 1.12.17 及以前的表现。");
+
+                return;
+            }
+
+            // 必须严格小于容量，否则又回到「一 tick 搬空」。不改成静默夹住：
+            // 那会让配置说的和实际做的不一样，而这正是这次要修的那类错。
+            if (rate >= capItems)
+            {
+                ProjectEdenPlugin.Log.LogWarning(
+                    $"researchTransferRate={rate} 不小于 researchStorage={capItems}："
+                    + "搬运速率一旦追平容量，下层每 tick 都会被搬空、永远停在 2 个，"
+                    + "货会全堆在最上层。已改用原版速率，请把它调到容量以下。");
+
+                _transferRateScaled = VanillaTransferScaled;
+
+                return;
+            }
+
+            _transferRateScaled = rate * MatrixScale;
+
+            ProjectEdenPlugin.Log.LogInfo(
+                $"堆叠研究站矩阵搬运速率：{VanillaTransferScaled / MatrixScale} → {rate} 个/tick/格"
+                + $"（{rate * 60} 个/秒），容量上限是 {capItems} 个。");
         }
 
         // ── 矩阵配方时间 ──────────────────────────────────────
@@ -251,8 +322,16 @@ namespace ProjectEden.Patches
                     + "本 mod 的速度早已让每条配方都在一帧内填满，改的是手搓时间和面板显示");
         }
 
-        /// <summary>供 IL 调用：研究模式矩阵存量上限（放大值）。</summary>
+        /// <summary>供 IL 调用：研究模式矩阵存量上限（放大值）。<b>容量</b>，不是速率。</summary>
         internal static int MatrixCapScaled() => _matrixCapScaled;
+
+        /// <summary>
+        /// 供 IL 调用：堆叠研究站往上层搬矩阵的<b>速率</b>上限（放大值，每 tick 每格）。
+        /// 默认就是原版那个 36000，也就是 10 个/tick——和 <see cref="MatrixCapScaled"/>
+        /// 是两个量，混用会让下层每 tick 被搬空（详见 <c>ApplyTransferRate</c>）。
+        /// </summary>
+        internal static int TransferRateScaled() =>
+            _transferRateScaled > 0 ? _transferRateScaled : VanillaTransferScaled;
 
         /// <summary>供 IL 调用：生产模式产物格的堆积上限。</summary>
         internal static int AssembleOutputCap()
@@ -358,7 +437,9 @@ namespace ProjectEden.Patches
         private static readonly MethodInfo AssembleOutputCapMethod =
                                                AccessTools.Method(typeof(MatrixLabPatches), nameof(AssembleOutputCap)),
                                            MatrixCapScaledMethod =
-                                               AccessTools.Method(typeof(MatrixLabPatches), nameof(MatrixCapScaled));
+                                               AccessTools.Method(typeof(MatrixLabPatches), nameof(MatrixCapScaled)),
+                                           TransferRateScaledMethod =
+                                               AccessTools.Method(typeof(MatrixLabPatches), nameof(TransferRateScaled));
 
         /// <summary>
         /// 生产模式产物格的堆积上限。原版：
@@ -412,8 +493,17 @@ namespace ProjectEden.Patches
         ///     int move = (matrixServed[i] - 7200) / 3600 * 3600;
         ///     if (move &gt; 36000) move = 36000;
         /// 这是<b>速率</b>而不是存量上限——上层能存多少由它自己的 needs 决定。
-        /// 但 10 个/tick/格（600 个/秒）填不满放大后的仓，所以一并放开，
-        /// 否则改了存储上限也只是个填不满的空壳。7200 那个「本层至少留 2 个」不动。
+        ///
+        /// <para><b>这段注释以前就是对的，而代码没照它写。</b> 上一版把这十二处换成了
+        /// <c>MatrixCapScaled()</c>（= <c>researchStorage × 3600</c>），理由写的是
+        /// 「10 个/tick 填不满放大后的仓」。理由本身没错（25 万的仓按 600 个/秒要填七分钟），
+        /// 但结论把速率和容量画上了等号，而<b>速率 ≥ 容量就意味着一 tick 搬空</b>：
+        /// 发货方写死「本层只留 2 个」（IL 0141 的 7200），停不停只由收货方的 needs 决定，
+        /// 于是下层永远停在 2 个、货全堆在最上层。玩家报的就是这个。</para>
+        ///
+        /// <para>现在改用 <see cref="TransferRateScaled"/>，默认写回原版那个 36000
+        /// ——<b>转译器照样跑、照样断言十二处</b>，这样游戏更新挪了那几处会当场失败，
+        /// 而不是静默失准。7200 那个「本层至少留 2 个」不动。</para>
         /// </summary>
         [HarmonyTranspiler]
         [HarmonyPatch(typeof(LabComponent), nameof(LabComponent.UpdateOutputToNext))]
@@ -429,7 +519,8 @@ namespace ProjectEden.Patches
 
                 if (matcher.IsInvalid) break;
 
-                matcher.Set(OpCodes.Call, MatrixCapScaledMethod);
+                // **速率**，不是容量——这两个量混用就是「一 tick 搬空」。
+                matcher.Set(OpCodes.Call, TransferRateScaledMethod);
                 matcher.Advance(1);
 
                 replaced++;
@@ -437,9 +528,12 @@ namespace ProjectEden.Patches
 
             // 六种矩阵各两处（比较值 + 赋值）
             if (replaced < 12)
-                ProjectEdenPlugin.Log.LogWarning($"堆叠研究站的矩阵搬运上限只替换了 {replaced} 处（应为 12 处）");
+                ProjectEdenPlugin.Log.LogWarning($"堆叠研究站的矩阵搬运速率只替换了 {replaced} 处（应为 12 处）");
             else
-                ProjectEdenPlugin.Log.LogInfo("堆叠研究站的矩阵搬运上限已接管");
+                ProjectEdenPlugin.Log.LogInfo(
+                    "堆叠研究站的矩阵搬运速率已接管（12 处）。**这是速率不是容量**；"
+                    + "默认写回原版的 10 个/tick，所以行为与原版一致，"
+                    + "但断言仍然守着那 12 处，游戏更新挪了位置会当场报出来");
 
             return matcher.InstructionEnumeration();
         }
@@ -468,6 +562,13 @@ namespace ProjectEden.Patches
 
         /// <summary>研究模式每种矩阵的存量上限（个）。0 保持原版（10 个）。</summary>
         public int researchStorage;
+
+        /// <summary>
+        /// 堆叠研究站往上层搬矩阵的<b>速率</b>（个/tick/格）。0 = 保持原版的 10。
+        /// 和 <see cref="researchStorage"/> 是两个量：速率追平容量就等于一 tick 搬空，
+        /// 下层永远停在 2 个、货全堆在最上层。必须小于 researchStorage。
+        /// </summary>
+        public int researchTransferRate;
 
         /// <summary>是否让研究站直接从本行星的物流站取料</summary>
         public bool logisticSupply;

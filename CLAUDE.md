@@ -176,6 +176,7 @@ python tools\sim_throttle.py        # 离线复现巨型建筑分频节流的时
 python tools\sim_pairindex.py       # 物流配对表：增量维护和全量重建是否等价（见 LocalPairIndex 那一节）
 python tools\sim_hubtray.py         # 枢纽「摆台→派送→退货」一圈：复现「多出一格同样的货」，并比对三种退货策略
 python tools\sim_veinscale.py       # 矿脉随面积缩放的三条公式 + 本 mod 稀有矿的改写前后真值（见 VeinScalingPatches）
+python tools\sim_labstock.py        # 矩阵研究站该囤多少：消耗率推导 + lab.json 四个上限的断言与反向对照
 powershell -ExecutionPolicy Bypass -File tools\check_bp_nest.ps1       # 蓝图 CheckBuildConditions 里那 6 个 O(预览²) 循环还在不在
 powershell -ExecutionPolicy Bypass -File tools\check_bp_inner.ps1      # 那 6 个循环是不是仍然只写 condition（跳过它们的前提）
 powershell -ExecutionPolicy Bypass -File tools\check_bp_writes.ps1     # 整个 CheckBuildConditions 写了哪些字段（为什么不能整体短路）
@@ -469,6 +470,55 @@ bottom of every call, for the *next* call's benefit; leaving that in place makes
 "progress + one whole `extraSpeed`" and cross the threshold immediately — that is where the 1.00 came
 from. And `Hold` must **not** zero `extraTime` (which is what `Suppress` does): at one hold per tick,
 zeroing means the extra timer never reaches its threshold and spraying these buildings is worthless.
+
+**And suppressing `time` reaches a THIRD region of `InternalUpdate` — the input charge — which turned a
+blocked mega building into an ingredient shredder (fixed 1.12.17, `MegaOutputGatePatches.SettleRefused`).**
+Reported as 「物流站属性存满了产物，巨型建筑还是会继续生产，不会停止」, and the measured shape is
+**output flat, ingredients vanishing at ~29 batches/s, nothing logged**. The whole mechanism is six offsets,
+all re-read rather than recalled:
+
+```
+0102: if (time < timeSpend) goto 0384      ← Hold / Suppress write time negative; THIS is the route
+0129: replicating = false                  ← cleared BEFORE the gate
+0159–02E8: the output gate, refusing with `ldc.i4.0 ; ret`   ← restores neither the flag nor time
+037E: time -= timeSpend                    ← after the gate, so a refusal leaves time >= timeSpend
+0384: if (replicating) goto 0555           ← reads the stale false
+038E: charge a full set of ingredients
+0550: replicating = true
+```
+
+**Vanilla is self-consistent and the stale flag has no reader**: a refusal does not decrement `time`, so the
+next call re-enters the settle block at 0102 and is refused again — control **never reaches 0384**. `Hold`
+writing `time = -speedOverride - 1` is exactly the path to 0384, where the stale `false` makes vanilla pay for
+a cycle whose products can never be emitted. `globalTickDivider` defaults to **2**, so every mega building hits
+it every other tick. Offline replay (`tools/sim_throttle.py`, grown first): 7000 ticks → 120 cycles settled,
+**3500 charges, i.e. 3379 batches destroyed**; after the fix, 121 charges = 120 + the one in flight.
+
+**Three general rules out of it, and the third is the one that generalises furthest:**
+
+- **A "stop the machine" primitive written as a *timer* value can land anywhere downstream of the branch that
+  reads that timer.** This file already recorded that `Suppress` is not a throttle (`MegaThrottle`'s own
+  lesson) and that both timers need it (`MegaLightPatches`). What neither said is *which regions of the method
+  the suppressed branch skips into* — here it skips the settle and lands in the input charge. **Enumerate what
+  the branch you are redirecting can reach, not just what it skips.**
+- **The fix is "do not interfere", not "repair the flag".** Writing `replicating = true` also stops the
+  charge, and it was tried in the model first: it leaves `MegaThrottle.Release` pushing `extraTime` forward for
+  a cycle that is then refused, while `RewindExtra` rewinds a whole `extraSpeed` against a per-cycle `share`
+  ≪ `extraSpeed` — net drift measured at **−6.7e11** into a **save field** vanilla never clears, which is the
+  recorded `CanBatch` poisoning (生产设施 14 ms → 210 ms). **A fix that writes no field cannot have that class
+  of consequence**; prefer standing down over repairing when both stop the symptom.
+- **The discriminator is a measured end state, not a reproduced condition.** `!replicating && time >= timeSpend`
+  is reachable *only* from a gate refusal — starvation leaves `time == 0` (IL 03E6), a fresh build 0, a
+  suppressed tick ≈ −1, and a running machine keeps `replicating == true`. So it survives vanilla growing a
+  fourth gate, which a reproduction of the gate condition would not (the drill-bit lesson, satisfied by
+  measurement as `RunExtraCycles`' `settled` counter already does).
+
+Two things the fix had to leave alone, both "skipping is worse than doing": `RedoxBurnerPatches.Burn` and
+`FusionBurnerPatches.Burn` still run on a stalled tick — for those two buildings **the fuel bay is the outlet**,
+so skipping the drain would lock them permanently — and `CatalystBedPatches.LooksProductive` is excluded on a
+stalled tick, because its own doc comment says it cannot see the output-full case, which is precisely this one.
+`tools/check_output_gate.ps1` now locates all six offsets and asserts their order, so a game update that moves
+any of them fails offline instead of silently invalidating the discriminator.
 
 **The reference-rate panels need the divider too**, for the same reason recorded under
 *The reference-rate panels quote a number the engine forbids* — otherwise they quote the un-throttled
@@ -1385,6 +1435,61 @@ Three things worth knowing before touching labs:
 - **`PrefabDesc.labResearchSpeed` is cosmetic.** Its only two references in the whole assembly are `PrefabDesc.ReadPrefab` (write) and `ItemProto.GetPropValue` (the item tooltip). No logic reads it. The research lever is `techSpeed`, unlock function **22**, accumulative — structurally identical to `stationPilerLevel`'s function 29, so `PilerLevelPatches`' tech-rewriting approach ports directly.
 - **Research mode has no parallel path.** `GameLogic` has `_lab_produce_parallel` and `_lab_output_to_next_parallel` but no research equivalent. Production and output-to-next *do* bypass `FactorySystem`, which is why the speed fix-up is a prefix on `LabComponent.InternalUpdateAssemble` rather than on `GameTickLabProduceMode`.
 - **Three separate storages, none capped where you'd expect.** `PlanetFactory.InsertInto` checks no limit at all for labs — inserters stop because `needs[]` goes to 0. So production input is capped by `UpdateNeedsAssemble` (vanilla: hardcoded **6** for recipes over 9s, else `3×ceil(speedOverride/10000)+3`), research matrices by `UpdateNeedsResearch` (`< 36000`), and production output by an early `return` inside `InternalUpdateAssemble` (**two** copies — the unrolled single-product path and the multi-product loop). The first two are overridden by recomputing `needs[]` in a postfix; only the output gate needs a transpiler. `LabComponent.UpdateOutputToNext`'s twelve `36000`s are a per-tick *transfer rate* between stacked labs, not a storage cap.
+
+**That last sentence was right and the code ignored it for versions — a rate set equal to a capacity means "the
+whole stock moves in one tick" (fixed 1.12.17).** Reported as 「矩阵研究站叠加到一起建造时……所有科研用的矩阵都
+跑到最上层去了」, and the mechanism is three facts in `UpdateOutputToNext`, all re-read:
+
+```
+0124: if (next.needs[0] != 6001) skip      ← the ONLY gate on the receiving side
+0141: if (this.matrixServed[0] < 7200) skip ← the sender keeps exactly 2 items, hardcoded
+0153: move = ((matrixServed[0] - 7200) / 3600) * 3600   ← i.e. give away ALL the rest
+016F: if (move > 36000) move = 36000        ← the twelve sites: a RATE, 10 items/tick
+```
+
+So a lower lab keeps 2 and pushes everything else up, and **the only thing that ever stops it is the upper lab's
+own `needs` going to 0 at its capacity.** `MatrixLabPatches` was rewriting those twelve sites to
+`researchStorage × 3600`, so rate == capacity: every tick the lower lab is emptied to 2, and until the top is full
+the whole tower's stock sits at the very top. At `researchStorage = 250000` that is a 125,000-fold gap against the
+hardcoded 2; **at vanilla's 10 the gap is 5-fold, which is why the hole cannot be seen at vanilla numbers.**
+
+**Two rules, and the first one is the reusable one:**
+
+- **A rate and a capacity are never the same knob, and the tell is that one of them is per-tick.** The justification
+  for the change was sound in isolation ("10 items/tick cannot fill a 250,000-deep silo — 7 minutes"), and it is
+  what made the conflation feel safe. The correct conclusion was that the *silo* was wrong, not the rate. Same
+  family as the piler's four `4`s and `MinerComponent`'s two meanings of `50`, one level up: **not one constant
+  with two meanings, but two different quantities collapsed into one config value.**
+- **When a doc comment states the distinction and the code below it violates the distinction, the comment is the
+  one that was checked.** The `UpdateOutputToNext_Transpiler` doc comment said "这是速率而不是存量上限" **in the
+  same paragraph** that then rewrote it to the capacity. A comment that argues itself out of its own claim is a
+  stronger signal than a missing comment.
+
+The rate is now `researchTransferRate` (0 = vanilla's 10/tick, the default), and the transpiler **still runs and
+still asserts twelve sites**, writing back the same constant — so a game update that moves them fails loudly
+instead of silently. `MatrixLabPatches.ApplyTransferRate` refuses a configured rate that is not strictly below the
+capacity, and says why, rather than clamping silently.
+
+**And the storage numbers themselves are now derived rather than "filled in large" (`tools/sim_labstock.py`).**
+The consumption side is closed-form and was read out of IL: `InternalUpdateResearch` @000A sets the per-tick hash
+budget to `(int)(research_speed + 2f)`, `FactorySystem.GameTickLabResearchMode` @00B3 passes
+`(float)GameHistoryData.techSpeed` as that argument, each hash spends `matrixPoints[j]` scaled units (@0208), and
+`GameHistoryData.Import` @03C0 fills `matrixPoints[Items[k] - 6001] = TechProto.ItemPoints[k]`. So **research mode
+eats `ItemPoints × (techSpeed + 2) / 60` items per second of each matrix**, and production mode eats
+`requireCounts × 60` (one craft per tick, the engine limit — there is no multi-cycle path for labs).
+
+Two process notes on that script, both repo rules re-earned:
+
+- **The assertions are anchored on vanilla, not on the extreme end of my own scan.** The first version asserted
+  against `techSpeed = 10000`, a number I invented; that is "measure in whatever unit is convenient", the
+  `sim_veinscale` lesson. The only real anchor is that **vanilla ships 10 and vanilla players never starve**, so
+  the bounds are stated as multiples of 10.
+- **It carries a negative control**: the pre-1.12.17 values are fed through the same predicates and each rejection
+  is printed. A checker that cannot fail says nothing when it passes.
+- `MatrixSurvey` now prints the *measured* drain every launch (techSpeed, the live `ItemPoints`, items/s, and how
+  many seconds the configured cap covers), because both inputs are unreadable offline — one is in
+  `resources.assets`, the other in the save. Without that line the derivation in `lab.json` would be an unchecked
+  claim, which is the shape this file keeps paying for.
 - **`matrixServed[]` is scaled ×3600** (`InsertInto` does `matrixServed[i] += 3600 * itemCount`), so research-mode matrix storage cannot reach 10M — Int32 caps it near 298k items, and the stack transfer can double the peak, so 250k is the safe limit. Production's `served[]` / `produced[]` are plain counts with no such problem.
 - **Same one-cycle-per-tick ceiling as assemblers.** `time += (int)(power * speedOverride)` runs once per tick and is guarded by `time < timeSpend`, so 60 cycles/s is the engine limit; `speed` only needs to be large enough to fill `timeSpend` in a single tick. Units: `timeSpend = RecipeProto.TimeSpend × 10000`, `extraTimeSpend = × 100000` (TimeSpend is in ticks), and `10000` is 1× speed. The binding Int32 constraints are `extraSpeed = speed × incTableMilli × 10` (**≤ ×4**) and `speedOverride = speed × (1 + accTableMilli)` (**≤ ×3.5**). **Those two ceilings used to read ×2.5 and ×2 here, and that was wrong** — they were computed from proliferator Mk.III, which is level **4** of an eleven-entry table (`+25% / +100%`), while the table itself runs to level **10** (`incTableMilli` 0.4, `accTableMilli` 2.5). Vanilla cannot reach past 4, but **this mod can**: 活性增产剂 sets its outcomes' spray level from `proliferator.json`. Measured by `MatrixSurvey`, which is why it takes `max()` over the live table rather than quoting a constant. Production mode also self-throttles on `produced[i] + productCounts[i] > 10 × ceil(speedOverride/10000)` — the same shape as the miner's `productCount/50` gate.
 

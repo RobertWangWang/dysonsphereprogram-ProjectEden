@@ -145,6 +145,26 @@ Raising it to 60 means that buffer runs three times deeper, and downstream of it
 fast the network drains it. So what this lifts is "the machine computes slowly"; what surfaces next is "the
 goods cannot leave".
 
+> **1.12.17 closed an ingredient black hole in that "goods cannot leave" state.** A player reported "the
+> logistics slots are full of products and the mega building still keeps producing, it never stops". That was
+> not a misreading: output stayed flat while **ingredients vanished at roughly 29 batches per second**, with
+> nothing at all in the log.
+>
+> The cause is that when this gate refuses to settle, vanilla clears its "a cycle is in flight" flag **first**
+> and consults the gate **second**, and the refusal path is a bare `ret` that restores neither the flag nor the
+> timer. Vanilla is self-consistent about it, because the timer is never decremented and so the next call lands
+> on the gate again — it **never reaches the place that reads that flag**. This mod's global tick divider, in
+> order to suppress vanilla's own call, writes that timer negative, and that is precisely the route to the
+> place that reads it — so vanilla charged another full set of ingredients for a cycle whose products can never
+> come out. `globalTickDivider` defaults to 2, so it happened every other tick.
+>
+> The behaviour now: **on a tick where the gate refused, nothing is touched at all** — no hold, no release, no
+> extra cycles — so vanilla refuses again exactly as it would on its own, which is the correct behaviour: it
+> stops. Take the products away and it resumes by itself, and not one ingredient is consumed in between.
+> Throughput is unchanged (measured offline in the back-pressure regime, identical before and after), and the
+> redox combustion plant and the giant fusion plant are unaffected — their fuel bays **are** the outlet for
+> their products, so they keep burning.
+
 > This came out of one player asking why production and consumption did not reconcile, and it agrees with a number
 > already measured in this repo: on a planet with 1079 mega buildings, "21,423 cycles actually settled per tick" —
 > an **average of 19.85**, hugging 20 rather than 60. Halving `cyclesPerTick` from 60 to 30 dropped the total to
@@ -674,8 +694,8 @@ mod does not touch it.
 Only **production mode** (the side that makes matrices) is changed. **Research speed is untouched.**
 
 - **Matrix production 10000x** (covers both the Matrix Lab and the Self-evolution Lab)
-- **10,000,000 each for input and output slots**
-- **250,000 of each matrix in research mode** (vanilla 10)
+- **600 each for input and output slots**
+- **100 of each matrix in research mode** (vanilla 10)
 - **All seven matrix recipes take 1 second** (vanilla: Electromagnetic 3 / Energy 6 / Structure 8 / Information 10 / Gravity 24 / Universe 15 seconds; the Bio Matrix was 3)
 
 > **This does not make labs produce faster — it changes hand-crafting.** The engine settles at most one recipe cycle per tick, and the 10000x above already fills every matrix recipe within a single tick, so a lab's output was and remains 60 per second. What actually changes is **how long one matrix takes to hand-craft** in the replicator, and the number of seconds shown in the panel.
@@ -694,7 +714,7 @@ Labs and the planet's logistics stations are **wired both ways**, with no belts 
 
 > So you need a slot on the station for that matrix, set to **local Demand**, before labs will ship into it. To
 > export the matrices, use the vanilla idiom: local Demand + remote Supply. With no Demand slot at all the matrices
-> pile up inside the lab and production stops at 10,000,000 — exactly as it would with no belt attached in vanilla.
+> pile up inside the lab and production stops at 600 — exactly as it would with no belt attached in vanilla.
 
 Stacking needs no thought either: every level sends and receives directly, without relaying up from the bottom.
 Research mode has no products and takes no part in shipping.
@@ -710,8 +730,27 @@ Research mode has no products and takes no part in shipping.
 > labs stack — every level would grow its own station and its own fleet, and it would only affect newly built labs,
 > leaving existing saves to be rebuilt by hand. Virtual supply works on labs that already exist, immediately.
 
+> **These four numbers were cut sharply in 1.12.17, and the trigger was a player reporting two things: labs hoard
+> far too much, and stacked labs send every research matrix to the top level.** They used to be set by "make it
+> large" — 10,000,000 each for input and output, 250,000 per matrix in research mode (which is exactly the physical
+> maximum that 32-bit field can hold). They are now derived from the engine's own limits: a lab settles exactly
+> **one** craft per tick (a hard engine limit; raising the speed does nothing), i.e. 60 crafts/s, so 600 input items
+> is one second of full-speed intake and 600 output items is five seconds of output. Research mode consumes
+> `ItemPoints × (research speed + 2) / 60` items per second of each matrix; solving 100 items against the worst
+> per-hash price covers a research speed of ~9000, and vanilla's research-speed upgrades never approach that.
+>
+> **"Everything goes to the top" is a separate fault, and cutting the capacity alone does not fix it.** When labs are
+> stacked, the sending level is hardcoded to keep only 2 items, and whether it keeps sending is decided *solely* by
+> whether the level above still wants more. This mod used to replace "how much moves per tick" — a **rate** — with
+> the capacity ceiling as well, and a rate that equals the capacity means **the whole stock moves in a single tick**:
+> every level below is permanently left at 2, and until the top is full the entire tower's stock sits at the very top.
+> 250,000 against 2 is a 125,000-fold gap; vanilla's 10 against 2 is only 5-fold, which is why the hole is invisible
+> at vanilla numbers. The rate is now a separate `researchTransferRate`, defaulting to vanilla's 10 per tick
+> (600/s, already tens of times the most demanding consumption).
+>
 > Research-mode matrix storage **cannot hold 10,000,000**: `matrixServed` is a 32-bit integer holding
-> "count × 3600", and 10 million overflows it 16 times over. 250,000 is the safe ceiling with margin.
+> "count × 3600", and 10 million overflows it 16 times over. The safe ceiling with margin is 250,000 — but that is
+> "what fits", not "what it should hold".
 >
 > Incidentally, the "research speed" field in the building's properties is **purely decorative** in this game —
 > no logic reads it. Actual research throughput comes from the research-speed techs.
@@ -5364,7 +5403,7 @@ should still have a speciality**.
 | `advancedminer.json` | Speed, buffers, product mapping and build restrictions for miners / water pumps / oil extractors, plus whether pumps can draw magma on lava planets |
 | `stations.json` | Station slot count and capacity, **per-station charging power and energy capacity** (`stationEnergy`, in the panel's own units — watts and joules), **per-station drone berths** (`stationDrones`, the single writer of that number in this repo), carry capacity (drone / vessel / **courier** configured separately), **base-speed multipliers for both craft** (`droneSpeedMultiplier` / `courierSpeedMultiplier`, applied to the base value, leaving the tech multiplier alone), stack level, orbital collectors, plus `skipIdleMegaStationTick` (mega-building stations skip the dispatch scan; **on by default** — they no longer launch planetary drones at all and every good moves through virtual logistics; measured at 35% off vanilla's transport cost, set it to false to get the drones back) |
 | `perfprobe.json` | Developer switch: prints per-task CPU cost into the log, so nobody has to copy ten milliseconds figures out of Statistics → Performance by hand. **Off by default, and it costs real time when on** |
-| `lab.json` | Matrix lab production speed, storage, automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
+| `lab.json` | Matrix lab production speed, storage caps (all four derived from the engine's own limits — see `tools/sim_labstock.py`), **the rate at which stacked labs pass matrices upward** (`researchTransferRate`, a different quantity from the capacity), automatic exchange with logistics stations, and how Bio Matrix shows in the lab 3-D animation |
 | `recipes.json` | Extra recipes, plus `vanillaEdits`: **edit a vanilla recipe's ingredient list in place** (currently one entry: the Hydrogen Fuel Rod's hydrogen ×10 → ×56) |
 | `power.json` | Per-node coverage radius and connection distance (`nodes`): Satellite Substation 2000 m planet-wide, Tesla Tower 30 m with a 60 m link. The old schema (`itemIds` plus one shared value) still works |
 | `belts.json` | Speed of the three belt tiers |

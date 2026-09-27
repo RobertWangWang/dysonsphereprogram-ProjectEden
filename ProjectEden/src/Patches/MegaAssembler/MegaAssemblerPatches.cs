@@ -138,9 +138,23 @@ namespace ProjectEden.Patches
 
             tOther = MegaTickProfiler.Now();
 
+            // ── 产物出不去时：这一 tick 一个字都不碰 ────────────────────────
+            //
+            // 上一次结算被**产出闸**拒绝过，说明物流槽位和传送带都满了、这台机器本该停着。
+            // 那就别插手：不走催化剂门（它会 Suppress）、不压不放（Hold/Release）、
+            // 一遍补跑周期都不跑。原版自己那一次调用会照原样重新被拒，也就是原版在
+            // 产物出不去时的正确行为。
+            //
+            // **插手的后果是原料黑洞，不是慢。** Hold 把 time 压成负数，正好绕过原版
+            // 「拒绝后 time 不扣、于是下一次照样重新进结算块」这层自洽，让控制流落到
+            // IL 0383 那句 `if (replicating)`——而闸的拒绝路径在 IL 0129 已经把那个标记
+            // 抹成 false 且不恢复，于是原版为一个产物永远发不出去的周期再扣一次料。
+            // 完整推导和离线复现的数见 MegaOutputGatePatches.SettleRefused。
+            bool stalled = MegaOutputGatePatches.SettleRefused(factory, ref component);
+
             // 催化反应器：床里没有活性催化剂就这一 tick 不许生产。
             // Gate 自己会调 Suppress 压住原版那次调用——前置钩子取消不了它后面那次。
-            if (!CatalystBedPatches.Gate(factory, ref component))
+            if (!stalled && !CatalystBedPatches.Gate(factory, ref component))
             {
                 MegaTickProfiler.AddOther(tOther);
 
@@ -151,7 +165,9 @@ namespace ProjectEden.Patches
 
             long tCycles = MegaTickProfiler.Now();
 
-            int settled = RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
+            int settled = stalled
+                ? 0
+                : RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
 
             MegaTickProfiler.AddCycles(tCycles);
 
@@ -159,8 +175,12 @@ namespace ProjectEden.Patches
 
             // 只在**真的产出了**的 tick 扣活性。settled 是实测值；cyclesPerTick = 1 时
             // 没有补跑周期可测，才退回按原版判据推导（见 LooksProductive 的注释）。
+            // stalled 时连退路都不给：LooksProductive 是**复现**原版判据的那条退路，
+            // 而它自己的注释就写着它看不见「产物槽满」那一种情况——正是这一种。
+            // 不排除的话产物出不去的这一 tick 反而会被判成「在产」、白扣一次催化剂活性。
             CatalystBedPatches.Settle(factory, ref component, settled,
-                                      settled == 0 && CatalystBedPatches.LooksProductive(ref component, power));
+                                      !stalled && settled == 0
+                                      && CatalystBedPatches.LooksProductive(ref component, power));
 
             CatalystBedPatches.DebugTick(factory, ref component);
 

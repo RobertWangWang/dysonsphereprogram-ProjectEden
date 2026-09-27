@@ -7,26 +7,31 @@
   "//matrixTimeSpend": "每一种研究矩阵的配方时间，单位**帧**（60 帧 = 1 秒，这是原版自己的换算：UIRecipeEntry.SetRecipe 打的就是 TimeSpend/60f）。填 60 = 全部一秒。覆盖范围按 LabComponent.matrixIds 走，也就是引擎自己认的那张矩阵表，生物矩阵包含在内——不是七个写死的配方号。填 0 保持原版（实测原版是 电磁 180 / 能量 360 / 结构 480 / 信息 600 / 引力 1440 / 宇宙 900 帧，生物矩阵本 mod 原配 180）。【要紧的一条】这**不会让研究站产得更快**：引擎每帧只结算一个配方周期，而 assembleSpeed 早就让每条配方都在一帧内填满了，所以研究站的产能本来就是每秒 60 个，改这项前后一样。真正变的是**手搓时间**和面板上显示的秒数。",
   "matrixTimeSpend": 60,
 
-  "//assembleStorage": "生产模式每个原料格的存量上限（个）。原版是 timeSpend > 5400000 ? 6 : 3*ceil(speedOverride/10000)+3——超过 9 秒的配方（信息 / 引力 / 宇宙矩阵）硬编码只囤 6 个。served[] 是明文个数的 Int32，PlanetFactory.InsertInto 不查上限，真正的闸门是 UpdateNeedsAssemble 算出来的 needs[]，所以这里用后置重算接管。填 0 保持原版。",
-  "assembleStorage": 10000000,
+  "//上限这四个数在 1.12.17 之前是「往大了填」定的，被玩家逮到了": "生产两格各一千万、研究模式每种 25 万（那正好是那个字段物理上能放的最大值）。后果有两个：研究站变成仓库、把物流网吸空；而**堆叠的研究站会把所有科研矩阵全推到最上层**，下面每一层只剩 2 个。现在四个数都按引擎自己的上限推出来，推导和断言在 tools/sim_labstock.py，改这几个数之前先跑它。",
 
-  "//assembleOutputStorage": "生产模式每个产物格的堆积上限（个）。原版是 InternalUpdateAssemble 里 `produced[i] + productCounts[i] > 10 * ceil(speedOverride/10000)` 就提前 return，和采矿机的 productCount/50 是同一个形状。填 0 保持原版。",
-  "assembleOutputStorage": 10000000,
+  "//assembleStorage": "生产模式每个原料格的存量上限（个）。原版是 timeSpend > 5400000 ? 6 : 3*ceil(speedOverride/10000)+3——超过 9 秒的配方（信息 / 引力 / 宇宙矩阵）硬编码只囤 6 个。served[] 是明文个数的 Int32，PlanetFactory.InsertInto 不查上限，真正的闸门是 UpdateNeedsAssemble 算出来的 needs[]，所以这里用后置重算接管。填 0 保持原版。【怎么定的】研究站每 tick 恒定结算 1 个配方周期（引擎硬上限，GameLogic 里只有 _lab_produce_parallel、没有多周期路径，巨型建筑那套 RunExtraCycles 不覆盖它），也就是 60 份/秒；单份用量按最坏的 10 个算就是 600 个/秒。600 = **一秒的满速进料**，而补料间隔只有 10 tick，余量 6 倍。原来的一千万是 4.6 小时的量。",
+  "assembleStorage": 600,
 
-  "//researchStorage": "研究模式每种矩阵的存量上限（个），原版 10。注意 matrixServed[] 存的是「个数 × 3600」的 Int32（PlanetFactory.InsertInto 里 matrixServed[idx] += 3600 * itemCount），再算上向上层搬料时的二次累加要按 2 倍峰值算，所以硬上限是 298261 个——这一格物理上放不下一千万，填大了会被代码按 250000 处理。填 0 保持原版。",
-  "researchStorage": 250000,
+  "//assembleOutputStorage": "生产模式每个产物格的堆积上限（个）。原版是 InternalUpdateAssemble 里 `produced[i] + productCounts[i] > 10 * ceil(speedOverride/10000)` 就提前 return，和采矿机的 productCount/50 是同一个形状。填 0 保持原版。【怎么定的】每 tick 一份、引力矩阵单次产 2，所以最多 120 个/秒；600 = **5 秒的产量**，足够盖住虚拟出货和分拣器取货的间隔。原来的一千万是 23 小时的量。",
+  "assembleOutputStorage": 600,
+
+  "//researchStorage": "研究模式每种矩阵的存量上限（个），原版 10。注意 matrixServed[] 存的是「个数 × 3600」的 Int32（PlanetFactory.InsertInto 里 matrixServed[idx] += 3600 * itemCount），再算上向上层搬料时的二次累加要按 2 倍峰值算，所以硬上限是 298261 个。填 0 保持原版。【怎么定的，以及为什么原来那个 25 万是错的】消耗率能精确推出来：InternalUpdateResearch @000A 把每 tick 的哈希预算定为 `(int)(techSpeed + 2)`，一次哈希吃掉 matrixPoints[j] 个放大单位（@0208），而 matrixPoints[j] 由 GameHistoryData.Import @03C0 填成 TechProto.ItemPoints[k]。所以**每种矩阵每秒吃 `ItemPoints × (techSpeed + 2) / 60` 个**。100 个按 ItemPoints=4 反解，能覆盖到 techSpeed ≈ 8998 的补料间隔——而原版的研究速度升级压根到不了那个量级，所以这个数在任何存档里都不会饿着。它同时是原版 10 个的 10 倍。**25 万的真正代价不在容量而在堆叠**：发货方写死「本层只留 2 个」（UpdateOutputToNext IL 0141 的 7200），停不停只由收货方的 needs 决定，所以上层填满之前下面每一层就是 2 个——25 万对 2 是 12.5 万倍的落差，而原版 10 对 2 只有 5 倍，看不出来。",
+  "researchStorage": 100,
+
+  "//researchTransferRate": "堆叠研究站往上层搬矩阵的**速率**上限（个/tick/格），原版 10（UpdateOutputToNext 里那 12 处 36000 ÷ 3600）。填 0 = 保持原版，这也是默认。【这一项是 1.12.17 新拆出来的，因为它原先被错当成容量】那 12 处是**每 tick 搬多少**，不是**能存多少**——CLAUDE.md 早就记了这句话，而我们的转译器偏偏把它们换成了 researchStorage×3600。速率等于容量的意思是「一 tick 就搬空」，于是下层永远停在 2 个、货全在最上层，改容量也救不回来。原版 10 个/tick = 600 个/秒，已经是最苛刻消耗的几十倍，所以默认不动它。只有在把 researchStorage 调到几百以上、又嫌堆叠填得慢的时候才有必要填这一项，而且**必须小于 researchStorage**（sim_labstock.py 会断言这一条）。",
+  "researchTransferRate": 0,
 
   "//logisticSupply": "让矩阵研究站直接从本行星的物流站取料，不用铺传送带和分拣器。没有给研究站真的装 StationComponent：研究站是要堆叠的，那样每一层都会长出一个独立的站和一批无人机，而且 prefabDesc 只对新建生效。虚拟供料对老存档里的研究站立即生效，代价是看不到无人机实体在飞。只从标了「供应」的储物格取货，Demand 格不动。",
   "logisticSupply": true,
 
-  "//supplyIntervalTicks": "取料间隔 tick 数。生产模式满速时每 tick 吃 60 份配方，所以 supplyAssembleBatches 要明显大于 间隔 × 60，否则两次取料之间会断料。默认 10 配 2000，相当于 33 tick 的缓冲。",
+  "//supplyIntervalTicks": "取料间隔 tick 数。生产模式满速是每 tick **一**份配方（不是 60 份——这行注释在 1.12.17 之前把「60 份/秒」写成了「60 份/tick」，差了 60 倍，而 supplyAssembleBatches 就是照那个错数定的），所以 supplyAssembleBatches 只要明显大于 间隔 × 1 就不会断料。默认 10 配 120，余量 12 倍。",
   "supplyIntervalTicks": 10,
 
-  "//supplyAssembleBatches": "生产模式囤多少份配方的原料。这是取料目标，不是容量上限（上限看 assembleStorage）——直接填到一千万会把整个物流网吸进一台研究站。",
-  "supplyAssembleBatches": 2000,
+  "//supplyAssembleBatches": "生产模式囤多少份配方的原料。这是取料目标，不是容量上限（上限看 assembleStorage）——填大了会把整个物流网吸进一台研究站。120 份 = **2 秒的满速生产**，而补料间隔是 10 tick（六分之一秒），余量 12 倍。原来是 2000，那是 33 秒的量，而且是照上面那个 60 倍的单位错误定的。",
+  "supplyAssembleBatches": 120,
 
-  "//supplyMatrixItems": "研究模式每种矩阵囤多少个（按件数写，内部自动换算成 ×3600 的放大值）。同样只是取料目标，上限看 researchStorage。",
-  "supplyMatrixItems": 1000,
+  "//supplyMatrixItems": "研究模式每种矩阵囤多少个（按件数写，内部自动换算成 ×3600 的放大值）。同样只是取料目标，上限看 researchStorage，而且不该超过它——超过了就是个永远填不满的目标，虚拟供料每个间隔都会白跑一趟。所以这里跟着 researchStorage 取同一个数。",
+  "supplyMatrixItems": 100,
 
   "//logisticOutput": "取料的反方向：把生产模式造好的矩阵直接送进本行星的物流站，不用铺分拣器。只做取料的话产物会堆在 produced[] 里，堆到 assembleOutputStorage 就停产。出货只往标了「本地需求」的格位送：那是玩家明说「请把这个东西送到这里」的标记，和取货只认「本地供应」格严格对称。要外运就按原版老套路配「本地需求 + 星际供应」。一个 Demand 格都没有的话产物会堆在机内，和原版不接分拣器一样。研究模式没有产物，不参与。",
   "logisticOutput": true,
