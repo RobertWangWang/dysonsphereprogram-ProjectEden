@@ -43,19 +43,40 @@ $bad = 0
 # --- 1. TargetMethods mixed with individual annotations -----------------------------
 foreach ($t in $ours.MainModule.Types) {
     $selector  = $false
+    $how       = ""
     $annotated = @()
 
     foreach ($m in $t.Methods) {
+        # (a) by attribute
         foreach ($a in $m.CustomAttributes) {
             $n = $a.AttributeType.Name
-            if ($n -eq "HarmonyTargetMethods" -or $n -eq "HarmonyTargetMethod") { $selector = $true }
+            if ($n -eq "HarmonyTargetMethods" -or $n -eq "HarmonyTargetMethod") {
+                $selector = $true
+                $how = "[$n]"
+            }
             if ($n -eq "HarmonyPatch") { $annotated += $m.Name }
+        }
+
+        # (b) BY NAME. Harmony recognises a method literally called TargetMethod(s) as the
+        #     selector even with no attribute on it -- HarmonyMethod's auxiliary-method
+        #     discovery is name-based, exactly like Prepare / Cleanup.
+        #
+        #     This half was missing and it was a REAL blind spot, found by writing a class
+        #     that used the convention form: the script printed OK on a class that mixes a
+        #     name-based TargetMethods with per-method [HarmonyPatch] annotations, which is
+        #     the very combination this check exists to catch and which takes the whole mod
+        #     down at PatchAll time. A checker that only knows one of the two spellings of
+        #     the thing it is checking reports a true fact and a false verdict -- the same
+        #     shape this repo already records for "select by name, miss by name".
+        if ($m.Name -eq "TargetMethods" -or $m.Name -eq "TargetMethod") {
+            $selector = $true
+            if (-not $how) { $how = "method named $($m.Name) (no attribute)" }
         }
     }
 
     if ($selector -and $annotated.Count -gt 0) {
-        Write-Host ("  MIXED  {0}: TargetMethod(s) plus individual [HarmonyPatch] on {1}" -f `
-                    $t.Name, (($annotated | Sort-Object -Unique) -join ", ")) -ForegroundColor Red
+        Write-Host ("  MIXED  {0}: selector via {1} plus individual [HarmonyPatch] on {2}" -f `
+                    $t.Name, $how, (($annotated | Sort-Object -Unique) -join ", ")) -ForegroundColor Red
         $bad++
     }
 }

@@ -297,6 +297,108 @@ namespace ProjectEden.Patches
             return AccessTools.MethodDelegate<T>(m);
         }
 
+        // ── 池里某一件货的 inc / stack：按**字段**访问，不是按方法 ──────────────
+        //
+        // 上面那几对绑的都是**方法**（签名被 preloader 加宽了），这一对绑的是**字段**，
+        // 而字段的宽度同样被改过。插件是按**未加宽**的 Assembly-CSharp 编译的，所以源码里
+        // 一句普通的 `pool[i].inc = x` 会发出 `stfld byte Cargo::inc`，运行时解析不到，
+        // 抛 MissingFieldException——本仓库为这条付过一次账（QualityRepairPatches 那次
+        // 每 30 秒一趟的巡检，进游戏几十秒后崩，而编译、Harmony、verify_* 全都不报）。
+        //
+        // 所以这里**运行时按字段的实际宽度发射**一对 DynamicMethod。写死任何一种宽度都会在
+        // 另一种下静默失配，那正是那次的成因。发射一次、之后是直接调用，
+        // 热路径上没有反射、没有装箱（和这个类其余部分的承诺一致）。
+        private delegate int CargoFieldGet(Cargo[] pool, int index);
+
+        private delegate void CargoFieldSet(Cargo[] pool, int index, int value);
+
+        private static readonly CargoFieldGet IncGetter = EmitGet(nameof(Cargo.inc)),
+                                             StackGetter = EmitGet(nameof(Cargo.stack));
+
+        private static readonly CargoFieldSet IncSetter = EmitSet(nameof(Cargo.inc));
+
+        /// <summary><c>Cargo.inc</c> 实际能装到多少：按**字段的真实宽度**算，不按我们以为的宽度。</summary>
+        internal static readonly int IncMax =
+            AccessTools.Field(typeof(Cargo), nameof(Cargo.inc))?.FieldType == typeof(short)
+                ? short.MaxValue
+                : byte.MaxValue;
+
+        /// <summary>这一对访问器都发射成功了吗。任何一个为 null 就整体不用。</summary>
+        internal static bool CargoFieldsReady => IncGetter != null && StackGetter != null && IncSetter != null;
+
+        /// <summary>池里第 <paramref name="index"/> 件货的增产点数（整堆的，不是每件的）。</summary>
+        internal static int GetInc(Cargo[] pool, int index) =>
+            pool == null || IncGetter == null || index < 0 || index >= pool.Length ? 0 : IncGetter(pool, index);
+
+        /// <summary>池里第 <paramref name="index"/> 件货的集装层数。</summary>
+        internal static int GetStack(Cargo[] pool, int index) =>
+            pool == null || StackGetter == null || index < 0 || index >= pool.Length ? 0 : StackGetter(pool, index);
+
+        /// <summary>
+        /// 写增产点数。<b>夹取放在这个唯一出口上，而不是交给调用方。</b>
+        /// 发射出来的 <c>conv.i2</c> / <c>conv.u1</c> 会**静默截断**，而截断成负数之后
+        /// 上限巡检接不住（它开头就是「小于等于 0 就返回」），那个负值会一直留在存档里——
+        /// 本仓库在品质那条线上原原本本栽过一次，教训是「按目标类型量，别按算得方便的类型量」。
+        /// </summary>
+        internal static void SetInc(Cargo[] pool, int index, int value)
+        {
+            if (pool == null || IncSetter == null || index < 0 || index >= pool.Length) return;
+
+            if (value < 0) value = 0;
+
+            if (value > IncMax) value = IncMax;
+
+            IncSetter(pool, index, value);
+        }
+
+        private static CargoFieldGet EmitGet(string fieldName)
+        {
+            FieldInfo f = AccessTools.Field(typeof(Cargo), fieldName);
+
+            if (f == null) return null;
+
+            var dm = new DynamicMethod("ProjectEden_Get_Cargo_" + fieldName, typeof(int),
+                                       new[] { typeof(Cargo[]), typeof(int) }, typeof(CargoWidening), true);
+
+            ILGenerator il = dm.GetILGenerator();
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldelema, typeof(Cargo));
+            il.Emit(OpCodes.Ldfld, f);
+            // Byte 是零扩展、Int16 是符号扩展，两种 ldfld 都已经在栈上留下 int32，
+            // conv.i4 因此是个空操作——写出来只为让「返回的就是 int」这件事一眼可见。
+            il.Emit(OpCodes.Conv_I4);
+            il.Emit(OpCodes.Ret);
+
+            return (CargoFieldGet)dm.CreateDelegate(typeof(CargoFieldGet));
+        }
+
+        private static CargoFieldSet EmitSet(string fieldName)
+        {
+            FieldInfo f = AccessTools.Field(typeof(Cargo), fieldName);
+
+            if (f == null) return null;
+
+            var dm = new DynamicMethod("ProjectEden_Set_Cargo_" + fieldName, null,
+                                       new[] { typeof(Cargo[]), typeof(int), typeof(int) },
+                                       typeof(CargoWidening), true);
+
+            ILGenerator il = dm.GetILGenerator();
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldelema, typeof(Cargo));
+            il.Emit(OpCodes.Ldarg_2);
+            // **按字段的真实宽度收窄**，而不是按我们以为的宽度。夹取已经在 SetInc 里做过，
+            // 所以这一步不会丢位——但它必须和字段宽度一致，否则 CLR 在写入时就会错位。
+            il.Emit(f.FieldType == typeof(short) ? OpCodes.Conv_I2 : OpCodes.Conv_U1);
+            il.Emit(OpCodes.Stfld, f);
+            il.Emit(OpCodes.Ret);
+
+            return (CargoFieldSet)dm.CreateDelegate(typeof(CargoFieldSet));
+        }
+
         /// <summary>
         /// <b>本 mod 自己调游戏的搬运方法之前，必须先把品质侧信道清零。</b>
         ///

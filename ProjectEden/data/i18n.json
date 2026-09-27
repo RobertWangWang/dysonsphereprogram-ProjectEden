@@ -604,6 +604,8 @@
     "{0} 个矿脉    储量 {1}": "{0} veins    reserve {1}",
     "气态    速率 {0}": "gas    rate {0}",
     "（拖右边条翻页）": " (drag the bar to page)",
-    "　还匹配到另外 {0} 种，把名字打全一点": "   {0} more matched; type more of the name"
+    "　还匹配到另外 {0} 种，把名字打全一点": "   {0} more matched; type more of the name",
+    "行星喷涂中枢": "Planetary Spray Hub",
+    "把增产剂雾化后随行星大气环流铺开，覆盖整颗星球的传送带。第一格放增产剂，本星球上新上带的货物自动带上增产点数，不必再逐条带铺喷涂机。其余二十九格是普通的行星内物流站格位。": "Atomises proliferator and lets the planet's own atmospheric circulation carry it across every belt on the world. Load proliferator into the first slot and cargo newly placed on any belt here arrives already sprayed, with no need to line the belts with individual spray coaters. The other twenty-nine slots are an ordinary planetary logistics station."
   }
 }

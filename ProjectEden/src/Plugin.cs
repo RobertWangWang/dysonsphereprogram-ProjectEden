@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.12.17";
+        public const string VERSION = "1.13.0";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -103,6 +103,7 @@ namespace ProjectEden
             Patches.Diagnostics.CpuCostProbe.Load();
             Patches.CatalystBedPatches.Config = JsonHelper.Load<Patches.CatalystConfig>("catalyst");
             Patches.LensPatches.Config = JsonHelper.Load<Patches.LensConfig>("lens");
+            Patches.PlanetSprayPatches.Config = JsonHelper.Load<Patches.SprayConfig>("spray");
             // 蓝图粘贴探针（blueprintprobe.json，默认关）。单独一个文件的理由写在那份 JSON 里：
             // JsonHelper 的磁盘覆盖是整份文件生效的，塞进 cheats.json 就得为一个开关影印六个作弊开关
             Patches.Diagnostics.BlueprintPasteProbe.Config =
@@ -152,6 +153,7 @@ namespace ProjectEden
             Patches.PlanetGroundUnitPatches.Report();
             Patches.HubCourierPatches.Report();
             Patches.StationTrafficCoalescer.Report();
+            Patches.PlanetSprayPatches.Report();
             Patches.LocalDispatchBurstPatches.Report();
             Patches.RemoteDispatchBurstPatches.Report();
             Patches.MegaTickProfiler.Report();
@@ -1015,6 +1017,8 @@ namespace ProjectEden
             // 同理：实体号也会重复使用，共位登记表留着会把新存档的建筑错认成旧的
             Patches.StackedRenderPatches.Reset();
             Patches.StationTrafficCoalescer.Reset();
+            // 货物容器和星球号在新存档里都会被复用，登记表留着会把新存档的星球错认成旧的
+            Patches.PlanetSprayPatches.Reset();
         }
     }
 }

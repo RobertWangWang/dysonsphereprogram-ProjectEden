@@ -3660,6 +3660,47 @@ belt stacking 5000  →  level 6 at most
 level 10 would mean dropping stacking below 3276, which is plainly a bad trade. The startup log
 computes the ceiling for your current config and spells out the derivation.
 
+### Spraying a whole planet at once: the Planetary Spray Hub
+
+If you would rather not line every belt with spray coaters, one building covers the whole world:
+the **Planetary Spray Hub**, a 30-slot planetary logistics station. **Put proliferator in the first
+slot and every cargo newly placed on any belt on this planet arrives already sprayed.** The other
+29 slots are an ordinary logistics station and go on handling whatever else you want.
+
+| | |
+|---|---|
+| Building it | Planetary Logistics Station ×1 + Spray Coater ×10 + Processor ×50. **It replaces exactly those ten coaters**, so they are its prerequisite rather than its victim |
+| The first slot | **Which tier goes in it is your choice, set in the panel** — this mod does not write that slot. All four tiers above are accepted, as are vanilla Mk.I–III |
+| Capacity | Set once to a default (3000) when the hub is new; after that the per-slot capacity box is entirely yours. `slotCapacity: 0` means never touch it at all |
+| No power / no stock | It does not spray. The test is copied from vanilla's own coater (supply ratio > 0.1) |
+| Alongside real coaters | **Raises only, never lowers.** Cargo already carrying more charge is not pushed down, and does not burn a spray either |
+
+**Which tier to pick is the opposite trade from lining up coaters.** One spray covers a **whole
+stack**, so "how many sprays one item is worth" is nearly worthless here — at 5000-layer stacking a
+single Mk.V Concentrated (126 sprays) already covers 630,000 items. What is worth something is the
+**level**, so level-6 Mk.V Concentrated usually beats the 151-spray but level-5 Mk.V Extended. The
+previous section's "level and stacking are charges against one budget" still applies: level 6 can
+fill at most 5461 layers, and stacking is 5000 — 9% of headroom.
+
+> **It does not sweep the belts every tick.** A cargo's proliferator charge is established the moment
+> it is **born**, so the hub hooks exactly that moment (the cargo-creation entry point, all 18 call
+> sites enumerated: six genuine belt insertions, five in the piler, six in splitters, one in belt
+> re-wiring — while belt-to-belt movement inside a path does not go through it at all). The cost is
+> one constant-time lookup per cargo and no traversal whatsoever.
+>
+> **The spray budget sizes itself.** The hub converts the proliferator in its first slot into "how many
+> sprays are left", and how many a window needs depends on how many splitters and pilers this planet
+> has and how busy they are right now — so it grows to **twice the measured peak** on its own, and the
+> batch count in the config is only a floor. Running short shows up as "some cargo sprayed, some not"
+> (first come, first served), and **that has nothing to do with belt speed**; if it happens the log says
+> so outright, and the per-minute line shows how far the buffer has grown and how many items missed out.
+>
+> Which items count as proliferator is read from **the spray coater's own whitelist**, not guessed —
+> that is vanilla's only answer to the question, and this mod's four tiers were registered into it
+> long ago. (The first version used "has a spray level and a spray count" as the test, which is wrong:
+> **those two properties are shared with ammunition** — a round's damage and rounds-per-box are stored
+> in exactly those fields — so every tier of alloy ammunition would have been taken for proliferator.)
+
 ---
 
 ## XXIII. Alien Veins: mining them consumes drill bits
@@ -5090,10 +5131,17 @@ pieces of physics rather than four power tiers.
 
 | Building | Recipe | Power | Effective speed |
 |---|---|---:|---:|
-| **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Iron Ingot ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 30× |
-| **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 8.6× |
-| **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 6.9× |
-| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 6.9× |
+| **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Iron Ingot ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 300× |
+| **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 86× |
+| **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 69× |
+| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 69× |
+
+> **The whole line was sped up 10× in 1.13.0**: from 0.857 to **8.571 crafts per second** (the table
+> already shows the post-change multipliers; before, they were 30× / 8.6× / 6.9× / 6.9×). What changed
+> is the **cycle count** (1 → 10), not the tick divider. The two are exactly equivalent in throughput,
+> but lowering the divider would distort the "built in a black hole system, ×2" bonus — `divider /
+> bonus` is integer division, and 70 ÷ 2 = 35 is exactly 2.00× while 7 ÷ 2 = 3 becomes 2.33×. It would
+> also visit these four 10× more often per second, which is precisely what the divider exists to avoid.
 
 A whole bank of accumulators is pressed into a space the size of a pin, and spacetime closes over
 it. Whatever sits in that cavity lives too briefly for any instrument to measure — it is inferred
@@ -5106,10 +5154,21 @@ and a Penning trap finally combines the two.
 
 ### These four are deliberately not 10000×
 
-The other twelve mega buildings run at 10000×; these four **settle once every 70 ticks**, which
-works out to the multipliers in the table. What is throttled is the **cycle count**, never `speed` —
-a mega building is identified by `speed >= threshold`, so lowering `speed` means the building is
-never picked up again (the same constraint the greenhouse's sunlight lives under, section XIII).
+The other thirteen mega buildings run at 10000×; these four **get a turn once every 70 ticks** (and
+settle 10 cycles on that turn), which works out to the multipliers in the table. What is throttled is
+the **cycle count**, never `speed` — a mega building is identified by `speed >= threshold`, so lowering
+`speed` means the building is never picked up again (the same constraint the greenhouse's sunlight
+lives under, section XIII).
+
+> **The unit of balance is cycles per second — `cycles ÷ divider` — not the multiplier.** One furnace
+> cycle yields 8 Hawking Radiation + 4 High-Energy Gamma Photons, which is exactly one round of the
+> separation tower (which eats 8) and one round of the pair chamber (which eats 4); those two each
+> yield 2 antiprotons / 2 positrons, which is exactly one round of the Penning trap. The chain is
+> 1:1:1:1, so all four must run the same cycles per second. The multipliers in the table differ wildly
+> (300× against 69×) only because the four recipes have different nominal times: at `speed = 1e8` a
+> recipe's own seconds do not govern throughput at all, since one tick already fills it.
+> **To retune the speed yourself, change `cyclesPerTick` on all four — missing one skews the chain,
+> and nothing reports it.**
 
 The cost is stated rather than hidden: **the assembler panel's "Production Speed" row still reads
 10000×** on these four. That row reads `speed`, and `speed` is never touched. The panel and the real
@@ -5420,6 +5479,7 @@ should still have a speciality**.
 | `alienvein.json` | Alien vein: which vein consumes drill bits, the bit predicate's hardness margin and yield formula, and the miner's bit slot |
 | `redox.json` | Redox Combustion Plant: the reductant and oxidiser candidate lists with their per-item oxygen balance, the three grain tiers' heat values and density thresholds, and the oxidiser-ratio slider's range |
 | `lens.json` | Living Lens: power multiplier, photon multiplier (the two are independent), heal rate, and which vanilla catalyst counts as "the other lens" |
+| `spray.json` | Planetary Spray Hub: master switch, the first slot’s capacity cap (**not the station default** — a local Demand slot asks the network for `max`, so copying it would drain every proliferator in the network), refill interval and batch size, and which items count as proliferator (**empty = the spray coater's own `PrefabDesc.incItemId` whitelist, recommended**; this mod's four living-proliferator tiers are already in it). **Which tier goes in the first slot is the player's choice — this mod does not write that slot** |
 | `abnormality.json` | **Suppresses the "abnormal data" determination**, on by default: the false positive any content mod trips unavoidably. With it off, achievements and metadata stay greyed out for good. A file of its own, same reason as `cargoprobe.json` |
 | `planet.json` | Bigger planets (radius multiplier, **on by default**), the spawn-point diagnostic probe, and **`veinScaling`** — vein count / variety / rare-vein chance scale with the area, each from its own derivation |
 | `tech.json` | One switch, **`buyoutCascade`** (**on by default**): buying a tech out with metadata first buys out its unresearched prerequisites in topological order, each paying its own metadata |

@@ -425,11 +425,38 @@ namespace ProjectEden.Patches
                     gate = MegaOutputGatePatches.Scale(vanilla, ref pool[i]) + 1;
                 }
 
-                sum += gate < cycles ? gate : cycles;
+                // **逐台的 cyclesPerTick 和 tickDivider 都要问 MegaThrottle 要。**
+                //
+                // 这一行以前只读全局 cyclesPerTick，于是反物质那四座（每座 1 周期 /
+                // 70 分频）被按 60 记账——高了 4200 倍。而这条普查的口径是「相当于几台
+                // 普通装配机」，那是个**吞吐**声明，所以分频必须除掉。
+                //
+                // 两个数都走已有的访问器（CyclesFor / DividerFor），和
+                // ReferenceRatePatches 读的是同一对函数——**不再另抄一份**。
+                // 这是同一个教训的第三次：给闸门接上真函数那次只改了当时在看的那个诊断，
+                // 逐台周期数这一半漏了，而漏掉的地方不报错，只是数字不对。
+                int perBuilding = MegaThrottle.CyclesFor(fs.factory, pool[i].entityId, cycles);
+                int divider = MegaThrottle.DividerFor(fs.factory, pool[i].entityId);
+
+                if (divider < 1) divider = 1;
+
+                // 闸是「一次结算最多几个周期」，所以先和它取小，再按分频摊到每 tick。
+                // 整数除法会把不满 1 的摊成 0——那恰好就是实情（分频 70 的一台平均
+                // 每 tick 结算 0.014 个周期），所以按 long 累加分子、最后一起除。
+                int settled = gate < perBuilding ? gate : perBuilding;
+
+                sum += (long)settled * Scale1000 / divider;
             }
 
-            return sum;
+            // 上面按千分之一累加，这里还原
+            return sum / Scale1000;
         }
+
+        /// <summary>
+        /// 逐台摊分频时的定点放大系数。分频 70 的一台平均每 tick 只结算 0.014 个周期，
+        /// 直接整数除会摊成 0、把整条反物质线从统计里抹掉；先放大再一起除就留住了它们。
+        /// </summary>
+        private const long Scale1000 = 1000;
 
         private static int CountMega(FactorySystem fs)
         {
