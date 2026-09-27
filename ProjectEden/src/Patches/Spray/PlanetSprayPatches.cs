@@ -108,8 +108,15 @@ namespace ProjectEden.Patches
             /// <summary>整局累计没喷到的次数，报告用。</summary>
             internal int StarvedTotal;
 
-            /// <summary>观测到的单窗口峰值需求（喷出去的 + 没喷到的）。缓冲按它定容。</summary>
+            /// <summary>
+            /// 观测到的单 tick 峰值需求（喷出去的 + 没喷到的）。缓冲按它定容。
+            /// <b>单位是「每 tick」而不是「每 refillIntervalTicks」</b>——补料每 tick 都跑，
+            /// 所以统计窗口就是一个 tick。第一版的日志把它标成「/窗口」，读的人会去乘 30。
+            /// </summary>
             internal int PeakDemand;
+
+            /// <summary>当前那一档增产剂一份喷几次，存下来只为让 <see cref="Tally"/> 能算目标。</summary>
+            internal int PerItem;
         }
 
         // ── 容器 → 星球：两个冷路径钩子 ────────────────────────────────
@@ -469,6 +476,8 @@ namespace ProjectEden.Patches
 
             int perItem = proto.HpMax;
 
+            hub.PerItem = perItem;
+
             // ── 缓冲按**实测需求**定容，不按拍出来的份数 ──────────────────
             //
             // 配置里那个 refillBatches 只是**下界**。真正的目标是「这颗星球一个窗口里
@@ -485,11 +494,7 @@ namespace ProjectEden.Patches
 
             if (demand > hub.PeakDemand) hub.PeakDemand = demand;
 
-            int floor = perItem * (Config.refillBatches > 0 ? Config.refillBatches : 4);
-
-            // 按峰值的 2 倍备：峰值是上一窗口量到的，而下一窗口可能更忙。
-            int wanted = hub.PeakDemand * 2;
-            int target = wanted > floor ? wanted : floor;
+            int target = TargetFor(hub, perItem);
 
             if (starved > 0) ReportStarvedOnce();
 
@@ -509,6 +514,24 @@ namespace ProjectEden.Patches
             }
 
             ReportOnce(hub, proto, perItem);
+        }
+
+        /// <summary>
+        /// 缓冲该备到多少次喷涂：<b>配置那个份数只是下界，真正的目标是实测峰值的 2 倍</b>。
+        ///
+        /// <para><b>它是个方法而不是两处各算一遍，因为那正是这一版栽过三次的那个错。</b>
+        /// 第一版 <see cref="Tally"/> 自己算了个 <c>峰值 × 2</c> 印出来，而 <see cref="Charge"/>
+        /// 用的是 <c>max(下界, 峰值 × 2)</c>——实测日志里诊断说「缓冲已长到 40」而剩余喷涂
+        /// 稳定在 240 附近，两个数各说各话。同一轮里 <c>PlanetCensus</c> 和
+        /// <c>ReferenceRatePatches</c> 已经各栽过一次同形的错（诊断没有读真函数），
+        /// 所以这里收拢成一个出口：<b>要印这个数就得调这个方法。</b></para>
+        /// </summary>
+        private static int TargetFor(HubState hub, int perItem)
+        {
+            int floor = perItem * (Config.refillBatches > 0 ? Config.refillBatches : 4);
+            int wanted = hub.PeakDemand * 2;
+
+            return wanted > floor ? wanted : floor;
         }
 
         private static bool Powered(PlanetFactory factory, StationComponent station)
@@ -817,9 +840,13 @@ namespace ProjectEden.Patches
                   .Append("：枢纽 ").Append(kv.Value.Hubs)
                   .Append(" 座，等级 ").Append(kv.Value.Level)
                   .Append("，剩余喷涂 ").Append(Volatile.Read(ref kv.Value.Remaining))
-                  .Append(" 次，缓冲已长到 ").Append(kv.Value.PeakDemand * 2)
+                  // **印的是真正在用的那个目标**（调 TargetFor），不是自己再算一遍 ——
+                  // 第一版就是自己算了个「峰值 × 2」，于是诊断说 40、实际用 240，两个数各说各话
+                  .Append(" 次，缓冲目标 ").Append(TargetFor(kv.Value, kv.Value.PerItem))
+                  // 补料每 tick 都跑，所以「窗口」就是 1 个 tick，不是 refillIntervalTicks
                   .Append("（实测峰值 ").Append(kv.Value.PeakDemand)
-                  .Append("/窗口），累计没喷到 ").Append(Volatile.Read(ref kv.Value.StarvedTotal)).Append(" 件");
+                  .Append(" 次/tick，约 ").Append(kv.Value.PeakDemand * 60)
+                  .Append(" 次/秒），累计没喷到 ").Append(Volatile.Read(ref kv.Value.StarvedTotal)).Append(" 件");
 
             ProjectEdenPlugin.Log.LogInfo(sb.ToString());
         }
