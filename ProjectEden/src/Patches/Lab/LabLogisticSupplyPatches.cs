@@ -6,7 +6,7 @@ using HarmonyLib;
 namespace ProjectEden.Patches
 {
     /// <summary>
-    /// 让矩阵研究站直接和本行星的物流站互通有无，不用铺传送带和分拣器：
+    /// 让矩阵研究站直接和本行星的其他研究站、物流站互通有无，不用铺传送带和分拣器：
     /// <b>取料</b>（物流站 → 研究站）和<b>出货</b>（研究站 → 物流站）两个方向都做。
     ///
     /// 只做取料的话，生产模式造出来的矩阵会一直堆在 produced[] 里，堆到上限就停产，
@@ -23,7 +23,7 @@ namespace ProjectEden.Patches
     ///   · 研究模式 matrixServed[] —— <b>个数 × 3600</b> 的放大值，按当前科技的 matrixPoints
     ///
     /// <b>三趟扫描而不是「每个研究站扫一遍物流站」</b>：后者是 labs × stations，行星上研究站
-    /// 一多就是平方级开销。这里先汇总缺口、再走一遍物流站取货、最后分发，整体是 labs + stations。
+    /// 一多就是平方级开销。这里先汇总缺口、扫描研究站产物和物流站取货、最后分发，整体是 labs + stations。
     /// 出货方向同样三趟（汇总产量 → 塞进物流站 → 按实际收下的量扣账）。
     /// 用的容器都是复用的静态字典，稳定之后不再分配。
     ///
@@ -49,10 +49,10 @@ namespace ProjectEden.Patches
 
         [ThreadStatic] private static Dictionary<int, long> _shortfall, _pool, _output, _taken;
 
-        /// <summary>取料：物品 → 本行星所有研究站合计还缺多少（研究模式记的是放大后的值）。</summary>
+        /// <summary>取料：物品 → 本行星所有研究站合计还缺多少（统一为实际件数）。</summary>
         private static Dictionary<int, long> Shortfall => _shortfall ?? (_shortfall = new Dictionary<int, long>());
 
-        /// <summary>取料：物品 → 这一轮从物流站实际取到多少（同上，研究模式是放大值）。</summary>
+        /// <summary>取料：物品 → 这一轮实际取到多少件。仅写入科研缓冲区时换算 ×3600。</summary>
         private static Dictionary<int, long> Pool => _pool ?? (_pool = new Dictionary<int, long>());
 
         /// <summary>出货：物品 → 本行星所有研究站合计可以出多少（生产模式的 produced[]，明文个数）。</summary>
@@ -86,13 +86,13 @@ namespace ProjectEden.Patches
             PlanetFactory factory = __instance.factory;
             FactorySystem system = factory?.factorySystem;
 
-            if (system?.labPool == null || __instance.stationPool == null) return;
+            if (system?.labPool == null) return;
 
             if (Config.logisticSupply) SupplyIn(system, __instance);
             if (Config.logisticOutput) ShipOut(system, __instance);
         }
 
-        /// <summary>取料方向：物流站的 Supply 格 → 研究站的缓冲区。</summary>
+        /// <summary>先从同星球研究站产物取料，再从物流站 Supply 格补足；剩余产物才向物流站出货。</summary>
         private static void SupplyIn(FactorySystem system, PlanetTransport transport)
         {
             Shortfall.Clear();
@@ -101,7 +101,9 @@ namespace ProjectEden.Patches
 
             Pool.Clear();
 
-            if (!TakeFromStations(transport)) return;
+            bool any = Config.logisticOutput && TakeFromLabs(system);
+            any |= TakeFromStations(transport);
+            if (!any) return;
 
             Distribute(system);
         }
@@ -186,7 +188,8 @@ namespace ProjectEden.Patches
                 // matrixPoints 是当前研究的科技每 hash 需要的各矩阵点数，为 0 表示这个科技不用它
                 if (matrixPoints[i] <= 0 || matrixIds[i] <= 0) continue;
 
-                long want = targetScaled - lab.matrixServed[i];
+                // 只搬完整物品；不足一件的科研缺口等消耗满一件再补，避免取整后丢失余量。
+                long want = (targetScaled - lab.matrixServed[i]) / MatrixScale;
 
                 if (want <= 0) continue;
 
@@ -197,10 +200,44 @@ namespace ProjectEden.Patches
             return any;
         }
 
-        // ── 第二趟：从物流站的 Supply 格位取货 ────────────────
+        // ── 第二趟：先从研究站产物取货，再从物流站的 Supply 格位补货 ──
+
+        private static bool TakeFromLabs(FactorySystem system)
+        {
+            long reserve = Config.outputReserveItems > 0 ? Config.outputReserveItems : 0;
+            var any = false;
+
+            for (var i = 1; i < system.labCursor; i++)
+            {
+                ref LabComponent lab = ref system.labPool[i];
+                if (lab.id != i || lab.researchMode) continue;
+
+                int[] products = lab.recipeExecuteData?.products;
+                if (products == null || lab.produced == null) continue;
+
+                int count = Math.Min(products.Length, lab.produced.Length);
+                for (var p = 0; p < count; p++)
+                {
+                    int itemId = products[p];
+                    if (itemId <= 0 || !Shortfall.TryGetValue(itemId, out long need) || need <= 0) continue;
+
+                    long take = Math.Min(need, lab.produced[p] - reserve);
+                    if (take <= 0) continue;
+
+                    // 与后面的 ShipOut 共用 produced[]，先扣实际转移量，保证不能重复出货。
+                    lab.produced[p] -= (int)take;
+                    Shortfall[itemId] = need - take;
+                    Add(Pool, itemId, take);
+                    any = true;
+                }
+            }
+
+            return any;
+        }
 
         private static bool TakeFromStations(PlanetTransport transport)
         {
+            if (transport.stationPool == null) return false;
             var any = false;
 
             // **起点每 tick 轮转**，理由和虚拟物流那边一字不差（见
@@ -233,9 +270,7 @@ namespace ProjectEden.Patches
                         if (station.storage[s].localLogic != ELogisticStorage.Supply) continue;
                         if (!Shortfall.TryGetValue(itemId, out long need) || need <= 0) continue;
 
-                        // 研究模式的缺口是放大值，换算回件数再取
-                        long wantItems = IsScaled(itemId) ? (need + MatrixScale - 1) / MatrixScale : need;
-                        long take = station.storage[s].count < wantItems ? station.storage[s].count : wantItems;
+                        long take = Math.Min(station.storage[s].count, need);
 
                         if (take <= 0) continue;
 
@@ -251,10 +286,8 @@ namespace ProjectEden.Patches
                         station.storage[s].count -= (int)take;
                         station.storage[s].inc -= incTake;
 
-                        long got = IsScaled(itemId) ? take * MatrixScale : take;
-
-                        Shortfall[itemId] = need - got;
-                        Add(Pool, itemId, got);
+                        Shortfall[itemId] = need - take;
+                        Add(Pool, itemId, take);
 
                         any = true;
                     }
@@ -272,12 +305,18 @@ namespace ProjectEden.Patches
             {
                 if (system.labPool[i].id != i) continue;
 
-                if (system.labPool[i].researchMode) GiveResearch(ref system.labPool[i]);
-                else GiveAssemble(ref system.labPool[i]);
+                if (!system.labPool[i].researchMode) GiveAssemble(ref system.labPool[i]);
+            }
+
+            // 先满足生产链，避免较低下标的科研站抢光宇宙矩阵的原料。
+            for (var i = 1; i < system.labCursor; i++)
+            {
+                if (system.labPool[i].id != i || !system.labPool[i].researchMode) continue;
+                GiveResearch(ref system.labPool[i]);
             }
 
             if (Interlocked.Exchange(ref _loggedIn, 1) == 0)
-                ProjectEdenPlugin.Log.LogInfo("矩阵研究站已开始从行星内物流站自动取料");
+                ProjectEdenPlugin.Log.LogInfo("矩阵研究站已开始从行星内其他研究站和供应物流站自动取料");
         }
 
         private static void GiveAssemble(ref LabComponent lab)
@@ -329,13 +368,13 @@ namespace ProjectEden.Patches
                 if (matrixPoints[i] <= 0 || matrixIds[i] <= 0) continue;
                 if (!Pool.TryGetValue(matrixIds[i], out long available) || available <= 0) continue;
 
-                long want = targetScaled - lab.matrixServed[i];
+                long want = (targetScaled - lab.matrixServed[i]) / MatrixScale;
 
                 if (want <= 0) continue;
 
                 long give = available < want ? available : want;
 
-                lab.matrixServed[i] += (int)give;
+                lab.matrixServed[i] += (int)(give * MatrixScale);
                 Pool[matrixIds[i]] = available - give;
             }
         }
@@ -393,11 +432,12 @@ namespace ProjectEden.Patches
         ///
         /// 「本地需求」正是玩家明说「请把这个东西送到这里」的那个标记，语义对得上，
         /// 也和取货侧只认 Supply 格严格对称。要把矩阵外运就按原版的老套路配：
-        /// 本地需求 + 星际供应。没有任何一个 Demand 格的话产物就堆在机内，
+        /// 本地需求 + 星际供应。其他研究站不需要且没有 Demand 格接收的产物堆在机内，
         /// 和原版不接分拣器是一个道理。
         /// </summary>
         private static bool PushToStations(PlanetTransport transport)
         {
+            if (transport.stationPool == null) return false;
             var any = false;
 
             // 同上：这一趟是「有多少给多少」，固定起点会让下标最小的那个站独吞全部出货
@@ -481,20 +521,6 @@ namespace ProjectEden.Patches
         }
 
         // ── 小工具 ────────────────────────────────────────────
-
-        /// <summary>研究模式的六种矩阵在 matrixServed 里是放大值，别的物品是明文。</summary>
-        private static bool IsScaled(int itemId)
-        {
-            int[] matrixIds = LabComponent.matrixIds;
-
-            if (matrixIds == null) return false;
-
-            foreach (int id in matrixIds)
-                if (id == itemId)
-                    return true;
-
-            return false;
-        }
 
         private static void Add(Dictionary<int, long> map, int key, long value)
         {

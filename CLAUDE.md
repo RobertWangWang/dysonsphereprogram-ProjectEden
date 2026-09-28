@@ -1555,6 +1555,19 @@ Two process notes on that script, both repo rules re-earned:
 
 **It has to be bidirectional**, for the same reason the mega buildings do: supply alone leaves `produced[]` piling up to `assembleOutputStorage` and the lab stalls, so the player still needs inserters. `ShipOut` mirrors the three passes (gather `produced[]` → push into stations → deduct what was actually accepted; nothing is deducted before a station takes it). Both directions key on the slot flag the player set, symmetrically: **taking** only drains `ELogisticStorage.Supply` (draining someone's Demand slot is theft), **pushing** only fills `Demand` (the explicit "deliver this here" marker; export is then the vanilla idiom, local Demand + remote Supply). Pushing first ignored `localLogic` and matched `itemId` alone, reasoned as "it stands in for a belt, and belt insertion ignores logistics settings" — wrong, because a belt has to physically reach the station and a virtual push does not: any new station with a matrix slot filled itself instantly and began supplying the planet. Research-mode labs have no `produced[]` and are skipped. Takes also deduct `StationStore.inc` proportionally — removing count while leaving `inc` alone makes the remaining items carry the whole stack's proliferator points, i.e. **free proliferation on every transfer**, while the receiving side gets un-sprayed goods. `MegaVirtualLogisticsPatches` had this bug and no longer does: all four `count` mutations now carry a paired `inc` one, the ratio always taken against the total *before* the deduction. Its outbound third pass settles against the **debt** recorded in pass two rather than each slot's own spray rate, so what the destinations received and what the sources pay are exactly equal and the books cannot drift. (`StationStore.inc` is Int32, unlike the belt's byte-wide `Cargo.inc` — no overflow concern at station scale.)
 
+**Lab-to-lab supply and item units (Universe Matrix fix).** The supply pass now takes matching
+`produced[]` from this planet's labs before visiting Supply stations, respecting `logisticOutput`
+and `outputReserveItems`; shipping then exports only the remaining output. Distribution satisfies
+production before research. Both `Shortfall` and `Pool` store **whole item counts**, regardless of
+item ID: matrices used as recipe ingredients live in plain-count `served[]`, so deciding the unit
+from `matrixIds` duplicated goods and mixed incompatible demands. Research deficits are divided by
+3600 (rounded down per consumer); only delivery to `matrixServed[]` multiplies by 3600. A fractional
+gap smaller than one item waits for further consumption instead of discarding a rounded-up item.
+`dotnet run --project tools/LabLogisticsTests` exercises the actual patch source with data-only game
+stubs, covering seven-input Universe Matrix supply, shared production/research demand, fractional
+stock, reserves, switches, station flags and repeated-tick conservation. Full game integration still
+requires the plugin build and Harmony verification.
+
 #### A seventh matrix — `src/Patches/Lab/BioMatrixPatches.cs`, `UniverseMatrixPatches.cs`, `LabSeventhSlotPatches.cs`
 
 生物矩阵 (item **6007**) is the seventh research matrix. It is **grown in the 生物温室, not

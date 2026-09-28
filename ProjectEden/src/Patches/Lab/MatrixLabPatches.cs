@@ -570,7 +570,7 @@ namespace ProjectEden.Patches
         /// </summary>
         public int researchTransferRate;
 
-        /// <summary>是否让研究站直接从本行星的物流站取料</summary>
+        /// <summary>是否让研究站直接从本行星的供应物流站取料；同时开启出货时也从其他研究站取料</summary>
         public bool logisticSupply;
 
         /// <summary>取料的间隔 tick 数。0 = 10</summary>
@@ -582,7 +582,7 @@ namespace ProjectEden.Patches
         /// <summary>研究模式每种矩阵囤多少个。0 = 1000</summary>
         public int supplyMatrixItems;
 
-        /// <summary>是否让研究站把生产模式的产物直接送进本行星的物流站</summary>
+        /// <summary>是否让研究站产物直接供给本行星的其他研究站和需求物流站</summary>
         public bool logisticOutput;
 
         /// <summary>出货时每个产物格里留多少个不送走。0 = 全部送走</summary>

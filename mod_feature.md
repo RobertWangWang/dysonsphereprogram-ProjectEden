@@ -708,13 +708,17 @@ Labs and the planet's logistics stations are **wired both ways**, with no belts 
 
 - **Fetching**: production mode fetches recipe inputs, research mode fetches matrices. It only takes from slots
   marked **Supply**; slots someone marked "Demand" are left alone
+- **Lab-to-lab supply**: with both `logisticSupply` and `logisticOutput` enabled, labs first fetch outputs from
+  other labs on the same planet, then fill the remaining shortfall from Supply stations. Universe Matrix production
+  can consume matrices made by other labs without a station relay. Production inputs take priority over research,
+  and each source retains its configured `outputReserveItems` reserve
 - **Shipping**: matrices made in production mode are **delivered into logistics stations automatically**. It only
   fills slots marked **Demand** — those are the ones where you explicitly said "put this here", symmetrical with
   fetching only from Supply
 
 > So you need a slot on the station for that matrix, set to **local Demand**, before labs will ship into it. To
-> export the matrices, use the vanilla idiom: local Demand + remote Supply. With no Demand slot at all the matrices
-> pile up inside the lab and production stops at 600 — exactly as it would with no belt attached in vanilla.
+> export the matrices, use the vanilla idiom: local Demand + remote Supply. Matrices that neither another lab nor a
+> Demand station can accept remain in the output buffer, and production stops at 600.
 
 Stacking needs no thought either: every level sends and receives directly, without relaying up from the bottom.
 Research mode has no products and takes no part in shipping.
@@ -5131,14 +5135,14 @@ pieces of physics rather than four power tiers.
 
 | Building | Recipe | Power | Effective speed |
 |---|---|---:|---:|
-| **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Iron Ingot ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 300× |
-| **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 86× |
-| **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 69× |
-| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 69× |
+| **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Plasma Vault (Full) ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 3000× |
+| **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 857.14× |
+| **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 685.71× |
+| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 685.71× |
 
-> **The whole line was sped up 10× in 1.13.0**: from 0.857 to **8.571 crafts per second** (the table
-> already shows the post-change multipliers; before, they were 30× / 8.6× / 6.9× / 6.9×). What changed
-> is the **cycle count** (1 → 10), not the tick divider. The two are exactly equivalent in throughput,
+> **The line is now another 10× faster**: all four buildings use 100 cycles instead of 10, or **85.714 crafts/s**. One set produces **10,285.71 antimatter/min**, or **20,571.43/min in a black hole system**, at full power with sufficient inputs and no proliferation.
+> The table shows the current multipliers. Material and charged-vault supply must scale accordingly.
+> Version 1.13.0 raised cycles from 1 to 10; this change raises them from 10 to 100 while keeping the divider at 70,
 > but lowering the divider would distort the "built in a black hole system, ×2" bonus — `divider /
 > bonus` is integer division, and 70 ÷ 2 = 35 is exactly 2.00× while 7 ÷ 2 = 3 becomes 2.33×. It would
 > also visit these four 10× more often per second, which is precisely what the divider exists to avoid.
@@ -5155,7 +5159,7 @@ and a Penning trap finally combines the two.
 ### These four are deliberately not 10000×
 
 The other thirteen mega buildings run at 10000×; these four **get a turn once every 70 ticks** (and
-settle 10 cycles on that turn), which works out to the multipliers in the table. What is throttled is
+settle a baseline of 100 cycles; global throttling at 2 batches this into 200 cycles every 140 ticks), which works out to the multipliers in the table. What is throttled is
 the **cycle count**, never `speed` — a mega building is identified by `speed >= threshold`, so lowering
 `speed` means the building is never picked up again (the same constraint the greenhouse's sunlight
 lives under, section XIII).

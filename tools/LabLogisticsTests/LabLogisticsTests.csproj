@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LabPatchSource Condition="'$(LabPatchSource)' == ''">../../ProjectEden/src/Patches/Lab/LabLogisticSupplyPatches.cs</LabPatchSource>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(LabPatchSource)" Link="LabLogisticSupplyPatches.cs" />
+  </ItemGroup>
+</Project>
