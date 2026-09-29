@@ -3931,7 +3931,7 @@ All six vanilla matrices are synthesised in the **Matrix Lab**. The seventh is n
 | | |
 |---|---|
 | Made in | **the Biodome** (not the Matrix Lab) |
-| Recipe | Hyphal Substrate ×2 + Colony ×2 → Bio Matrix ×1, 3 s |
+| Recipe | Hyphal Substrate ×2 + Colony ×2 → Bio Matrix ×5; base 3 s, overridden to 1 s by default matrix settings |
 | Used for | the **seventh ingredient** of the Universe Matrix |
 
 ### Why it is not synthesised in the lab
