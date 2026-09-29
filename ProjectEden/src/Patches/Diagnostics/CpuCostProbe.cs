@@ -361,6 +361,8 @@ namespace ProjectEden.Patches.Diagnostics
     internal class PerfProbeConfig
     {
         public bool enabled = false;
+        public bool systemTiming = false;
+        public bool nanoTiming = false;
         public float perfProbeSeconds = 20f;
 
         /// <summary>

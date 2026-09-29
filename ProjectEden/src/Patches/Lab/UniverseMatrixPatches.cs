@@ -27,15 +27,14 @@ namespace ProjectEden.Patches
     /// ── 名单是点过名的，不是挑出来的 ──
     ///
     /// 把<b>全程序</b>碰 <c>LabComponent.served / needs / incServed</c> 的方法全列了一遍，
-    /// 按「下标是字面量（展开）还是循环」分类，产出模式的投料链上只有三处展开：
+    /// 按「下标是字面量（展开）还是循环」分类，当前产出模式仍需补齐的投料链有两处展开：
     ///
     /// <list type="bullet">
     /// <item><c>SetFunction</c> —— 写死的 <c>new int[6]</c>。</item>
     /// <item><c>UpdateNeedsAssemble</c> —— <c>needs[0..5]</c>，12 处字面下标。</item>
-    /// <item><c>UpdateOutputToNext</c> —— 叠放实验室之间传 <c>served</c>，0..5。
-    /// （<see cref="BioMatrixPatches"/> 那个后缀只管 <c>matrixServed</c>，管不到这里。）</item>
     /// </list>
     ///
+    /// 当前游戏 <c>UpdateOutputToNext</c> 的生产分支也按 served.Length 循环，不追加搬运。
     /// 其余<b>全部是 <c>ldlen</c> 循环</b>，不用管：<c>PlanetFactory.InsertInto</c> 两个重载、
     /// <c>InternalUpdateAssemble</c>、<c>TakeBackItems_Lab</c>、<c>ThrowItems_Lab</c>、
     /// <c>EntityFastFillIn</c>、<c>UILabWindow._OnUpdate</c> / <c>OnItemButtonClick</c>、
@@ -128,7 +127,7 @@ namespace ProjectEden.Patches
             if (recipe.Items.Length > VanillaSlots)
                 ProjectEdenPlugin.Log.LogInfo(
                     $"　原版产出模式只认 {VanillaSlots} 个投料槽（SetFunction 的 new int[6] 与 "
-                    + "UpdateNeedsAssemble 的展开写死），已由本文件的三个后缀补齐；"
+                    + "UpdateNeedsAssemble 的展开写死），已由本文件的 needs 后缀补齐；"
                     + "否则第七样原料永远不会被分拣器索取，而且不会报错。");
         }
 
@@ -273,54 +272,8 @@ namespace ProjectEden.Patches
                 needs[i] = i < served.Length && served[i] < batch ? requires[i] : 0;
         }
 
-        /// <summary>
-        /// 叠放实验室之间，把第 7 槽起的产出模式投料也往上传。
-        ///
-        /// <b><see cref="BioMatrixPatches"/> 那个同名后缀管不到这里</b>——它搬的是
-        /// <c>matrixServed</c>（科研模式的矩阵），这里搬的是 <c>served</c>（产出模式的原料）。
-        /// 两个数组、两条路径，原版在同一个方法里把两者都展开到了 0..5。
-        ///
-        /// 传递规则抄原版：只往<b>下一台确实在要这样东西</b>（<c>next.needs[i]</c> 非 0）的槽里送，
-        /// 并且按比例带走增产点数——只搬数量不搬点数，就是每传一次白送一次增产。
-        /// </summary>
-        [HarmonyPostfix]
-        [HarmonyPatch(typeof(LabComponent), nameof(LabComponent.UpdateOutputToNext))]
-        private static void UpdateOutputToNext_Postfix(ref LabComponent __instance, LabComponent[] labPool)
-        {
-            if (__instance.researchMode) return;
-            if (__instance.nextLabId <= 0 || labPool == null || __instance.nextLabId >= labPool.Length) return;
-
-            int[] mine = __instance.served;
-            int[] mineInc = __instance.incServed;
-
-            if (mine == null || mineInc == null || mine.Length <= VanillaSlots) return;
-
-            LabComponent next = labPool[__instance.nextLabId];
-
-            if (next.served == null || next.incServed == null || next.needs == null) return;
-
-            for (int i = VanillaSlots; i < mine.Length; i++)
-            {
-                if (i >= mineInc.Length || i >= next.served.Length || i >= next.incServed.Length) continue;
-                if (i >= next.needs.Length || next.needs[i] == 0) continue;
-                if (mine[i] <= 0) continue;
-
-                // 这条跑在 _lab_output_to_next_parallel 上，和原版锁同一组数组
-                lock (next.served)
-                lock (mine)
-                {
-                    int move = mine[i];
-
-                    if (move <= 0) continue;
-
-                    int incMove = (int)((long)mineInc[i] * move / mine[i]);
-
-                    mine[i] -= move;
-                    mineInc[i] -= incMove;
-                    next.served[i] += move;
-                    next.incServed[i] += incMove;
-                }
-            }
-        }
+        // 当前游戏 UpdateOutputToNext 的生产分支已经遍历 served.Length，包含第七槽。
+        // 不再追加搬运：原版保留 requireCounts[i] + 1 + speedOverride / 20000，
+        // 每次最多上传 5 件；旧后缀却把第七槽全部搬走，使本层刚收到的生物矩阵归零。
     }
 }

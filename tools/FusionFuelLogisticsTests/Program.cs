@@ -46,3 +46,5 @@ class Program
   Console.WriteLine("PASS: transfer conservation, buffer limit, supply only, orders, switch, timing, fuel compatibility, no mixing");
  }
 }
+
+namespace ProjectEden.Patches.Diagnostics { internal static class TransportSplitProbe { internal static void Phase(string name) { } } }

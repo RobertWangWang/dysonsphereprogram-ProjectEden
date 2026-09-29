@@ -157,8 +157,8 @@ namespace ProjectEden.Patches
                                   && deltaComplete
                                   && keys != null && keys.Count > 0
                                   && keys.Count <= IncrementalMaxKeys
-                                  && FullyBuilt.ContainsKey(planet)
-                                  && !DueForReconcile(planet, keys.Count);
+                                  && FullyBuilt.ContainsKey(planet);
+            bool reconciling = false;
 
             if (canIncremental)
             {
@@ -166,8 +166,6 @@ namespace ProjectEden.Patches
 
                 if (unsupported == 0)
                 {
-                    DroneRepair(transport, pool, cursor, droneCarries, keys);
-
                     if (vanished > 0 &&
                         System.Threading.Interlocked.Increment(ref _vanishedReported) <= 3)
                         ProjectEdenPlugin.Log.LogInfo(
@@ -175,20 +173,32 @@ namespace ProjectEden.Patches
                             + "它们的配对在拆站那一刻就摘干净了，这里只补跑无人机订单修复。"
                             + "**这是正常路径**——上一版把它误判成「增量失败」，每拆一座站都白做一次全量重建。");
 
-                    return;
+                    // 必须先应用本批 delta，再比较同一输入状态的增量表与全量表。
+                    // 旧代码在到期时跳过 RebuildMany，必然把本批新增/改槽当成差异。
+                    reconciling = DueForReconcile(planet, keys.Count);
+                    if (!reconciling)
+                    {
+                        DroneRepair(transport, pool, cursor, droneCarries, keys);
+                        return;
+                    }
                 }
 
                 // 真的做不了（拿不到 stationPool 之类）才整批退回全量：
                 // 半套增量比全量更难解释，而全量永远是对的。
-                ProjectEdenPlugin.Log.LogWarning(
-                    $"物流配对表·增量：行星 {planet} 拿不到站点池，本次退回全量重建。");
+                if (unsupported != 0)
+                    ProjectEdenPlugin.Log.LogWarning(
+                        $"物流配对表·增量：行星 {planet} 拿不到站点池，本次退回全量重建。");
             }
 
             Buffers b = _buf ?? (_buf = new Buffers());
 
             // 对账：如果这次全量是为了核对增量的结果，先记下增量算出来的校验和。
-            bool reconciling = FullyBuilt.ContainsKey(planet) && IncrementalEnabled && ReconcileDue(planet);
-            long before = reconciling ? Checksum(pool, cursor) : 0L;
+            // 全量重建重置增量计数；不完整 delta 只能建立新基线，不能用于判定增量错误。
+            IncrementsByPlanet[planet] = 0;
+            long auditStarted = reconciling ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+            long[] stationHashes = reconciling ? new long[cursor] : null;
+            int[] stationCounts = reconciling ? new int[cursor] : null;
+            long before = reconciling ? Checksum(pool, cursor, stationHashes, stationCounts) : 0L;
 
             try
             {
@@ -203,7 +213,12 @@ namespace ProjectEden.Patches
 
             FullyBuilt[planet] = 0;
 
-            if (reconciling) Reconcile(pool, cursor, planet, before);
+            if (reconciling)
+            {
+                Reconcile(pool, cursor, planet, before, stationHashes, stationCounts, keys);
+                _auditTicks += System.Diagnostics.Stopwatch.GetTimestamp() - auditStarted;
+                _auditRuns++;
+            }
 
             int planetId = planet;
             int n = RebuildsByPlanet.AddOrUpdate(planetId, 1, (_, old) => old + 1);
@@ -313,16 +328,6 @@ namespace ProjectEden.Patches
             return n >= ReconcileEvery;
         }
 
-        /// <summary>全量分支里再问一次：这次是不是为了对账。问完就清零。</summary>
-        private static bool ReconcileDue(int planet)
-        {
-            if (!IncrementsByPlanet.TryGetValue(planet, out int n) || n < ReconcileEvery) return false;
-
-            IncrementsByPlanet[planet] = 0;
-
-            return true;
-        }
-
         /// <summary>
         /// 对账：把增量维护出来的表和刚刚全量重建的表比一比。
         ///
@@ -337,11 +342,18 @@ namespace ProjectEden.Patches
         /// <para>不一致就<b>只关增量</b>，保留全量索引版——那仍然比原版快一个数量级。
         /// 而且此刻表里留下的是全量算出来的那一份，所以物流不受影响。</para>
         /// </summary>
-        private static void Reconcile(StationComponent[] pool, int cursor, int planet, long before)
+        private static void Reconcile(StationComponent[] pool, int cursor, int planet, long before,
+            long[] stationHashes, int[] stationCounts,
+            System.Collections.Concurrent.ConcurrentDictionary<int, byte> keys)
         {
-            long after = Checksum(pool, cursor);
+            var hashes = new long[cursor];
+            var counts = new int[cursor];
+            long after = Checksum(pool, cursor, hashes, counts);
+            int differences = 0;
+            for (int i = 1; i < cursor; i++)
+                if (hashes[i] != stationHashes[i] || counts[i] != stationCounts[i]) differences++;
 
-            if (before == after)
+            if (before == after && differences == 0)
             {
                 if (System.Threading.Interlocked.Increment(ref _reconciled) <= 8)
                     ProjectEdenPlugin.Log.LogInfo(
@@ -352,11 +364,25 @@ namespace ProjectEden.Patches
             }
 
             System.Threading.Volatile.Write(ref _ivmOff, 1);
+            var detail = new System.Text.StringBuilder();
+            detail.Append($" 本批变更站=[{string.Join(",", keys.Keys)}]，差异站点={differences}；以下最多8站，槽位索引从0起。");
+            int shown = 0;
+            for (int i = 1; i < cursor && shown < 8; i++)
+            {
+                if (hashes[i] == stationHashes[i] && counts[i] == stationCounts[i]) continue;
+                shown++;
+                detail.Append($"\n  站={i} 增量配对数={stationCounts[i]} 全量配对数={counts[i]} 增量hash={stationHashes[i]} 全量hash={hashes[i]}");
+                var slots = pool[i]?.storage;
+                if (slots == null) continue;
+                for (int k = 0; k < slots.Length && k < 30; k++)
+                    if (slots[k].itemId > 0)
+                        detail.Append($" 槽{k}:物品{slots[k].itemId}/{slots[k].localLogic}");
+            }
 
             ProjectEdenPlugin.Log.LogError(
                 $"物流配对表·增量对账**失败**（行星 {planet}）：增量 {before}，全量 {after}。"
                 + "**已整局关掉增量维护，退回全量索引版**（那仍比原版快一个数量级）。"
-                + "本次留下的是全量算出来的表，所以物流不受影响。");
+                + "本次留下的是全量重建的表。" + detail);
         }
 
         private static int _reconciled;
@@ -499,7 +525,7 @@ namespace ProjectEden.Patches
         /// 那是有意的取舍：顺序在原版里只影响 <c>localPairProcess</c> 这个轮询游标
         /// 从哪一条开始扫，扫完一圈的结果一样。</para>
         /// </summary>
-        private static long Checksum(StationComponent[] pool, int cursor)
+        private static long Checksum(StationComponent[] pool, int cursor, long[] stationHashes = null, int[] stationCounts = null)
         {
             long sum = 0;
 
@@ -509,6 +535,7 @@ namespace ProjectEden.Patches
 
                 if (s == null || s.id != i || s.localPairs == null) continue;
 
+                if (stationCounts != null) stationCounts[i] = s.localPairCount;
                 for (var p = 0; p < s.localPairCount; p++)
                 {
                     // 把「这条配对存在谁身上」也算进去：两边各存一份，
@@ -520,7 +547,11 @@ namespace ProjectEden.Patches
                     h = Mix(h ^ s.localPairs[p].demandId);
                     h = Mix(h ^ s.localPairs[p].demandIndex);
 
-                    unchecked { sum += h; }
+                    unchecked
+                    {
+                        sum += h;
+                        if (stationHashes != null) stationHashes[i] += h;
+                    }
                 }
             }
 

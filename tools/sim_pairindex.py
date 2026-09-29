@@ -297,6 +297,16 @@ def main():
     out.write("  ④ 负面对照（故意漏掉小站号对侧）：%s\n" % ("已抓到" if caught else "**没抓到**"))
     check(caught, "负面对照没被抓到——检查器本身失效了，前三项的通过不能作数")
 
+    # 对账必须先应用触发本轮检查的变更；旧表与新输入的全量结果不可比较。
+    stations = {1: [(1001, SUPPLY)], 2: [(1001, DEMAND)]}
+    pairs = full_rebuild(stations)
+    stations[2] = [(1002, DEMAND)]
+    check(multiset(pairs) != multiset(full_rebuild(stations)), "未复现旧对账时序误报")
+    detach(pairs, 2)
+    emit_for(pairs, stations, 2)
+    check(multiset(pairs) == multiset(full_rebuild(stations)), "应用当前变更后对账仍不一致")
+    out.write("  ⑤ 对账时序：先应用当前 delta，再与全量比较，通过\n")
+
     if failures:
         out.write("\n失败：\n")
         for f in failures:

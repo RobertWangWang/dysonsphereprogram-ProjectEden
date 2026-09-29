@@ -25,6 +25,7 @@ namespace ProjectEden.Patches.Fusion
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void Supply(PlanetTransport __instance, long time)
         {
+            ProjectEden.Patches.Diagnostics.TransportSplitProbe.Phase("聚变燃料虚空物流");
             bool supply = MegaBuildingRegistry.Config?.virtualLogistics == true;
             var factory = __instance.factory;
             var power = factory?.powerSystem;

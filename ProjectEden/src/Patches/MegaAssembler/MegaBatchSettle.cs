@@ -73,6 +73,7 @@ namespace ProjectEden.Patches
     /// 和配方表对不上、额外产物动了），也<b>一律退回逐次</b>——判据是<b>观测到的差值
     /// 和配方表严格相等</b>，不是「差不多」。
     /// </summary>
+    // 本类保留旧无增产路径；被拒绝后由 MegaProliferatorBatch 处理均匀喷涂及历史 incUsed 状态。
     internal static class MegaBatchSettle
     {
         private static int _enabled = -1;
@@ -109,6 +110,8 @@ namespace ProjectEden.Patches
         internal static long Stepped => Interlocked.Read(ref _stepped);
         internal static long BailProliferator => Interlocked.Read(ref _bailProliferator);
         internal static long BailShape => Interlocked.Read(ref _bailShape);
+
+        internal static void CountBatched(int n) => Interlocked.Add(ref _batched, n);
 
         internal static void CountStepped(int n) { if (n > 0) Interlocked.Add(ref _stepped, n); }
 

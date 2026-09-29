@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup><Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaProliferatorBatch.cs" Link="Batch.cs"/><Compile Include="../out/ProliferatorBatchTests/Original.cs" Link="Original.cs"/></ItemGroup></Project>

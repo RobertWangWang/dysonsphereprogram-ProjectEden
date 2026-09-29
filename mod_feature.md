@@ -5044,9 +5044,13 @@ Facilities" row fell from 12.3 ms to 1.6 ms.
 > **falls back to one-at-a-time automatically** and logs an error. So the worst case is "no faster",
 > never "wrong numbers".
 >
-> **Proliferated buildings are excluded from batching** and take the old path: their speed changes
-> the moment the spray points run out, and batching assumes the unit stays constant. There were
-> zero such buildings on the test planet.
+> **Uniformly sprayed ordinary recipes can also batch.** Each input slot must contain an integer number
+> of proliferation points per item; slots may have different levels. The new path advances the original
+> integer timers and bonus-output gates step by step, combining inventory and statistics writes.
+> Mixed points, quality-bearing state and special recipes fall back to individual updates. The historical
+> `incUsed` flag is preserved and no longer prevents the new path when current inputs are uncoated.
+> The first and every 65,536th eligible batch is replayed on a copy; any mismatch in inventories,
+> points, progress, counters or registers disables batching.
 
 To turn it off, set `batchSettle` to `false` in `megabuildings.json`; throughput and correctness
 are identical, it is just slower.
@@ -5127,9 +5131,9 @@ pieces of physics rather than four power tiers.
 | **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Plasma Vault (Full) ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 10000× |
 | **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 10000× |
 | **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 10000× |
-| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 10000× |
+| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×10 + Saturated Getter ×1 (8 s) | 300 MW | 10000× |
 
-All four now use the same **10000× production speed** and global `cyclesPerTick=60` as other mega buildings, without individual throttling or a black-hole bonus. At full power with sufficient inputs, unblocked outputs and no proliferation, one set theoretically produces **432,000 antimatter/min** in any star system. Global throttling at 2 settles 120 cycles every 2 ticks without changing sustained throughput.
+All four now use the same **10000× production speed** and global `cyclesPerTick=60` as other mega buildings, without individual throttling or a black-hole bonus. At full power with sufficient inputs, unblocked outputs and no proliferation, one set theoretically produces **2,160,000 antimatter/min** in any star system. Global throttling at 2 settles 120 cycles every 2 ticks without changing sustained throughput.
 
 A whole bank of accumulators is pressed into a space the size of a pin, and spacetime closes over
 it. Whatever sits in that cavity lives too briefly for any instrument to measure — it is inferred
@@ -5426,3 +5430,28 @@ Mini Fusion Power Stations now generate **3 GW** (50,000,000 J/tick), consuming 
 
 
 Charged vaults exported by Singularity Vault Stations now follow the current logistics-station output stacking level (`stationPilerLevel`). Each shipment uses the smaller of available stock and the unlocked stack limit, without waiting for a full stack. Proliferation points move with the vaults; blocked belts consume no stock. Both plasma and overload vaults are supported in charging and idle modes. The vanilla charged-vault buffer normally holds 20 units, so a higher technology level cannot export more than the available inventory.
+
+
+Singularity Vault Stations now fetch vaults through virtual logistics, following `virtualLogistics` and `virtualIntervalTicks`. Select the plasma or overload tier in the window: charging fetches matching empty vaults from same-planet local Supply slots; discharging fetches matching charged vaults, up to a 20-unit input buffer. Idle mode stops fetching. Logistics stations and mega production buildings can supply them. Proliferation points transfer with items, and stock committed to outbound orders is reserved. Charged vaults automatically enter matching same-planet local Demand slots in logistics stations or production buildings; empty vaults from discharging are returned the same way. Idle mode drains both inventories to Demand slots without fetching. If no destination has room, items remain in the station. Belt output remains available; interplanetary supply requires logistics-station transport. Before changing tiers, switch to idle and clear the vault inventory.
+
+
+Fixed biological matrices disappearing from a Universe Matrix production lab immediately after delivery: an obsolete seventh-slot transfer patch moved the entire local stock upstairs, although the current game already handles that slot. The duplicate transfer is removed. Stacked labs retain their local reserve and pass up to five items per transfer using vanilla behavior. The seventh input slot is saved normally; Universe Matrix production still consumes biological matrices.
+
+
+Performance diagnostics: set `enabled=true`, `systemTiming=true`, and `perfProbeSeconds=20` in `BepInEx/config/ProjectEden/perfprobe.json`, then restart. Reports include CPU tasks, transport postfix phases, and `[系统探针]` frame rate, UPS, slow frames, GC counts, memory and process CPU. Fusion fuel and vault virtual logistics now have separate phase markers. Keep the independent mega-building sampling switch `phaseTiming=false` initially because of known historical timing bias. Reproduce lag for 1–2 minutes and inspect `BepInEx/LogOutput.log`. Profiling adds overhead; disable all three switches and restart when done. Frame intervals include rendering and waits, not measured GPU time; GC counts are not pause durations.
+
+
+Vault virtual logistics now scans each planet’s logistics stations only once per round, indexing Supply and Demand slots by item for all Singularity Vault Stations to reuse. Exhausted or full slots are skipped for the remainder of the round. Indexes are isolated per worker thread, rebuilt each round and cleared afterward, preserving tier changes, slot updates, proliferation points, order reservations and item conservation.
+
+
+Diagnostic addition: `nanoTiming` in `perfprobe.json` (off by default) records production counts, total, mean and maximum durations in integer nanoseconds from one Stopwatch clock. Mega buildings sample every 64th invocation per thread: recipe settlement, individual updates (nested within settlement), belt slots, storage synchronization and other logic. Reports contain measured samples without whole-frame extrapolation. Factory production, matrix production and research methods are timed on every call; parallel or nested durations must not be added. Events include calls lasting at least 100ms, frame gaps of at least 1s with GC deltas and logic ticks, and save/blueprint validation and creation intervals. The event queue holds 64 entries and reports overflow; uninstrumented causes remain unknown. Startup reports clock frequency and resolution; nanosecond units do not guarantee 1ns accuracy. Disable `nanoTiming`, `systemTiming`, `enabled` and `phaseTiming`, then restart after diagnosis.
+
+The multithreaded path also records entire mining, assembler, fractionator, ejector, silo and matrix-production worker methods, including scheduling/waiting rather than pure computation alone.
+
+Save-completion stall events are written directly to the log, preserving completion timing even when no further UI frame runs during exit.
+
+
+Local logistics pairing fix: when accumulated changes reach the reconciliation threshold, the current delta is applied before comparison with a full rebuild. Normal station additions or slot edits therefore no longer falsely disable incremental maintenance. Incomplete change sets trigger a full rebuild and reset the counter. Real mismatches still fall back to the full index; failure logs now include changed station IDs, the number of differing stations, and counts, checksums and current slot item/direction details for up to eight stations. Per-station summaries are collected only during periodic reconciliation, without copying the entire pair table.
+
+
+Antimatter diagnostics and old-save repair: a machine below the mega-speed threshold is checked against its building prototype before restoring configured speed, preventing old saved speed values from bypassing the repair. Ordinary buildings remain unchanged. With system diagnostics enabled, the four local antimatter building types report speed, cycles per real/simulation second, power, cycle budget, divider and input/output stocks every 20 seconds. At most two machines per type are detailed, with snapshot counts of input shortages and blocked outputs. Each Horizon Evaporator cycle consumes one charged plasma vault; the default full-load rate of 3600 cycles per simulation second requires matching vault supply, so the displayed speed alone does not determine throughput.

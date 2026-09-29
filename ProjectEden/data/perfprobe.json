@@ -8,6 +8,10 @@
   "//单位": "timeCostsAve 里存的是「计数器差 ÷ performanceFrequency」（SummarizeCpuStats @0137–013E），而 performanceFrequency = PerformanceCounter.Frequency（BeginRenderingFrame @0000–0006），即每秒计数——所以那个 Double 的单位是**秒**，×1000 才是面板上的毫秒。这一条是从 IL 读出来的，不是推的：本仓库的 MegaTickProfiler 曾经拿 Stopwatch.Frequency 当真，报出过 12 倍的假数。",
 
   "enabled": false,
+  "//systemTiming": "低频系统报告：FPS、UPS、慢帧、GC、进程 CPU 与内存。每帧只记时间，按 perfProbeSeconds 汇总；不强制 GC。",
+  "systemTiming": false,
+  "//nanoTiming": "纳秒生产分段：每线程每64台次抽1次，输出实测次数/总计/均值/最大值，不外推。工厂生产和矩阵方法全量计时；记录>=100ms慢调用、>=1s长帧，以及存档/蓝图事件。计时单位ns不代表1ns精度。",
+  "nanoTiming": false,
 
   "//perfProbeSeconds": "多久报一行。20 秒够用：timeCostsAve 本身就是滑动平均，报太密只是同一个数打很多遍。",
   "perfProbeSeconds": 20,

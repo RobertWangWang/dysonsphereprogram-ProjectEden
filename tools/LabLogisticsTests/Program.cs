@@ -126,6 +126,38 @@ static class Program
         Equal(3, Labs(world)[2].served[0], "shortage distributed without duplication");
         Equal(0, Labs(world)[3].produced[0], "total donor debit");
         Console.WriteLine("PASS multiple consumers and shortage");
+
+        // 三座物流站分别供应矩阵，覆盖每个轮转起点及生产/科研两种模式。
+        for (int start = 0; start < 3; start++)
+        {
+            MegaVirtualLogisticsPatches.Start = start;
+            world = World(new[] { Consumer(6001, 6002, 6003) });
+            world.stationPool = new[] { null,
+                new StationComponent { id = 1, storage = new[] { Slot(6001, 10, ELogisticStorage.Supply) } },
+                new StationComponent { id = 2, storage = new[] { Slot(6002, 10, ELogisticStorage.Supply) } },
+                new StationComponent { id = 3, storage = new[] { Slot(6003, 10, ELogisticStorage.Supply) } } };
+            world.stationCursor = 4;
+            Run(world);
+            foreach (int amount in Labs(world)[1].served) Equal(10, amount, "three station production inputs");
+            for (int i = 1; i <= 3; i++) Equal(0, world.stationPool[i].storage[0].count, "three station exact debit");
+            LabComponent.matrixIds = new[] { 6001, 6002, 6003 };
+            LabComponent.matrixPoints = new[] { 1, 1, 1 };
+            Labs(world)[1] = new LabComponent { id = 1, researchMode = true, matrixServed = new int[3] };
+            for (int i = 1; i <= 3; i++) world.stationPool[i].storage[0] = Slot(6000 + i, 10, ELogisticStorage.Supply);
+            Run(world);
+            foreach (int amount in Labs(world)[1].matrixServed) Equal(36000, amount, "three station research inputs");
+            for (int i = 1; i <= 3; i++) Equal(0, world.stationPool[i].storage[0].count, "research exact debit");
+
+            // 同一种矩阵分散在三个站，必须把三站库存合并，不能在第一站提前返回。
+            Labs(world)[1] = Consumer(6001); Labs(world)[1].id = 1;
+            for (int i = 1; i <= 3; i++) world.stationPool[i].storage[0] = Slot(6001, i == 3 ? 4 : 3, ELogisticStorage.Supply);
+            Run(world);
+            Equal(10, Labs(world)[1].served[0], "combined stock across three stations");
+            for (int i = 1; i <= 3; i++) Equal(0, world.stationPool[i].storage[0].count, "combined stock conservation");
+            Run(world); Equal(10, Labs(world)[1].served[0], "repeat tick no duplicate");
+        }
+        MegaVirtualLogisticsPatches.Start = 0;
+        Console.WriteLine("PASS three stations: distinct matrices, research, pooled shortages and all rotation starts");
     }
 }
 
@@ -155,7 +187,7 @@ namespace ProjectEden.Patches {
     }
     public static class ProjectEdenPlugin { public static LabConfig LabConfig; public static Logger Log = new Logger(); }
     public class Logger { public void LogInfo(string text) { } }
-    public static class MegaVirtualLogisticsPatches { public static int Rotation(PlanetTransport transport) => 0; }
+    public static class MegaVirtualLogisticsPatches { public static int Start; public static int Rotation(PlanetTransport transport) => Start; }
     public static class QualityAccess {
         public static void TakeStationQua(ref StationStore slot, int take) { slot.qua -= (int)((long)slot.qua * take / slot.count); }
     }

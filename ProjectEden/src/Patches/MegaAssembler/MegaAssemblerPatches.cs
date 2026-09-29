@@ -122,21 +122,35 @@ namespace ProjectEden.Patches
         {
             if (!GenesisBookCompat.MegaAssemblerEnabled) return;
             if (factory == null) return;
-            if (component.speed < MegaBuildingRegistry.MegaSpeedThreshold) return;
+            if (component.speed < MegaBuildingRegistry.MegaSpeedThreshold)
+            {
+                // 旧存档的低速字段不能阻止速度修复本身：先用建筑原型确认身份。
+                int entity = component.entityId;
+                if (factory.entityPool == null || entity <= 0 || entity >= factory.entityPool.Length) return;
+                var proto = LDB.items.Select(factory.entityPool[entity].protoId);
+                if (proto?.prefabDesc == null || proto.prefabDesc.assemblerSpeed < MegaBuildingRegistry.MegaSpeedThreshold) return;
+                ApplySpeed(ref component);
+                if (component.speed < MegaBuildingRegistry.MegaSpeedThreshold) return;
+            }
 
             // 抽样判定必须排在所有 Now() 之前：它决定这一 tick 的十二个计时点开不开
             // 带上星球号：分段探针要按星球分桶，用来验「单次耗时是否随本星球的建筑数增长」
             MegaTickProfiler.BeginBuilding(component.entityId, factory.planetId);
+            Diagnostics.NanosecondProbe.Begin(factory.planetId, component.entityId, component.recipeId);
 
             long tOther = MegaTickProfiler.Now();
+            long nanoOther = Diagnostics.NanosecondProbe.Now();
 
             ApplySpeed(ref component);
 
             MegaTickProfiler.AddOther(tOther);
+            Diagnostics.NanosecondProbe.End(4, nanoOther);
 
             UpdateSlots(factory, ref component);
 
             tOther = MegaTickProfiler.Now();
+
+            nanoOther = Diagnostics.NanosecondProbe.Now();
 
             // ── 产物出不去时：这一 tick 一个字都不碰 ────────────────────────
             //
@@ -157,21 +171,27 @@ namespace ProjectEden.Patches
             if (!stalled && !CatalystBedPatches.Gate(factory, ref component))
             {
                 MegaTickProfiler.AddOther(tOther);
+                Diagnostics.NanosecondProbe.End(4, nanoOther);
 
                 return;
             }
 
             MegaTickProfiler.AddOther(tOther);
+            Diagnostics.NanosecondProbe.End(4, nanoOther);
 
             long tCycles = MegaTickProfiler.Now();
+            long nanoCycles = Diagnostics.NanosecondProbe.Now();
 
             int settled = stalled
                 ? 0
                 : RunExtraCycles(factory, ref component, power, productRegister, consumeRegister);
 
             MegaTickProfiler.AddCycles(tCycles);
+            Diagnostics.NanosecondProbe.End(0, nanoCycles);
 
             tOther = MegaTickProfiler.Now();
+
+            nanoOther = Diagnostics.NanosecondProbe.Now();
 
             // 只在**真的产出了**的 tick 扣活性。settled 是实测值；cyclesPerTick = 1 时
             // 没有补跑周期可测，才退回按原版判据推导（见 LooksProductive 的注释）。
@@ -194,6 +214,7 @@ namespace ProjectEden.Patches
             Patches.Fusion.FusionBurnerPatches.Burn(factory, ref component);
 
             MegaTickProfiler.AddOther(tOther);
+            Diagnostics.NanosecondProbe.End(4, nanoOther);
         }
 
         /// <summary>
@@ -357,10 +378,12 @@ namespace ProjectEden.Patches
                     int extraBefore = component.extraCycleCount;
 
                     long tInner = MegaTickProfiler.Now();
+                    long nanoInner = Diagnostics.NanosecondProbe.Now();
 
                     component.InternalUpdate(power, productRegister, consumeRegister);
 
                     MegaTickProfiler.AddInner(tInner);
+                    Diagnostics.NanosecondProbe.End(1, nanoInner);
 
                     ran++;
                     MegaTickProfiler.AddCalls(1);
@@ -390,6 +413,7 @@ namespace ProjectEden.Patches
                         }
 
                         Tally(ran, cycles - 1 - ran);
+                        MegaBatchSettle.CountStepped(1);
 
                         return settled;
                     }
@@ -416,26 +440,41 @@ namespace ProjectEden.Patches
             }
 
             // 原本那次调用紧随其后，所以这里只补差额
+            bool batchTried = false;
+            int batched = 0;
             for (var i = 1 + ran; i < cycles; i++)
             {
                 long tInner = MegaTickProfiler.Now();
+                long nanoInner = Diagnostics.NanosecondProbe.Now();
 
                 component.InternalUpdate(power, productRegister, consumeRegister);
 
                 MegaTickProfiler.AddInner(tInner);
+                Diagnostics.NanosecondProbe.End(1, nanoInner);
 
                 ran++;
                 MegaTickProfiler.AddCalls(1);
+
+                // 先运行一次真实结算，再合并均匀喷涂的稳定区间；边界继续走原循环。
+                bool realMade = watch && produced[0] != last;
+                int batch = batchTried ? 0 : MegaProliferatorBatch.TryApply(ref component, cycles - 1 - i, power, productRegister, consumeRegister);
+                batchTried = true;
+                if (batch > 0)
+                {
+                    settled += batch;
+                    batched += batch;
+                    i += batch;
+                }
 
                 long sum = ProducedSum(produced);
                 int nowTime = component.time;
                 int nowExtra = component.extraTime;
 
-                if (watch && produced[0] != last)
+                if (realMade)
                 {
                     settled++;
-                    last = produced[0];
                 }
+                if (watch) last = produced[0];
 
                 if (sum == prevSum && nowTime == prevTime && nowExtra == prevExtra)
                 {
@@ -449,7 +488,7 @@ namespace ProjectEden.Patches
                 prevExtra = nowExtra;
             }
 
-            Tally(ran, skipped);
+            Tally(ran + batched, skipped);
 
             MegaBatchSettle.CountStepped(ran);
 
@@ -596,6 +635,7 @@ namespace ProjectEden.Patches
                 + "落在性能面板的 Facilities 一项上。");
 
             ReportBatch();
+            ProjectEdenPlugin.Log.LogInfo($"均匀增产批量：本局累计合并 {MegaProliferatorBatch.Batched} 个周期，完整状态回放校验 {MegaProliferatorBatch.Checks} 次（包括曾喷涂、当前无点数的机器）。");
         }
 
         /// <summary>
@@ -649,10 +689,7 @@ namespace ProjectEden.Patches
         /// <summary>
         /// 批量结算的覆盖率，跟在空转统计那一行后面报。
         ///
-        /// <b>覆盖率是这件事值不值的全部依据</b>：带增产剂的建筑一律退回逐次，
-        /// 而那一类占多少事先没人知道。这一行把「批量吃掉的周期 / 逐次跑掉的周期」
-        /// 摆出来，顺带把两种退回的原因分开——增产（结构性，只能这样）和
-        /// 形状不符（换配方、产物槽满这些，本来就该退回）。
+        /// 同时统计旧无增产与新均匀增产路径；旧入口拒绝不代表最终仍逐次执行。
         /// </summary>
         private static void ReportBatch()
         {
@@ -679,7 +716,7 @@ namespace ProjectEden.Patches
             ProjectEdenPlugin.Log.LogInfo(
                 $"巨型建筑·批量结算：过去 60 秒批量吃掉 {b} 个周期、逐次跑掉 {s} 个"
                 + (tot > 0 ? $"，覆盖 {100.0 * b / tot:0.#}%" : "")
-                + $"；退回逐次的原因——带增产剂 {bp} 次、单次调用没落在稳态 {bs} 次。"
+                + $"；旧无增产批量入口拒绝 {bp} 台次、非稳态 {bs} 台次（随后仍可进入均匀增产批量）。"
                 + $"自检已回放 {MegaBatchAudit.Checks} 次，其中偏保守 {MegaBatchAudit.Conservative} 次"
                 + "（偏保守只是慢一点，不影响正确性；真出问题会报 ERROR 并整局关掉批量）。");
 
@@ -700,9 +737,7 @@ namespace ProjectEden.Patches
                 ProjectEdenPlugin.Log.LogInfo(
                     $"巨型建筑·批量结算·退回明细（共 {bp} 台次）："
                     + $"用过增产点 {u}、extraSpeed 非零 {es}、**extraTime 非零 {et}**、incServed 有余量 {ise}。"
-                    + "前两条和最后一条是「玩家真的喷了」，结构性的；"
-                    + "**extraTime 非零基本只可能是本 mod 自己压制后没清干净**（MegaLightPatches.Suppress / "
-                    + "MegaThrottle.Hold 都会把它写成负数），那一条占大头就是 bug，不是设计。");
+                    + "incUsed 只表示曾用过增产点，不代表当前喷涂；这些是旧入口拒绝数，不是最终逐次台次。");
 
             // 「没落在稳态」同样是六个出口合成的一个数，同样拆开。
             long sc = MegaBatchSettle.ShapeCycle - _lastShC;
@@ -738,17 +773,10 @@ namespace ProjectEden.Patches
             // 「周期」，一台退回会跑出几十个周期，所以那个百分比必然小得离谱**——它报出
             // 「带增产剂只占 2.1%」，而真相是 100% 的台次都栽在那里。改成和台次比。
             // 这正是本文件反复记的那条：**量纲不一致的比值不是测量。**
-            long decisions = bp + b + s > 0 ? bp : 0;
-
             if (tot > 0 && b * 100 < tot * 80)
                 ProjectEdenPlugin.Log.LogWarning(
-                    $"巨型建筑·批量结算：**覆盖率只有 {100.0 * b / tot:0.#}%**，"
-                    + $"逐次真调了 {s} 个周期。看上面那行退回明细定位是哪一条："
-                    + "incServed / incUsed 占大头 → 工厂喷满了增产剂，批量按设计就不接，"
-                    + "**这才是「建筑一多就卡」的主因，不是 bug**；"
-                    + "extraTime 占大头 → 本 mod 自己的压制没清干净，是 bug；"
-                    + $"退回台次 {decisions} 却仍有大量周期逐次跑 → BatchSize 里复现的产出闸"
-                    + "和 MegaOutputGatePatches 真正抬到的值对不上了。");
+                    $"巨型建筑·批量结算：覆盖率 {100.0 * b / tot:0.#}%，逐次调用 {s} 次。"
+                    + "请结合均匀增产批量命中数及生产探针分析；历史 incUsed 标记不能证明当前带增产剂。");
         }
 
         /// <summary>
@@ -844,6 +872,7 @@ namespace ProjectEden.Patches
         private static void UpdateSlots(PlanetFactory factory, ref AssemblerComponent component)
         {
             long tSlots = MegaTickProfiler.Now();
+            long nanoSlots = Diagnostics.NanosecondProbe.Now();
 
             SlotData[] slots = SlotDataStore.GetSlots(factory.planetId, component.entityId);
 
@@ -852,13 +881,16 @@ namespace ProjectEden.Patches
             UpdateInputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool);
 
             MegaTickProfiler.AddSlots(tSlots);
+            Diagnostics.NanosecondProbe.End(2, nanoSlots);
 
             long tStorage = MegaTickProfiler.Now();
+            long nanoStorage = Diagnostics.NanosecondProbe.Now();
 
             // 传送带之外，再走一遍行星内物流：储物格与制造台之间搬运，运输机自动送料取货
             MegaStationPatches.UpdateStationStorage(factory, ref component);
 
             MegaTickProfiler.AddStorage(tStorage);
+            Diagnostics.NanosecondProbe.End(3, nanoStorage);
         }
 
         /// <summary>把产物和多余的原料推上输出带。</summary>
