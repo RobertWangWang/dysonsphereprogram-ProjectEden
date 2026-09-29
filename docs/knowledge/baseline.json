@@ -1,0 +1,13 @@
+{
+  "assembly_sha256": "c43a484f6adf8a9e4b956156047070891b46860d5b5c707ba1377b6a2af25732",
+  "assembly": "Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+  "mvid": "ee6dc40f-a6a2-4b39-b220-81c6de923db6",
+  "verified_date": "2026-09-28",
+  "mod_baseline": "1.13.2 / 22754d6",
+  "ilspy": "8.2.0.7535",
+  "scope": "本机磁盘上的原版程序集，尚未经过 BepInEx preloader / Harmony 改写",
+  "game_display_version": null,
+  "game_config_initial_version": "0.10.35",
+  "version_evidence": "GameConfig 静态字段初始化；build 与最终运行时显示版本本轮未确认。",
+  "note": "程序集版本 0.0.0.0 不是游戏发行版本。按 SHA-256 和 MVID 定位，不从旧设计文档推测版本。"
+}

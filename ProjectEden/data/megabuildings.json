@@ -408,8 +408,8 @@
       "//slot": "建造栏第 1 类第 12 槽。和第 11 槽一样超出界面的 10 个按钮，启动时会有一条 WARNING，靠滚动到得了——BuildMenuSlotGuardPatches 的那条提示说的就是这个。",
       "//singularity-vault": "**奇点储能厂：第十二座巨型建筑，也是第一座能量枢纽型的。** 它不生产任何东西——它把电从电网抽进电浆蓄能柜，或者把充满的柜子放回电网。",
       "//why-exchanger": "**为什么是枢纽不是发电机。** 发电机会把燃料吃掉；枢纽放完电把空壳还给你。一座每分钟吃 20 个柜子、一个不还的电厂不是电池，是材料黑洞。原版把「充电 → 搬走 → 放电」建模成枢纽（蓄电器那一对），这里照它走。组件模型允许同一台实体挂多个：CreateEntityLogicComponents 里 isPowerExchanger（IL 08A9）和 isPowerGen（059E）、isAssembler（1122）、isStation（14FE）都是独立的顺序 if。",
-      "//power": "1800 GW = 3e10 J/tick（1.12.12 由 60 GW 抬上来）。一块电浆蓄能柜 179.82 GJ，所以 6 tick（0.1 秒）一块，600 块/分；过载柜 12 tick，300 块/分。**传送带得跟得上**：每秒 10 进 10 出，否则它会安静地停在那里（InputUpdate @0042 的 fullCount >= 20）。具体数字和天花板见下面 exchanger.energyPerTick 那条注释。",
-      "//not-free-energy": "**它不增加总发电量。** 放电 1800 GW 的背后必须有人先充进去 1800 GW（往返效率 1.00，和原版蓄电器一致），也就是六十座氧化还原燃烧厂。这条线的意义是把电**打包运走**——DSP 里跨星球送电只能靠蓄电器，而原版一块 540 MJ 实在太碎。",
+      "//power": "额定充放电功率 36 TW = 36000 GW = 600000000000 J/tick（60 tick/s）。原版每 tick 最多换一个柜子；电浆柜 179.82 GJ、过载柜 359.64 GJ，持续吞吐上限分别为 10.7892 TW、21.5784 TW，均为 3600 块/分。额定值不等于持续吞吐，实际还受电网和传送带限制。",
+      "//not-free-energy": "它不增加总发电量。放出的能量必须先由电网充入，往返效率 1.00；36 TW 是充放共用的额定功率，不是额外发电量。",
       "//recipeType": "**4（Assemble），而它在这里只有一个用途：让这座建筑本身做得出来。** 配了枢纽段之后 isAssembler 会被关掉（见 MegaBuildingRegistry 里那段注释），所以 assemblerRecipeType 对它没有意义；但同一个字段还决定**建造配方的 Type**，留 0 的话那条配方是 Type None——只能手搓，而这座建筑要 200 台蓄电器加 500 个能量矩阵，手搓不现实。填 4 就能进制造台。",
       "//no-assembler": "它不生产、不收发货：没有装配机组件也没有物流站组件，只有能量枢纽。这样点开它就是原版枢纽窗口（三个模式按钮在那儿），既不会弹空的制造面板，也不会有几个窗口抢同一次点击——那一场争抢上一版直接抛了 NullReferenceException。",
       "//no-audit": "整条储能线一个热值都没有：能量走 PrefabDesc.maxAcuEnergy 和这里的 exchangeEnergyPerTick，不是 ItemProto.HeatValue，**不进能量审计**——而那是对的，它消耗的是电网里真实存在的电。",
@@ -417,7 +417,7 @@
       "modelId": 691,
       "recipeId": 6686,
       "displayName": "奇点储能厂",
-      "description": "三条弧形扶壁从底座斜撑上来，在半空把一根石英柱箍住。柱子里是一段被磁场捏细的电浆，而底层那排弹匣架不停地吞进空柜、吐出满柜——它不生产任何东西，只是把电网里此刻多出来的功率，压进能带着走的容器里。等到几十光年外需要的时候，再原样还回去。",
+      "description": "三条弧形扶壁从底座斜撑上来，在半空把一根石英柱箍住。柱子里是一段被磁场捏细的电浆，而底层那排弹匣架不停地吞进空柜、吐出满柜——它不生产任何东西，只是把电网里此刻多出来的功率，压进能带着走的容器里。等到几十光年外需要的时候，再原样还回去。额定充放电功率 36 TW；实际吞吐受单柜容量、每 tick 最多换一个柜子及传送带供给限制。",
       "iconName": "singularity-vault",
       "recipeType": 4,
       "machineTypeName": "储能设备",
@@ -440,8 +440,8 @@
         "alsoServes": [
           "overload-vault"
         ],
-        "//energyPerTick": "充放功率，单位**焦/tick**（面板上的瓦 ÷ 60）。3e10 × 60 = 1800 GW（1.12.12 由 60 GW 抬上来，所有者决定）。\n\n**两个字段都是 Int64，所以这个数不接近位宽上限**：PrefabDesc.exchangeEnergyPerTick 和 PowerExchangerComponent.energyPerTick 都是 Int64（实测），而且 CalculateActualEnergyPerTick 全程没有一条 conv.i4。要是哪天它们是 Int32 就得小心——3e10 早就越过 2.147e9 了。\n\n**真正的天花板不是位宽，是「一 tick 最多换一个柜子」。** PowerExchangerComponent.InputUpdate 里**没有循环**：@0055 那句 currPoolEnergy -= maxPoolEnergy 每次调用只走一遍，换完之后 @0111 把本 tick 的抽取量夹成 maxPoolEnergy - currPoolEnergy。所以 energyPerTick 一旦超过 maxPoolEnergy（电浆柜 179.8 GJ ≈ 10,788 GW、过载柜 ≈ 21,576 GW）就不再更快，也不会浪费，只是白填一个大数。1800 GW 是电浆柜那条线的 1/6：6 tick 一个柜，10 个/秒。\n\n**还有两条会表现成「充电变慢」而不是报错的闸**：@0042 的 fullCount >= 20（内部只存 20 个满柜，所以带子必须每秒运走 10 个、送进 10 个），以及空柜带增产点时 CalculateActualEnergyPerTick 会返回 energyPerTick × (1 + accTableMilli[级])——本 mod 最高级 6 即 ×2.5 = 4500 GW，仍在天花板内。\n\n**改这个数必须连运行时对齐一起想**：energyPerTick **进存档**（Export @0082 / Import @0096 原样读回），而且原版没有像 StorageComponent 那样回头从 proto 重新推导。更要命的是本 mod 整条识别链都挂在它身上——GameData.Import 后置那句 `FindPair(pool[i].energyPerTick, …) == null → continue` 读的是组件里的旧值，所以光改配置不仅老厂功率不变，连它们的 maxPoolEnergy 修复和换档都会一起失灵。AlignRate 就是为这件事加的：它按**建筑的 protoId** 认，不按功率认，排在那道闸之前。\n\n对齐是**双向**的（调大调小都即时生效），依据是枚举写入口：SetEmpty / Import / PowerSystem.Import / NewExchangerComponent，**没有任何界面能写它**（UIPowerExchangerWindow._OnUpdate 只读来显示）。这正是 stations.json 里 energyMax 那一条的判据——有界面写入口的（充能滑条）才只抬一次，没有的就对齐。",
-        "energyPerTick": 30000000000
+        "//energyPerTick": "充放电共用额定功率，单位 J/tick：600000000000 × 60 = 36 TW。PrefabDesc.exchangeEnergyPerTick 和组件 energyPerTick 都是 Int64。原版 InputUpdate / OutputUpdate 每 tick 最多转换一个柜子，因此持续吞吐还受单柜容量限制；最高级增产可把计算功率乘到 90 TW，但不会突破每 tick 换柜上限。内部最多 20 个满柜，满速需每秒输入、输出各 60 个柜子。energyPerTick 进存档；已有 AlignRate 在读档时按建筑 protoId 对齐新配置，保留柜体档位，不需要拆建。",
+        "energyPerTick": 600000000000
       },
       "recipeItemIds": [
         2206,
@@ -477,17 +477,8 @@
     {
       "//": "**反物质产线，第一座：压缩与蒸发合成一座。** 原方案是「奇点压缩机 → 微型黑洞 → 霍金辐射采集器」两座建筑加一个中间物品，合并掉了——理由是物理不是取舍：180 GJ ÷ c² = 2.0 mg，τ ≈ 8.4×10⁻¹⁷(M/kg)³ s 给出寿命 6.7×10⁻³⁴ 秒，比一个 tick（1/60 秒）短约 32 个数量级。那个黑洞不可能存在到「能被放进储物格」的地步。合并顺带消掉三件实现成本：虚拟物流瞬移（巨型建筑本身就是物流站，黑洞只要是物品就一定会被 MegaVirtualLogisticsPatches 瞬移）、StackSize=1 的豁免口子（ItemStackSizePatches 会把每一个物品压平到 10000，循环里没有排除表）、以及多产物 UI（2 个产物正好是原版 UIAssemblerWindow 展开的上限）。",
       "//power": "3.0 GW = 2.4（压缩）+ 0.6（采集）。workEnergyPerTick = 功率 ÷ 60。**耗电和速度是解耦的**——SetPCState 按 workEnergyPerTick 算、不看 speed，所以「慢而且极耗电」不需要任何新机制。",
-      "//speed": "**cyclesPerTick 已经是逐建筑字段了**（MegaThrottle.Collect 读的是每座自己的 b.cyclesPerTick），所以这四座跑的不是全局那个 60。这段注释曾经写着「现在还是全局配置，要让它真正慢下来得两步」——那两步早就做完了，留着会让人以为改这里没用。而且 cyclesPerTick=1 本身**不是**慢速：speed=1e8 之下配方时间完全不起作用，一 tick 结算一个周期就是 60 次/秒，真正让它慢下来的是 tickDivider。详见 反物质设计.md 第六节。",
+      "//current-rate": "四座恢复全局巨型建筑万倍速：assemblerSpeed=100000000，周期数跟随全局60，无独立分频和黑洞加成。全局分频2仅批量结算，不改变吞吐。满供电无增产时一组理论产432000个反物质/分钟。",
       "itemId": 6683,
-      "//bonus": "**就地生产加成：建在黑洞系里快一倍。四座都给，所以玩家的决策是个梯度而不是二选一——往那一颗星球上挤多少条线。** 驱动的是「建在哪」：三种原料只在黑洞／中子星系产，而黑洞系**只有 1 颗行星**（StarGen.CreateStarPlanets @009B–00A5，写死无随机），既放不下整条产线也没有任何扩张余地；配套（电浆蓄能柜、碳化钨、活性复合材）还全得反向运进去。所以「运矿出去敞开了建」和「挤在原地换加成」是一笔真账。\\n\\n**刻意不挂 star.mass。** 量过：黑洞质量 = 18 + (r1 × r2) × 30（StarGen.CreateStar @024F–0265），两个随机数相乘、极度偏左，中位 23.6、85% 低于 33；而默认 64 星的一局**只有 1 个黑洞**，所以质量对一个存档是个常数——挂在它上面，玩家不是在做决策，是在抽种子，而且八成抽到个小数。同族教训见合金那条「单轴阈值会让第二个自由度变成摆设」。\\n\\n作用在 tickDivider 上（除以它），不动产量、不克隆配方。**面板上看不出来**——「制造速度」读的是 speed，而 speed 永远是 1e8、绝不能动。和生物温室的日照同一个坑。",
-      "//throttle": "**这一组四座共用 tickDivider = 70，那不是巧合，是配平。** 一次炉子循环出 8 霍金辐射 + 4 高能γ光子，正好喂满磁分离塔一轮（吃 8）和对产生室一轮（吃 4），而这两座各出 2 反质子 / 2 正电子，又正好喂满彭宁阱一轮——整条链是 1:1:1:1，所以四座该跑同样的**周期/秒**，也就是 cyclesPerTick × 60 ÷ tickDivider 必须四座相等。**改速度时四座必须一起改，漏一座就把这条链打歪，而且一个字都不报。**\\n\\n**1.13.0：整条线提速 10 倍，改的是 cyclesPerTick（1 → 10），不是 tickDivider。** 10 × 60 ÷ 70 ≈ 8.57 次/秒（原先 0.857）。两条路吞吐完全等价（离线量过，都是 10.00 倍），但降分频有两处代价：\\n\\n· **就地加成会失真。** EffectiveDivider 是整数除法 divider / bonusSpeedup，70 ÷ 2 = 35 正好是 2.00 倍，而 7 ÷ 2 = 3 变成 2.33 倍——配置写着 2.0，实际给了 2.33，悄悄改掉一个平衡数。\\n· **访问频次会涨 10 倍，而那正是分频要省的东西。** 单次 InternalUpdate 的代价随本星球台数超线性涨（实测 103 台 143 ns、7240 台 10959 ns，指令数完全相同，所以是访存/工作集）。改周期数则频次一点不变，只是每次多跑几个周期——而且 cycles > 1 之后这四座才第一次吃上批量结算（MegaBatchSettle 要求 cycles > 1）。\\n\\n**注意「倍率」在这里已经不是配平的单位了。** speed = 1e8 之下配方自己的秒数不控制吞吐（一个 tick 就能把 timeSpend 填满），所以同样的 8.57 次/秒，对 35 秒的炉子是 300 倍、对 8 秒的对产生室是 69 倍。**要配平一条链，对齐的是周期/秒，不是倍率。**\\n\\n换算：想要每秒 r 次合成 → cyclesPerTick ÷ tickDivider = r / 60。先把 tickDivider 定在够粗的档位（让 ÷ bonusSpeedup 整除），再用 cyclesPerTick 调倍数。",
-      "//current-rate": "四座同步再次提速 10 倍：cyclesPerTick 10 → 100，分频保持 70，黑洞加成保持 2。普通星系 10285.714 个反物质/分钟，黑洞星系 20571.429 个/分钟。原料与满蓄能柜供给需相应扩容。",
-      "cyclesPerTick": 100,
-      "tickDivider": 70,
-      "bonusStarTypes": [
-        "BlackHole"
-      ],
-      "bonusSpeedup": 2.0,
       "modelId": 690,
       "recipeId": 6693,
       "displayName": "视界蒸发炉",
@@ -522,12 +513,6 @@
     {
       "//": "**第二座：按电荷把蒸发谱劈开。** 正反粒子成对出现，而质子和反质子电荷相反，磁场一加就往相反方向偏转。所以这座**必然**同时产出正常物质那一半——6 个氢是物理要求的，不是白送的平衡数字，配方那边写了 energyNote。",
       "itemId": 6684,
-      "cyclesPerTick": 100,
-      "tickDivider": 70,
-      "bonusStarTypes": [
-        "BlackHole"
-      ],
-      "bonusSpeedup": 2.0,
       "modelId": 689,
       "recipeId": 6694,
       "displayName": "磁分离塔",
@@ -560,12 +545,6 @@
     {
       "//": "**第三座：对产生。** γ光子在重核的库仑场里凭空生成电子-正电子对。**靶用碳化钨是有依据的**：对产生截面正比于 Z²，钨的 Z=74，高 Z 材料就是干这个用的。电子被靶材吸收、只引出正电子，是简化，写在物品描述里。",
       "itemId": 6685,
-      "cyclesPerTick": 100,
-      "tickDivider": 70,
-      "bonusStarTypes": [
-        "BlackHole"
-      ],
-      "bonusSpeedup": 2.0,
       "modelId": 688,
       "recipeId": 6695,
       "displayName": "对产生室",
@@ -597,12 +576,6 @@
     {
       "//": "**第四座：在彭宁阱里把两种反粒子合成反氢。** 合成之后它是中性的，磁场按不住，只能靠真空本身隔开——所以这座要持续吃吸气剂。**那是整条设计里唯一一条「非物料、而是环境条件」的约束**：吸气剂不进产物，只维持真空，吸附饱和就得换，而再生每轮损耗 1/3。断了不是产量下降，是整条线停摆。",
       "itemId": 6686,
-      "cyclesPerTick": 100,
-      "tickDivider": 70,
-      "bonusStarTypes": [
-        "BlackHole"
-      ],
-      "bonusSpeedup": 2.0,
       "modelId": 687,
       "recipeId": 6696,
       "displayName": "彭宁阱复合室",

@@ -30,7 +30,7 @@ namespace ProjectEden
     {
         public const string GUID    = "com.wangyu.projecteden";
         public const string NAME    = "Project Eden";
-        public const string VERSION = "1.13.2";
+        public const string VERSION = "1.13.3";
 
         /// <summary>存档格式版本。改动 Export/Import 的字节布局时必须递增。</summary>
         private const int SaveVersion = 5;
@@ -357,6 +357,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction += Patches.VeinScalingPatches.Apply;
 
             LDBTool.PostAddDataAction += Patches.Fusion.FusionRegistry.Resolve;
+            LDBTool.PostAddDataAction += Patches.Fusion.FusionFuelLogisticsPatches.ApplyPower;
 
             LDBTool.PostAddDataAction += I18N.VerifyCoverage;
             // 能量审计排在最后：它要读 LDB 里的最终热值，
@@ -401,6 +402,7 @@ namespace ProjectEden
             LDBTool.PostAddDataAction -= RefreshPowerStatIndices;
             LDBTool.PostAddDataAction -= FuelSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= MatrixLabPatches.ApplyMatrixTime;
+            LDBTool.PostAddDataAction -= Patches.Fusion.FusionFuelLogisticsPatches.ApplyPower;
             LDBTool.PostAddDataAction -= MatrixSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= ProliferatorSurvey.OnPostAddData;
             LDBTool.PostAddDataAction -= MinerStationSurvey.OnPostAddData;

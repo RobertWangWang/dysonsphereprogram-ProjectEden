@@ -17,5 +17,8 @@ tools/out/
 __pycache__/
 *.pyc
 
+# 从本机游戏程序集生成的反编译参考，不进入版本控制或安装包
+docs/knowledge/generated/
+
 # 会话残留，不是项目文件
 ProjectEden/session.txt

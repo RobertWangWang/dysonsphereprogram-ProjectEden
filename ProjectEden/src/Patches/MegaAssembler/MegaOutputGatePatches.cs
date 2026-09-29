@@ -86,7 +86,8 @@ namespace ProjectEden.Patches
             // （MegaThrottle.CyclesFor 的补偿），闸门不放大就会把那 G 倍卡回 1 倍——
             // 表现是「开了全局分频，产能掉成 1/G」，而配置上看不出任何理由。
             // 闸门只是天花板，真正的循环上限在 RunExtraCycles，所以放大它不会让谁多跑。
-            int wanted = cycles * MegaThrottle.GlobalDivider - 1;
+            // 逐建筑覆盖可能远高于全局预算，不能再用全局值封顶。
+            int wanted = MegaThrottle.GateCycles(component.recipeType) - 1;
 
             // 只抬不降：闸是天花板，减产另有三个旋钮（cyclesPerTick / 日照 / 分频）
             return wanted > vanilla ? wanted : vanilla;

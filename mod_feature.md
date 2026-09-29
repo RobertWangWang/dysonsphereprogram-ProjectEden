@@ -2727,6 +2727,8 @@ It now switches to the right tab and column page before selecting.
 
 ### Resource search window: `Ctrl + F`
 
+Planet properties are also searchable: `tidal locking` (including permanent day/night, 1:2 and 1:4), `permanent day`, `tidal locking 1:2`, `tidal locking 1:4`, `horizontal rotation`, `reverse rotation`, and `multiple satellites`. Chinese queries work too. Recognized property queries take priority; results follow star/planet order and show the planet traits. Clicking still locates the planet. Properties come directly from the game flags, without waiting for vein scans; no matches displays 0 planets.
+
 Opens a standalone window: type the name of an ore or a gas and it lists **which planets have it, and how many
 veins and how much reserve each one holds**. Click a row to fly the map there.
 
@@ -4971,26 +4973,13 @@ graphene / graphene (advanced) pair).
 ### The Singularity Vault Station: the twelfth mega building
 
 A plasma vault holds **179.8 GJ** (333× a vanilla full accumulator) and an overload vault **359.6 GJ**;
-the Singularity Vault Station is what charges and discharges them: **1800 GW** (raised from 60 GW in
-1.12.12) — **6 ticks (0.1 s)** per plasma vault either way and 12 ticks for an overload vault, so **600 a
-minute** (300 for overload vaults).
+the Singularity Vault Station now has **36 TW (36,000 GW) rated charging and discharging power**: 600,000,000,000 J/tick at 60 ticks/s. Both modes share this setting.
 
-**It does not add generating capacity.** Discharging 1800 GW requires that someone charged 1800 GW in first
-(round trip 1.00, as vanilla). What it buys is that **shipping power between stars becomes practical** —
-in DSP electricity only crosses planets inside accumulators, and vanilla's 540 MJ apiece is far too
-granular. The charging side needs 1800 GW, i.e. **sixty redox combustion plants**.
+**It does not add generating capacity.** Energy must first be drawn from the grid, transported in charged vaults, and returned to a grid, with a round-trip efficiency of 1.00.
 
-> **Raising it further buys nothing: the ceiling is "at most one vault per tick".** Vanilla's
-> `PowerExchangerComponent.InputUpdate` contains **no loop** — the vault-conversion step runs once per call —
-> and after converting it clamps the energy drawn this tick to "how much is still needed to fill one more
-> vault". So past **10,788 GW** (plasma) / **21,576 GW** (overload) it is neither faster nor wasteful, just a
-> large number doing nothing. 1800 GW is one sixth of the plasma line.
+> **Rated power differs from sustained throughput.** Vanilla converts at most one vault per tick: **60 vaults/s or 3600/min** for either tier. Using the exact capacities of 179.82 / 359.64 GJ, sustained power is capped at **10.7892 / 21.5784 TW**, respectively. Grid and belt limitations can reduce it further.
 
-> **Two limits present as "charging got slower" rather than as an error.** First, it holds **only 20 full
-> vaults** internally, so the belts must **carry away 10 full vaults and deliver 10 empty ones every second**
-> — fall behind on either and it simply stops, silently. Second, **spraying the empty vaults multiplies the
-> rate again** (vanilla scales by `1 + accTable[level]`); this mod's top level is ×2.5, i.e. 4500 GW, still
-> inside the ceiling.
+> The internal buffer holds at most 20 charged vaults. Reaching the ceiling requires delivering 60 empty vaults and removing 60 charged vaults each second. Top-tier proliferator raises the calculated rate to 90 TW, but cannot bypass the one-vault-per-tick limit.
 
 > **Changing that number also moves the plants you have already built** — no rebuild needed.
 > `energyPerTick` is a save field and vanilla's `Import` reads the stored value back verbatim without
@@ -5133,19 +5122,14 @@ The two ores from the previous section (Accretion Melt, Horizon Core) now have a
 new mega buildings turn them into **vanilla antimatter**, in four steps that are four different
 pieces of physics rather than four power tiers.
 
-| Building | Recipe | Power | Effective speed |
+| Building | Recipe | Power | Production speed |
 |---|---|---:|---:|
-| **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Plasma Vault (Full) ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 3000× |
-| **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 857.14× |
-| **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 685.71× |
-| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 685.71× |
+| **Horizon Evaporator** | Accretion Melt ×6 + Horizon Core ×1 + Unipolar Magnet ×2 + Plasma Vault (Full) ×1 → **Hawking Radiation** ×8 + **High-Energy Gamma Photon** ×4 (35 s) | 3000 MW | 10000× |
+| **Magnetic Separation Tower** | Hawking Radiation ×8 + Unipolar Magnet ×1 → **Antiproton** ×2 + Hydrogen ×6 (10 s) | 480 MW | 10000× |
+| **Pair Production Chamber** | High-Energy Gamma Photon ×4 + Tungsten Carbide ×1 → **Positron** ×2 (8 s) | 360 MW | 10000× |
+| **Penning Trap Combiner** | Antiproton ×2 + Positron ×2 + Porous Getter ×1 → **Antimatter** ×2 + Saturated Getter ×1 (8 s) | 300 MW | 10000× |
 
-> **The line is now another 10× faster**: all four buildings use 100 cycles instead of 10, or **85.714 crafts/s**. One set produces **10,285.71 antimatter/min**, or **20,571.43/min in a black hole system**, at full power with sufficient inputs and no proliferation.
-> The table shows the current multipliers. Material and charged-vault supply must scale accordingly.
-> Version 1.13.0 raised cycles from 1 to 10; this change raises them from 10 to 100 while keeping the divider at 70,
-> but lowering the divider would distort the "built in a black hole system, ×2" bonus — `divider /
-> bonus` is integer division, and 70 ÷ 2 = 35 is exactly 2.00× while 7 ÷ 2 = 3 becomes 2.33×. It would
-> also visit these four 10× more often per second, which is precisely what the divider exists to avoid.
+All four now use the same **10000× production speed** and global `cyclesPerTick=60` as other mega buildings, without individual throttling or a black-hole bonus. At full power with sufficient inputs, unblocked outputs and no proliferation, one set theoretically produces **432,000 antimatter/min** in any star system. Global throttling at 2 settles 120 cycles every 2 ticks without changing sustained throughput.
 
 A whole bank of accumulators is pressed into a space the size of a pin, and spacetime closes over
 it. Whatever sits in that cavity lives too briefly for any instrument to measure — it is inferred
@@ -5156,76 +5140,9 @@ the pipeline), hard gammas strike a tungsten target and conjure electron–posit
 nuclear field (the positron is led away by an electrode, the ordinary electron stays in the target),
 and a Penning trap finally combines the two.
 
-### These four are deliberately not 10000×
+### Shared mega-building speed rules
 
-The other thirteen mega buildings run at 10000×; these four **get a turn once every 70 ticks** (and
-settle a baseline of 100 cycles; global throttling at 2 batches this into 200 cycles every 140 ticks), which works out to the multipliers in the table. What is throttled is
-the **cycle count**, never `speed` — a mega building is identified by `speed >= threshold`, so lowering
-`speed` means the building is never picked up again (the same constraint the greenhouse's sunlight
-lives under, section XIII).
-
-> **The unit of balance is cycles per second — `cycles ÷ divider` — not the multiplier.** One furnace
-> cycle yields 8 Hawking Radiation + 4 High-Energy Gamma Photons, which is exactly one round of the
-> separation tower (which eats 8) and one round of the pair chamber (which eats 4); those two each
-> yield 2 antiprotons / 2 positrons, which is exactly one round of the Penning trap. The chain is
-> 1:1:1:1, so all four must run the same cycles per second. The multipliers in the table differ wildly
-> (300× against 69×) only because the four recipes have different nominal times: at `speed = 1e8` a
-> recipe's own seconds do not govern throughput at all, since one tick already fills it.
-> **To retune the speed yourself, change `cyclesPerTick` on all four — missing one skews the chain,
-> and nothing reports it.**
-
-The cost is stated rather than hidden: **the assembler panel's "Production Speed" row still reads
-10000×** on these four. That row reads `speed`, and `speed` is never touched. The panel and the real
-throughput disagree here; that is known and there is no lever that fixes it. (The analysis panel's
-"reference rate" / "theoretical output" columns are a different matter — since 1.12.6 those two are
-divided down by the tick divider.)
-
-**Proliferator works on these four, at exactly the same ratio as anywhere else.** The throttle sets
-*how often a cycle settles*, not how much extra a cycle earns — spraying Mk.III yields 0.25 extra
-batches per cycle here just as it does on an un-throttled mega building. Acceleration mode remains
-pointless: `speed` is already two orders of magnitude above any recipe's time, so there is nothing
-left to accelerate.
-
-### The energy account: only a black hole system breaks even
-
-One full pass of the chain (one cycle in each of the four) yields **Antimatter ×2** and costs:
-
-```
-Horizon Evaporator      3.500 GJ      per pass   4.83 GJ
-Magnetic Separation     0.560 GJ      per unit   2.42 GJ
-Pair Production         0.420 GJ
-Penning Trap            0.350 GJ
-```
-
-And how much does antimatter give back? The vanilla recipe `Antimatter ×12 + Hydrogen ×12 +
-Annihilation Constraint Sphere ×1 + Titanium Alloy ×1 → Antimatter Fuel Rod ×2` is 7200 MJ per rod,
-i.e. **1.20 GJ per unit of antimatter**.
-
-**2.42 in, 1.20 out — a net loss of half.** This line is not a generator. It converts electricity
-into something you can pack into a fuel rod and carry away.
-
-And the four **halve their settlement period when built in a black hole system** (70 → 35 ticks).
-Power is charged per tick and is independent of the settlement period, so doubling the output
-**halves the electricity per unit**: 2.42 → 1.21 GJ, which is **exactly the 1.20 you burn back**.
-
-That is not a contrived coincidence, it is the design: **building it anywhere else always loses
-power, and only building it at the source just about pays** — and a black hole system has exactly
-one planet (hardcoded, not rolled). That planet cannot hold the whole line, and everything it needs
-(tungsten carbide, living composite, plasma capacitors) has to be shipped *inward*. So "haul the ore
-out and build freely" versus "cram it in on site for the bonus" is a real trade.
-
-### Why the bonus keys on where it is built, not on stellar mass
-
-A black hole's mass in this game is `18 + (r1 × r2) × 30` — two random numbers multiplied, range
-18.0–47.9, median 23.6. It looks like a ready-made knob, but **a default 64-star cluster contains
-exactly one black hole**, so for any one save it is **a constant**: it varies between saves, not
-within one. Keying the bonus on it would not be asking the player to make a decision, it would be
-**asking them to reroll the seed** — and a bad deal at that: at `1 + (mass − 18) / 30` the median is
-only 1.19×, and nine games out of ten never see 1.6×.
-
-The same family of lesson is the alloys' "a single-axis threshold makes the second degree of freedom
-decorative" (section XVIII). There it was linear programming pushing the optimum to a vertex; here it
-is a sample size of one.
+Each building settles 3600 cycles per second, preserving the 1:1:1:1 main-line balance. Proliferation, power and logistics limits follow the normal mega-building rules. Recipes and power settings are unchanged. The old black-hole break-even claim no longer applies; the charged plasma vault consumed by the recipe must also be included in energy costs.
 
 ### The getter is a loop, not a consumable
 
@@ -5499,3 +5416,13 @@ and moving a file into `ProjectEden/assets/icons/` makes it referenceable by fil
 
 After editing, `dotnet build` is all that is needed — it deploys to the r2modman profile automatically. Every change
 has a confirmation line in the game log; a failed match logs an ERROR rather than failing silently.
+
+
+### Automatic fuel supply for Mini Fusion Power Stations
+
+With `virtualLogistics` enabled in `megabuildings.json`, Mini Fusion Power Stations automatically take compatible fusion fuel rods from local Supply slots in logistics stations or Tiangong assemblers on the same planet. No sorters or drones are needed. Each station refills once per second up to 5000 rods, preserving proliferation points and avoiding mixed fuel types. Interplanetary fuel must first arrive at a logistics station configured for local Supply. Sorter input remains available.
+
+Mini Fusion Power Stations now generate **3 GW** (50,000,000 J/tick), consuming fuel energy at the same rated power to preserve vanilla efficiency. Existing stations update automatically after loading. The 5000-rod target applies to virtual supply; manual and sorter loading retain vanilla rules. Vanilla stores total fuel proliferation points in Int16: uncoated and Mk.III rods can reach 5000, while top-tier 10-point rods are limited to about 3276 to prevent overflow.
+
+
+Charged vaults exported by Singularity Vault Stations now follow the current logistics-station output stacking level (`stationPilerLevel`). Each shipment uses the smaller of available stock and the unlocked stack limit, without waiting for a full stack. Proliferation points move with the vaults; blocked belts consume no stock. Both plasma and overload vaults are supported in charging and idle modes. The vanilla charged-vault buffer normally holds 20 units, so a higher technology level cannot export more than the available inventory.

@@ -71,6 +71,7 @@ namespace ProjectEden.Patches
         /// <summary>注册期调一次，把配置里逐建筑的两个旋钮收集起来。</summary>
         internal static void Collect()
         {
+            RecipeCycles.Clear();
             MegaBuildingEntry[] buildings = MegaBuildingRegistry.Config?.buildings;
 
             if (buildings == null)
@@ -90,6 +91,8 @@ namespace ProjectEden.Patches
                 if (b == null) continue;
 
                 int cycles = b.cyclesPerTick;
+                if (!RecipeCycles.TryGetValue(b.recipeType, out int previous) || cycles > previous)
+                    RecipeCycles[b.recipeType] = cycles;
                 int divider = b.tickDivider;
 
                 EStarType[] bonusStars = ParseStarTypes(b.bonusStarTypes, b.displayName);
@@ -203,6 +206,17 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>这台建筑这一 tick 的周期上限。没单配就返回传进来的全局值。</summary>
+        // 产出闸没有 factory 参数，按配方类型缓存最大逐建筑预算。
+        private static readonly Dictionary<int, int> RecipeCycles = new Dictionary<int, int>();
+
+        internal static int GateCycles(ERecipeType type)
+        {
+            int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
+            if (RecipeCycles.TryGetValue((int)type, out int configured) && configured > cycles)
+                cycles = configured;
+            return System.Math.Max(1, cycles) * GlobalDivider;
+        }
+
         internal static int CyclesFor(PlanetFactory factory, int entityId, int globalCycles)
         {
             int i = IndexOf(factory, entityId);

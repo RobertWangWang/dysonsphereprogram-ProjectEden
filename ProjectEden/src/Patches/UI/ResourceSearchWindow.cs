@@ -52,6 +52,7 @@ namespace ProjectEden.Patches.UI
 
         private static int _scroll;
         private static int _matchedItem;
+        private static bool _propertySearch;
 
         /// <summary>除了选中那一种，还有几种也命中了查询串——提示玩家把名字打全。</summary>
         private static int _alsoMatched;
@@ -231,10 +232,26 @@ namespace ProjectEden.Patches.UI
             _scroll = 0;
             _matchedItem = 0;
             _alsoMatched = 0;
+            _propertySearch = false;
 
             string q = (_input?.text ?? "").Trim();
 
-            if (q.Length > 0)
+            var propertyMask = PlanetPropertySearch.Parse(q);
+            _propertySearch = propertyMask != 0;
+            if (_propertySearch)
+            {
+                // 星球特征在创建星系时就已确定，无需等待资源索引完成。
+                var stars = GameMain.galaxy?.stars;
+                if (stars != null)
+                    foreach (var star in stars)
+                    {
+                        if (star?.planets == null) continue;
+                        foreach (var planet in star.planets)
+                            if (PlanetPropertySearch.Matches(planet, propertyMask))
+                                Matched.Add(new ResourceIndex.Entry { Planet = planet });
+                    }
+            }
+            else if (q.Length > 0)
             {
                 var best = int.MaxValue;
 
@@ -356,6 +373,12 @@ namespace ProjectEden.Patches.UI
 
                 string where = $"{e.Planet.star?.displayName} · {e.Planet.displayName}";
 
+                if (_propertySearch)
+                {
+                    Rows[i].text = where + "    " + PlanetPropertySearch.Describe(e.Planet);
+                    continue;
+                }
+
                 Rows[i].text = e.Gas
                     ? where + "    " + string.Format(
                         I18N.Tr("气态    速率 {0}"), (e.Amount / 10000f).ToString("0.##"))
@@ -369,12 +392,17 @@ namespace ProjectEden.Patches.UI
         {
             if (_status == null) return;
 
-            string scan = ResourceIndex.Running
+            string scan = !_propertySearch && ResourceIndex.Running
                 ? string.Format(I18N.Tr("　正在后台扫描 {0}/{1} 颗星球…"),
                     ResourceIndex.Scanned, ResourceIndex.Total)
                 : "";
 
-            if (_matchedItem > 0)
+            if (_propertySearch)
+            {
+                _status.text = string.Format(I18N.Tr("{0}：{1} 颗星球"), _input.text.Trim(), Matched.Count)
+                               + (Matched.Count > MaxRows ? I18N.Tr("（拖右边条翻页）") : "");
+            }
+            else if (_matchedItem > 0)
             {
                 ItemProto proto = LDB.items.Select(_matchedItem);
 
@@ -388,8 +416,8 @@ namespace ProjectEden.Patches.UI
             else
             {
                 _status.text = (_input != null && _input.text.Trim().Length > 0
-                                   ? I18N.Tr("没有找到这种资源")
-                                   : I18N.Tr("输入矿石或气体的名字"))
+                                   ? I18N.Tr("没有找到匹配的资源或星球属性")
+                                   : I18N.Tr("输入资源名称或星球属性"))
                                + scan;
             }
         }
@@ -534,7 +562,7 @@ namespace ProjectEden.Patches.UI
 
             rootGO.GetComponent<Image>().color = new Color(0.04f, 0.06f, 0.09f, 0.94f);
 
-            MakeLabel(_root, "title", font, I18N.Tr("资源搜索"), 17, TextAnchor.MiddleLeft,
+            MakeLabel(_root, "title", font, I18N.Tr("资源与星球搜索"), 17, TextAnchor.MiddleLeft,
                 new Color(0.92f, 0.96f, 1f), new Vector2(14f, -10f), new Vector2(300f, 24f));
 
             // 给右上角那个叉腾出位置，所以比标题少靠右一点
@@ -636,7 +664,7 @@ namespace ProjectEden.Patches.UI
             _placeholder = MakeText(trs, "Placeholder", font, TextAnchor.MiddleLeft,
                 new Color(0.92f, 0.96f, 1f, 0.35f), 14);
 
-            _placeholder.text = I18N.Tr("矿石或气体的名字，例如 白钨矿");
+            _placeholder.text = I18N.Tr("资源或星球属性，例如 白钨矿、潮汐锁定");
 
             _input = fieldGO.GetComponent<InputField>();
 

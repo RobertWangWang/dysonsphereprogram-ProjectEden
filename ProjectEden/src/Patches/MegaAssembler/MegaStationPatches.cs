@@ -106,7 +106,7 @@ namespace ProjectEden.Patches
             // **循环外算一次。** 它读三个配置字段，而这个循环是每台巨型建筑每 tick
             // 每种原料跑一遍——上一版把它写在循环里，等于把三次配置查表乘上了
             // 「台数 × 原料数 × 60」。值在一个 tick 内不会变。
-            int stockCycles = StockCycles();
+            int stockCycles = StockCycles(factory, component.entityId);
 
             lock (station.storage)
             {
@@ -317,14 +317,14 @@ namespace ProjectEden.Patches
         /// <para>代价说清楚：备货变多意味着每台机器里停着更多原料。G = 4 时是 240 份，
         /// 相对物流站那 1000 万的槽位可以忽略。</para>
         /// </summary>
-        private static int StockCycles()
+        private static int StockCycles(PlanetFactory factory, int entityId)
         {
             int stock = Config?.requireStockMultiplier ?? 0;
             int cycles = MegaBuildingRegistry.Config?.cyclesPerTick ?? 1;
 
             if (cycles < 1) cycles = 1;
 
-            int need = cycles * MegaThrottle.GlobalDivider;
+            int need = MegaThrottle.CyclesFor(factory, entityId, cycles);
 
             return stock > need ? stock : need;
         }

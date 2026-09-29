@@ -1,0 +1,21 @@
+# Experimental 128-bit FMA4 decoder for the 120 verified VFMADDPS instructions.
+# The intrinsic is intentionally opaque: result[0..15] is the vector and
+# result[16..19] is the updated MXCSR. No floating-point or exception model
+# is asserted. Keep this candidate separate from a complete C recovery.
+define pcodeop DSP_FMA4_PS_RESULT_AND_MXCSR;
+
+:VFMADDPS XmmReg1, vexVVVV_XmmReg, XmmReg2_m128, Xmm_imm8_7_4 is $(VEX_NDS) & $(VEX_L128) & $(VEX_PRE_66) & $(VEX_0F3A) & $(VEX_W0) & vexVVVV_XmmReg; byte=0x68; (XmmReg1 & ZmmReg1) ... & XmmReg2_m128; Xmm_imm8_7_4
+{
+    local result:20 = DSP_FMA4_PS_RESULT_AND_MXCSR(vexVVVV_XmmReg, XmmReg2_m128, Xmm_imm8_7_4, MXCSR);
+    XmmReg1 = result:16;
+    MXCSR = result(16);
+    ZmmReg1 = zext(XmmReg1);
+}
+
+:VFMADDPS XmmReg1, vexVVVV_XmmReg, Xmm_imm8_7_4, XmmReg2_m128 is $(VEX_NDS) & $(VEX_L128) & $(VEX_PRE_66) & $(VEX_0F3A) & $(VEX_W1) & vexVVVV_XmmReg; byte=0x68; (XmmReg1 & ZmmReg1) ... & XmmReg2_m128; Xmm_imm8_7_4
+{
+    local result:20 = DSP_FMA4_PS_RESULT_AND_MXCSR(vexVVVV_XmmReg, Xmm_imm8_7_4, XmmReg2_m128, MXCSR);
+    XmmReg1 = result:16;
+    MXCSR = result(16);
+    ZmmReg1 = zext(XmmReg1);
+}
