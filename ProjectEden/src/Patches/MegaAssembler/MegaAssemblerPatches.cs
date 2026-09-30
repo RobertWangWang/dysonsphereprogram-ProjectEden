@@ -321,6 +321,9 @@ namespace ProjectEden.Patches
                 }
             }
 
+            MegaProliferatorTiming.Repair(ref component);
+            cycles = MegaProliferatorTiming.ScaleCycles(ref component, cycles, GameMain.gameTick, factory);
+
             int[] produced = component.produced;
             bool watch = produced != null && produced.Length > 0;
             int last = watch ? produced[0] : 0;
@@ -625,6 +628,11 @@ namespace ProjectEden.Patches
                 return;
             }
 
+            // 已有分钟报表兜底：复用索引已有计数，不开启全引擎采样。
+            if (Diagnostics.CpuCostProbe.Config?.enabled != true
+                && Diagnostics.CpuCostProbe.Config?.systemTiming != true && !Diagnostics.NanosecondProbe.Enabled)
+                MegaCandidateIndex.Report();
+
             long total = ran + skipped;
             double saved = total > 0 ? 100.0 * skipped / total : 0.0;
 
@@ -635,7 +643,7 @@ namespace ProjectEden.Patches
                 + "落在性能面板的 Facilities 一项上。");
 
             ReportBatch();
-            ProjectEdenPlugin.Log.LogInfo($"均匀增产批量：本局累计合并 {MegaProliferatorBatch.Batched} 个周期，完整状态回放校验 {MegaProliferatorBatch.Checks} 次（包括曾喷涂、当前无点数的机器）。");
+            ProjectEdenPlugin.Log.LogInfo($"均匀增产批量：本局累计合并 {MegaProliferatorBatch.Batched} 个周期，其中数学合并 {MegaProliferatorBatch.MathCycles} 个周期，完整状态回放校验 {MegaProliferatorBatch.Checks} 次（包括曾喷涂、当前无点数的机器）。");
         }
 
         /// <summary>

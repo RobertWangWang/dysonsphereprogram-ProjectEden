@@ -1,6 +1,6 @@
 {
   "name": "ProjectEden",
-  "version_number": "1.13.6",
+  "version_number": "1.13.7",
   "website_url": "https://github.com/RobertWangWang/dysonsphereprogram-ProjectEden",
   "description": "扩展戴森球计划后期生产：十七座巨型建筑、十四种新矿脉、万倍速反物质产线末端每批产出50个反物质、生物矩阵每批100个、研究站直接互供矩阵，以及随货物流动的物品品质和完整化工链。支持 5000 层集装（含 preloader），默认行星半径翻倍（旧版本存档需注意兼容），参数均可通过 JSON 配置。",
   "dependencies": [

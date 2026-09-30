@@ -306,9 +306,8 @@ namespace ProjectEden.Patches
                 int can;
 
                 if (c.recipeType == ERecipeType.Smelt)
-                    // 接受条件 p + k·cnt + cnt <= 100，最紧的一次是 k = n−1 → p + n·cnt <= 100
-                    // 加法闸，MegaOutputGatePatches 刻意没动它（它本来就不卡巨型建筑）
-                    can = (100 - p) / cnt;
+                    // 与真实方法共用冶炼加法闸，包含分频和喷涂所需的缓冲。
+                    can = (MegaOutputGatePatches.SmeltLimit(100, ref c) - p) / cnt;
                 else
                     // **系数必须问 MegaOutputGatePatches 要，不能写死 9 / 19。**
                     // 那两个数是原版的，而转译器已经把巨型建筑那两档抬到了

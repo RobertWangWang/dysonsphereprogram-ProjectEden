@@ -397,6 +397,13 @@ namespace ProjectEden.Patches
 
             if (data == null) return;
 
+            if (MegaProliferatorTiming.Applies(ref component))
+            {
+                MegaProliferatorTiming.Repair(ref component);
+                if (component.replicating && component.time < data.timeSpend) component.time = data.timeSpend;
+                return;
+            }
+
             RewindExtra(ref component);
 
             // 没有付过料的周期就没有可放的——这时候什么都不做，等下一个周期
@@ -476,7 +483,8 @@ namespace ProjectEden.Patches
         {
             component.time = -component.speedOverride - 1;
 
-            RewindExtra(ref component);
+            if (MegaProliferatorTiming.Applies(ref component)) MegaProliferatorTiming.Repair(ref component);
+            else RewindExtra(ref component);
         }
 
         /// <summary>

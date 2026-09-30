@@ -45,7 +45,11 @@ static class Program
         };
     }
 
-    static void Run(PlanetTransport world, long time = 10) => Tick.Invoke(null, new object[] { world, time });
+    static void Run(PlanetTransport world, long time = 10)
+    {
+        if (world.stationPool != null) foreach (var station in world.stationPool) if (station != null) StationConfiguredSlots.Invalidate(station.storage);
+        Tick.Invoke(null, new object[] { world, time });
+    }
     static LabComponent[] Labs(PlanetTransport world) => world.factory.factorySystem.labPool;
 
     static PlanetTransport RandomWorld(int seed)
@@ -207,6 +211,23 @@ static class Program
         }
         MegaVirtualLogisticsPatches.Start = 0;
         Randomized();
+        ProjectEden.Patches.Diagnostics.CpuCostProbe.Config.indexedMegaLogistics = false;
+        Randomized();
+        ProjectEden.Patches.Diagnostics.CpuCostProbe.Config.indexedMegaLogistics = true;
+        // 稳定缺料世界：37514个站仅最后一站有相关布局，重复两轮必须复用索引。
+        world = World(new[] { Consumer(6001) });
+        world.stationPool = new StationComponent[37515]; world.stationCursor = 37515;
+        for (int id = 1; id < world.stationCursor; id++)
+            world.stationPool[id] = new StationComponent { id = id, storage = new[] { Slot(id == 37514 ? 6001 : 9999, 0, ELogisticStorage.Supply) } };
+        long Selected() => (long)typeof(MegaCandidateIndex).GetField("_selected", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+        long selected = Selected();
+        Tick.Invoke(null, new object[] { world, 10L });
+        Tick.Invoke(null, new object[] { world, 10L });
+        Equal(2, Selected() - selected, "稳定缺料候选规模");
+        world.stationPool[37514].storage[0].count = 10; // 数量变化无需使布局失效。
+        Tick.Invoke(null, new object[] { world, 10L });
+        Equal(10, Labs(world)[1].served[0], "缓存候选仍实时读取新到货");
+        Console.WriteLine("PASS: 37514站缺料两轮仅枚举2个候选；补货无需布局通知即可唤醒取料。");
         Console.WriteLine("PASS three stations: distinct matrices, research, pooled shortages and all rotation starts");
     }
 }
@@ -219,10 +240,12 @@ public struct LabComponent {
     public int[] served, produced, incServed, matrixServed;
     public static int[] matrixIds, matrixPoints;
 }
-public class FactorySystem { public LabComponent[] labPool; public int labCursor; }
-public class PlanetFactory { public FactorySystem factorySystem; }
+public struct AssemblerComponent { public int id, speed; }
+public struct EntityData { public int assemblerId; }
+public class FactorySystem { public AssemblerComponent[] assemblerPool = new AssemblerComponent[1]; public LabComponent[] labPool; public int labCursor; }
+public class PlanetFactory { public EntityData[] entityPool = new EntityData[1]; public FactorySystem factorySystem; }
 public class PlanetTransport { public PlanetFactory factory; public StationComponent[] stationPool; public int stationCursor; public void GameTick(long time) { } }
-public class StationComponent { public int id; public StationStore[] storage; }
+public class StationComponent { public int entityId; public int id; public StationStore[] storage; }
 public struct StationStore { public int itemId, count, max, inc, qua; public ELogisticStorage localLogic; }
 public enum ELogisticStorage { None, Supply, Demand }
 namespace HarmonyLib {
@@ -236,7 +259,7 @@ namespace ProjectEden.Patches {
         public int supplyIntervalTicks, supplyAssembleBatches, supplyMatrixItems, outputReserveItems;
     }
     public static class ProjectEdenPlugin { public static LabConfig LabConfig; public static Logger Log = new Logger(); }
-    public class Logger { public void LogInfo(string text) { } }
+    public class Logger { public void LogInfo(string text) { } public void LogWarning(string text) { } }
     public static class MegaVirtualLogisticsPatches { public static int Start; public static int Rotation(PlanetTransport transport) => Start; }
     public static class QualityAccess {
         public static void TakeStationQua(ref StationStore slot, int take) { slot.qua -= (int)((long)slot.qua * take / slot.count); }
@@ -246,3 +269,10 @@ namespace ProjectEden.Diagnostics { public static class TransportSplitProbe { pu
 
 public static class GameMain { public static long gameTick; public static object data = new object(); }
 namespace HarmonyLib { public class HarmonyPrefix : Attribute {} public class HarmonyFinalizer : Attribute {} }
+
+namespace ProjectEden.Patches.Diagnostics {
+ public static class CpuCostProbe { public static IndexConfig Config = new IndexConfig(); }
+ public class IndexConfig { public bool indexedMegaLogistics = true, parallelMegaIndex = true; }
+ public static class TransportSplitProbe { public static bool Armed = true; public static void Phase(string name) {} }
+}
+namespace ProjectEden { public static class MegaBuildingRegistry { public const int MegaSpeedThreshold = 1000000; } }

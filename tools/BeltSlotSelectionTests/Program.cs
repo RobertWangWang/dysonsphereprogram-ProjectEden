@@ -29,6 +29,7 @@ class Program
     }
     static void Main()
     {
+        SlotDataStoreTests.Run();
         Parallel.For(0,100000,seed=>{
             var r=new Random(seed);int length=new[]{0,1,12,31,32,33,64,80}[seed%8];var slots=new SlotData[length];
             for(int i=0;i<length;i++)slots[i]=new SlotData {dir=(IODir)r.Next(-1,4),beltId=r.Next(-1,4),counter=r.Next(),storageIdx=r.Next(8)};

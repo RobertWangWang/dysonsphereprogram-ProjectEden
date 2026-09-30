@@ -86,14 +86,20 @@ namespace ProjectEden.Patches
             PlanetFactory factory = __instance.factory;
             FactorySystem system = factory?.factorySystem;
 
-            if (system?.labPool == null) return;
+            if (system?.labPool == null || system.labCursor <= 1) return;
 
-            if (Config.logisticSupply) SupplyIn(system, __instance);
-            if (Config.logisticOutput) ShipOut(system, __instance);
+            // 只在实际需要向站点取/送料时准备；两个方向共享同一份候选及锁。
+            MegaCandidateIndex.State candidates = null;
+            try
+            {
+                if (Config.logisticSupply) SupplyIn(system, __instance, ref candidates);
+                if (Config.logisticOutput) ShipOut(system, __instance, ref candidates);
+            }
+            finally { candidates?.Release(); }
         }
 
         /// <summary>先从同星球研究站产物取料，再从物流站 Supply 格补足；剩余产物才向物流站出货。</summary>
-        private static void SupplyIn(FactorySystem system, PlanetTransport transport)
+        private static void SupplyIn(FactorySystem system, PlanetTransport transport, ref MegaCandidateIndex.State candidates)
         {
             Shortfall.Clear();
 
@@ -102,14 +108,14 @@ namespace ProjectEden.Patches
             Pool.Clear();
 
             bool any = Config.logisticOutput && TakeFromLabs(system);
-            any |= TakeFromStations(transport);
+            any |= TakeFromStations(transport, ref candidates);
             if (!any) return;
 
             Distribute(system);
         }
 
         /// <summary>出货方向：研究站的 produced[] → 物流站的储物格。</summary>
-        private static void ShipOut(FactorySystem system, PlanetTransport transport)
+        private static void ShipOut(FactorySystem system, PlanetTransport transport, ref MegaCandidateIndex.State candidates)
         {
             Output.Clear();
 
@@ -117,7 +123,7 @@ namespace ProjectEden.Patches
 
             Taken.Clear();
 
-            if (!PushToStations(transport)) return;
+            if (!PushToStations(transport, ref candidates)) return;
 
             DeductOutput(system);
         }
@@ -235,7 +241,7 @@ namespace ProjectEden.Patches
             return any;
         }
 
-        private static bool TakeFromStations(PlanetTransport transport)
+        private static bool TakeFromStations(PlanetTransport transport, ref MegaCandidateIndex.State candidates)
         {
             if (transport.stationPool == null) return false;
             var any = false;
@@ -253,9 +259,10 @@ namespace ProjectEden.Patches
             // 研究站这条是同一个形状的另外两处。
             int start = MegaVirtualLogisticsPatches.Rotation(transport);
 
-            for (var k = 0; k < transport.stationCursor - 1 && remaining > 0; k++)
+            if (candidates == null) candidates = MegaCandidateIndex.Prepare(transport, transport.factory);
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Supply, 0, Shortfall, start))
             {
-                int i = 1 + (start + k) % (transport.stationCursor - 1);
+                if (remaining == 0) break;
 
                 StationComponent station = transport.stationPool[i];
 
@@ -263,7 +270,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    foreach (int s in StationConfiguredSlots.Traverse(station.storage, station.id))
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Supply))
                     {
                         int itemId = station.storage[s].itemId;
 
@@ -439,7 +446,7 @@ namespace ProjectEden.Patches
         /// 本地需求 + 星际供应。其他研究站不需要且没有 Demand 格接收的产物堆在机内，
         /// 和原版不接分拣器是一个道理。
         /// </summary>
-        private static bool PushToStations(PlanetTransport transport)
+        private static bool PushToStations(PlanetTransport transport, ref MegaCandidateIndex.State candidates)
         {
             if (transport.stationPool == null) return false;
             var any = false;
@@ -450,9 +457,10 @@ namespace ProjectEden.Patches
             // 同上：这一趟是「有多少给多少」，固定起点会让下标最小的那个站独吞全部出货
             int start = MegaVirtualLogisticsPatches.Rotation(transport);
 
-            for (var k = 0; k < transport.stationCursor - 1 && remaining > 0; k++)
+            if (candidates == null) candidates = MegaCandidateIndex.Prepare(transport, transport.factory);
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Demand, 0, Output, start))
             {
-                int i = 1 + (start + k) % (transport.stationCursor - 1);
+                if (remaining == 0) break;
 
                 StationComponent station = transport.stationPool[i];
 
@@ -460,7 +468,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    foreach (int s in StationConfiguredSlots.Traverse(station.storage, station.id))
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Demand))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Demand) continue;
 

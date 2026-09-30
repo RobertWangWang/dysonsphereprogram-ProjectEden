@@ -4,6 +4,7 @@ class Program
 {
  static void Check(bool ok,string name){if(!ok)throw new Exception(name);}
  static void Main(){
+  MegaProliferatorTiming.Enabled=false; // 保留旧计时路径的回归对照。
   var r=new Random(927);int accepted=0;
   for(int test=0;test<40000;test++){
    int inputs=r.Next(1,5),outputs=r.Next(1,4),level=r.Next(11);
@@ -77,7 +78,7 @@ public enum ERecipeType {None,Smelt,Chemical,Refine,Assemble,Particle}
 static class ProjectEdenPlugin {public static Logger Log=new Logger();}
 class Logger {public void LogInfo(string s){} public void LogError(string s)=>throw new Exception(s);}
 namespace ProjectEden.Patches {
- static class MegaOutputGatePatches {internal static int Scale(int x,ref AssemblerComponent c)=>119;}
+ static class MegaOutputGatePatches {internal static int Scale(int x,ref AssemblerComponent c)=>119; internal static int SmeltLimit(int x,ref AssemblerComponent c)=>x;}
  static class MegaBatchSettle {internal static bool Enabled=true;internal static void DisableByAudit()=>Enabled=false;internal static void CountBatched(int n){} internal static void CountStepped(int n){} }
  static class QualityAccess {internal static bool CraftReady=false;internal static int GetQuaPending(ref AssemblerComponent c)=>0;internal static int GetQuaPendingItems(ref AssemblerComponent c)=>0;internal static int[] GetQuaServed(ref AssemblerComponent c)=>new[]{1};internal static int[] GetQuaProduced(ref AssemblerComponent c)=>null;}
  static class MegaTickProfiler {internal static long Now()=>0;internal static void AddInner(long t){} internal static void AddCalls(int n){}}
@@ -91,6 +92,7 @@ public class ItemSet {public Item Select(int id)=>new Item{prefabDesc=new Prefab
 public class Item {public Prefab prefabDesc;}
 public class Prefab {public int assemblerSpeed;}
 namespace ProjectEden.Patches {
+ static class MegaThrottle {internal static int GlobalDivider=2;internal static int DividerFor(PlanetFactory f,int id)=>GlobalDivider;internal static int GateCycles(ERecipeType t)=>120;}
  static class MegaBuildingRegistry {internal static Settings Config=new Settings();internal static int MegaSpeedThreshold=100000000;}
  class Settings {public int assemblerSpeed=100000000;public bool batchSettle=true;}
 }

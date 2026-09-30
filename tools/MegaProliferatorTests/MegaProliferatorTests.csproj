@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net472</TargetFramework><LangVersion>latest</LangVersion></PropertyGroup><ItemGroup><Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaInputTransfer.cs" Link="MegaInputTransfer.cs"/>
+<Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaProliferatorTiming.cs" Link="Timing.cs"/>
+<Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaProliferatorTimingPatches.cs" Link="TimingPatches.cs"/>
+<Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaOutputGatePatches.cs" Link="Gates.cs"/>
+<Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaProliferatorBatch.cs" Link="Batch.cs"/>
+<Compile Include="../out/MegaProliferatorTests/Original.cs" Link="Original.cs"/>
+<Reference Include="0Harmony"><HintPath>$(APPDATA)/r2modmanPlus-local/DysonSphereProgram/profiles/ProjectEden/BepInEx/core/0Harmony.dll</HintPath></Reference>
+<Reference Include="$(APPDATA)/r2modmanPlus-local/DysonSphereProgram/profiles/ProjectEden/BepInEx/core/MonoMod*.dll"/>
+<Reference Include="$(APPDATA)/r2modmanPlus-local/DysonSphereProgram/profiles/ProjectEden/BepInEx/core/Mono.Cecil*.dll"/>
+</ItemGroup></Project>

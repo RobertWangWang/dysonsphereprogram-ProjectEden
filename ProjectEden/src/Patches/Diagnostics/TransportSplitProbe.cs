@@ -262,6 +262,7 @@ namespace ProjectEden.Patches.Diagnostics
             LogisticsTickContext.Report();
             ParallelStationNeedsPatches.Report();
             StationLoopProbe.Report();
+            if (CpuCostProbe.Config?.systemTiming != true && !NanosecondProbe.Enabled) MegaCandidateIndex.Report();
         }
     }
 }

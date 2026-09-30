@@ -109,6 +109,7 @@ class Program
         if (warm.needs[0] != 777) throw new Exception("换货未生效");
         Console.WriteLine("PASS: 100000组随机白名单、32000组并发对照、空/满仓/曲速器/轮换/换货及10000次热路径零分配。");
         ConfiguredSlotsTests.Run();
+        NeedsOutputCacheTests.Run();
         // 与上一版完整前置比较，两边均包含库存锁，不把已取消的原版路径算入基线。
         var previous = (Func<StationComponent, bool>)typeof(SingleScanReference).GetMethod("UpdateNeeds_Prefix", BindingFlags.NonPublic | BindingFlags.Static).CreateDelegate(typeof(Func<StationComponent, bool>));
         var bench = new StationComponent { id = 1, storage = new StationStore[30], needs = new int[6], isStellar = true, warperMaxCount = 50 };

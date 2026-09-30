@@ -176,6 +176,11 @@ namespace ProjectEden.Patches
         internal static void Suppress(ref AssemblerComponent component)
         {
             component.time = -component.speedOverride - 1;
+            if (MegaProliferatorTiming.Applies(ref component))
+            {
+                MegaProliferatorTiming.Repair(ref component);
+                return; // 暂停不推进，也不丢失已经获得的增产余量。
+            }
 
             // **只在增产计时器真的会走的时候才压它。** extraSpeed == 0 时原版推进它的唯一
             // 一处（IL 0586 `extraTime += power * extraSpeed`）加的是 0，本来就跨不过门槛，

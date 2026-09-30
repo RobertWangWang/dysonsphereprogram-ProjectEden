@@ -7,6 +7,7 @@ class Program
     static void Check(bool v, string m) { if (!v) throw new Exception(m); }
     static void Main()
     {
+        TestSprayedFeed();
         Parallel.For(0, 10000, Compare);
         var s = Enumerable.Range(0,30).Select(i => new StationStore { itemId = i < 3 ? i+1 : 0, max=100 }).ToArray();
         Check(MegaStationPatches.HasDirectLayout(s,new[]{1,2},new[]{3}), "稳定布局未启用");
@@ -20,13 +21,13 @@ class Program
         transport=new PlanetTransport {stationPool=new[]{null,new StationComponent {id=1,entityId=1,storage=storage,workDroneDatas=new DroneData[10],energyMax=1000}}},Reactor=reactor };
     static AssemblerComponent Component(int[] req, int[] prod) => new AssemblerComponent { entityId=1,recipeId=1,
         recipeExecuteData=new RecipeExecuteData {requires=req,products=prod,requireCounts=req.Select(x=>2).ToArray()},
-        served=new int[req.Length],produced=prod.Select(x=>11).ToArray(),quaProduced=prod.Select(x=>37).ToArray() };
+        served=new int[req.Length],incServed=new int[req.Length],produced=prod.Select(x=>11).ToArray(),quaProduced=prod.Select(x=>37).ToArray() };
     static void Compare(int seed)
     {
         var r=new Random(seed); int length=new[]{5,12,30,40}[seed%4];
         int[] req=seed%7==0?new[]{1,1}:new[]{1,2}; int[] prod=seed%5==0?new[]{1,3}:new[]{3,4};
         var storage=new StationStore[length];
-        for(int i=0;i<length;i++) storage[i]=new StationStore {itemId=i<4?(i<2?req[i]:prod[i-2]):0,count=r.Next(100),inc=r.Next(400),qua=r.Next(500),max=100,localLogic=(ELogisticStorage)r.Next(3),remoteLogic=(ELogisticStorage)r.Next(3)};
+        for(int i=0;i<length;i++) storage[i]=new StationStore {itemId=i<4?(i<2?req[i]:prod[i-2]):0,count=r.Next(100),inc=0,qua=r.Next(500),max=100,localLogic=(ELogisticStorage)r.Next(3),remoteLogic=(ELogisticStorage)r.Next(3)};
         if(seed%3==0) for(int i=0;i<length;i++){storage[i].itemId=r.Next(7);storage[i].max=r.Next(2)==0?0:100;storage[i].count=r.Next(2)==0?0:storage[i].count;}
         var a=Factory((StationStore[])storage.Clone(),seed%11==0);var b=Factory((StationStore[])storage.Clone(),seed%11==0);
         var ca=Component((int[])req.Clone(),(int[])prod.Clone()); var cb=Component((int[])req.Clone(),(int[])prod.Clone());
@@ -46,6 +47,37 @@ class Program
             Check(ca.served.SequenceEqual(cb.served)&&ca.produced.SequenceEqual(cb.produced)&&ca.quaProduced.SequenceEqual(cb.quaProduced),$"buffers seed={seed} tick={tick}");
             Check(a.Dirty==b.Dirty,$"dirty seed={seed} tick={tick}");
         }
+    }
+    static void TestSprayedFeed()
+    {
+        foreach(bool fallback in new[]{false,true})
+        {
+            var storage=new StationStore[30];
+            storage[0]=new StationStore{itemId=1,count=1000,inc=4000,max=10000,localLogic=ELogisticStorage.Demand};
+            storage[1]=new StationStore{itemId=2,max=10000,localLogic=ELogisticStorage.Supply};
+            if(fallback){storage[4]=storage[0];storage[0]=new StationStore();}
+            var f=Factory(storage,false);var c=Component(new[]{1},new[]{2});
+            MegaStationPatches.UpdateStationStorage(f,ref c);
+            Check(c.served[0]==240 && c.incServed[0]==960,"station spraying did not reach assembler");
+            int slot=fallback?4:0;
+            Check(storage[slot].count==760 && storage[slot].inc==3040,"station points not debited");
+            MegaStationPatches.UpdateStationStorage(f,ref c);
+            Check(c.incServed[0]==960 && storage[slot].inc==3040,"full buffer duplicated points");
+        }
+        var random=new Random(1001);
+        for(int n=0;n<10000;n++)
+        {
+            int count=random.Next(1,1000000),take=random.Next(1,count+1),points=random.Next(0,count*10+1);
+            var source=new StationStore{count=count,inc=points};var c=Component(new[]{1},new[]{2});
+            MegaInputTransfer.Move(ref source,ref c,0,take);
+            Check((long)source.inc+c.incServed[0]==points && source.count+c.served[0]==count,"transfer conservation");
+            if(source.count>0)MegaInputTransfer.Move(ref source,ref c,0,source.count);
+            Check(source.inc==0 && c.incServed[0]==points,"drain lost remainder");
+        }
+        var large=new StationStore{count=1000000000,inc=2000000000};var target=Component(new[]{1},new[]{2});
+        MegaInputTransfer.Move(ref large,ref target,0,500000000);
+        Check(large.inc==1000000000 && target.incServed[0]==1000000000,"intermediate multiplication overflow");
+        Console.WriteLine("PASS: actual station direct/fallback feeding carries MkIII points; partial/full/zero/mixed/large transfers conserve all points.");
     }
     static void Benchmark()
     {
@@ -67,7 +99,7 @@ public struct Entity {public int stationId,protoId;}
 public class PlanetFactory {public Entity[] entityPool;public PlanetTransport transport;public bool Reactor;public int Dirty;}
 public class PlanetTransport {public StationComponent[] stationPool;}
 public class RecipeExecuteData {public int[] requires,requireCounts,products;}
-public struct AssemblerComponent {public int entityId,recipeId;public RecipeExecuteData recipeExecuteData;public int[] served,produced,quaProduced;}
+public struct AssemblerComponent {public int entityId,recipeId;public RecipeExecuteData recipeExecuteData;public int[] served,incServed,produced,quaProduced;}
 public class ItemProto {public string name="test";}
 public class ItemSet {public ItemProto Select(int id)=>new ItemProto();}
 public static class LDB {public static ItemSet items=new ItemSet();}
@@ -88,3 +120,5 @@ public static bool IsReactor(PlanetFactory f,int id)=>f.Reactor;
 public static bool ClaimSlots(StationComponent s,int length,ref long claimed){bool changed=false;for(int i=0;i<length;i++)if((claimed&(1L<<i))==0&&s.storage[i].count<=0){s.storage[i].itemId=99;s.storage[i].localLogic=ELogisticStorage.Demand;claimed|=1L<<i;changed=true;break;}return changed;}}
 }
 namespace ProjectEden.Utils {public static class QualityAccess {public static bool Ready=true;public static int GetStationQua(ref StationStore s)=>s.qua;public static void SetStationQua(ref StationStore s,int q){s.qua=q;}public static void GiveStationQua(ref StationStore s,int q){s.qua+=q;}}}
+
+public static class MegaProliferatorTiming {public static int CapacityCycles(int n)=>n;}

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
@@ -10,10 +10,12 @@ namespace ProjectEden.Patches
     {
         internal sealed class Layout
         {
+            internal long Version;
             internal uint Mask;
             internal int Count;
             internal bool Valid;
             internal long CheckedAt, NextCheck;
+
         }
         private static readonly ConditionalWeakTable<StationStore[], Layout> Layouts = new ConditionalWeakTable<StationStore[], Layout>();
         // 热路径不争抢 ConditionalWeakTable 的共享内部锁；各线程只缓存同一份布局对象的引用。
@@ -96,11 +98,17 @@ namespace ProjectEden.Patches
 
         private static Layout Create(StationStore[] storage) => new Layout();
 
+        internal static Layout Track(StationStore[] storage) => Layouts.GetValue(storage, Create);
+
         internal static void Invalidate(StationStore[] storage)
         {
-            if (storage == null || storage.Length > 32) return;
+            if (storage == null) return;
             lock (storage)
-                if (Layouts.TryGetValue(storage, out Layout layout)) layout.Valid = false;
+                if (Layouts.TryGetValue(storage, out Layout layout))
+                {
+                    layout.Valid = false;
+                    System.Threading.Interlocked.Increment(ref layout.Version);
+                }
         }
     }
 

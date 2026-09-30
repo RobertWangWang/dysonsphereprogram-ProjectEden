@@ -141,8 +141,7 @@ namespace ProjectEden.Patches
                                 qua - (int)((long)qua * take / station.storage[slot].count));
                     }
 
-                    station.storage[slot].count -= take;
-                    component.served[i] += take;
+                    MegaInputTransfer.Move(ref station.storage[slot], ref component, i, take);
                 }
 
                 // 产物：produced → 储物格
@@ -350,7 +349,8 @@ namespace ProjectEden.Patches
 
             if (cycles < 1) cycles = 1;
 
-            int need = MegaThrottle.CyclesFor(factory, entityId, cycles);
+            // 必须连喷涂加速的消耗一起备好，否则仍会在原料缓冲处卡回基准速度。
+            int need = MegaProliferatorTiming.CapacityCycles(MegaThrottle.CyclesFor(factory, entityId, cycles));
 
             return stock > need ? stock : need;
         }
@@ -450,6 +450,7 @@ namespace ProjectEden.Patches
                     if (station.storage[i].localLogic != ELogisticStorage.Demand) continue;
 
                     station.storage[i].localLogic = ELogisticStorage.Supply;
+                    StationConfiguredSlots.Invalidate(station.storage);
                     changed = true;
 
                     ReportLeftover(station.storage[i].itemId, station.storage[i].count, i);
