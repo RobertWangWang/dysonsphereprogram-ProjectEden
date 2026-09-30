@@ -38,7 +38,12 @@ namespace ProjectEden.Patches
         /// <summary>行星内物流：运输机运载量。</summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
-        private static void PlanetTransport_GameTick_Prefix() => Apply();
+        private static void PlanetTransport_GameTick_Prefix()
+        {
+            long start = Diagnostics.TransportBodyProbe.Start();
+            try { Apply(); }
+            finally { Diagnostics.TransportBodyProbe.Record(4, start); }
+        }
 
         /// <summary>星际物流：运输船运载量。</summary>
         [HarmonyPrefix]

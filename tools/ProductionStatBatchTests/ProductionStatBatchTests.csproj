@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net472</TargetFramework><LangVersion>latest</LangVersion></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../ProjectEden/src/Patches/Diagnostics/ProductionStatBuffer.cs" Link="ProductionStatBuffer.cs" />
+    <Compile Include="../../ProjectEden/src/Patches/Diagnostics/ProductionStatBatchPatches.cs" Link="ProductionStatBatchPatches.cs" />
+    <Compile Include="../../ProjectEden/src/Patches/Diagnostics/TransportBodyProbe.cs" Link="TransportBodyProbe.cs" />
+    <Compile Include="../../ProjectEden/src/Patches/Diagnostics/NeedsRefreshProbe.cs" Link="NeedsRefreshProbe.cs" />
+    <Compile Include="../../ProjectEden/src/Patches/Station/StationBeltInputPatches.cs" Link="StationBeltInputPatches.cs" />
+    <Reference Include="0Harmony"><HintPath>$(APPDATA)/r2modmanPlus-local/DysonSphereProgram/profiles/ProjectEden/BepInEx/core/0Harmony.dll</HintPath></Reference>
+    <Reference Include="$(APPDATA)/r2modmanPlus-local/DysonSphereProgram/profiles/ProjectEden/BepInEx/core/MonoMod*.dll" />
+    <Reference Include="$(APPDATA)/r2modmanPlus-local/DysonSphereProgram/profiles/ProjectEden/BepInEx/core/Mono.Cecil*.dll" />
+  <Compile Include="../../ProjectEden/src/Patches/Station/StationConfiguredSlots.cs" Link="StationConfiguredSlots.cs" /><Compile Include="../../ProjectEden/src/Patches/Station/LogisticsTickContext.cs" Link="LogisticsTickContext.cs" /><Compile Include="../../ProjectEden/src/Patches/Station/ParallelStationNeedsPatches.cs" Link="ParallelStationNeedsPatches.cs" /><Compile Include="../../ProjectEden/src/Patches/Diagnostics/StationLoopProbe.cs" Link="StationLoopProbe.cs" /></ItemGroup>
+</Project>

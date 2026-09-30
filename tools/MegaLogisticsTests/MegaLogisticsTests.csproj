@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework></PropertyGroup><ItemGroup>
+<Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaVirtualLogisticsPatches.cs" Link="MegaVirtualLogisticsPatches.cs" />
+<Compile Include="../../ProjectEden/src/Patches/Station/StationConfiguredSlots.cs" Link="StationConfiguredSlots.cs" />
+<Compile Include="../../ProjectEden/src/Patches/Station/LogisticsTickContext.cs" Link="LogisticsTickContext.cs" />
+<Compile Include="../../ProjectEden/src/Patches/MegaAssembler/MegaCandidateIndex.cs" Link="MegaCandidateIndex.cs" /></ItemGroup></Project>

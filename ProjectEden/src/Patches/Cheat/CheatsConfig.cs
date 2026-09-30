@@ -38,6 +38,9 @@ namespace ProjectEden.Patches
         /// </summary>
         public int instantBuildPerTick;
 
+        /// <summary>每渲染帧秒建软预算（毫秒），含收尾；0关闭。单座和收尾不可中断。</summary>
+        public double instantBuildFrameBudgetMs;
+
         /// <summary>
         /// 无条件建造：建造预览的<b>所有</b>拒绝条件一律放行，覆盖/重建标记也一并清掉。
         ///

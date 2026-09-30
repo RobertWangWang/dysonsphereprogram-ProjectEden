@@ -1,4 +1,4 @@
-#pragma warning disable 649 // 配置类的字段由 JSON 反序列化赋值
+﻿#pragma warning disable 649 // 配置类的字段由 JSON 反序列化赋值
 
 using System;
 using System.Collections.Concurrent;
@@ -433,6 +433,7 @@ namespace ProjectEden.Patches
             if (station.storage[slot].itemId <= 0)
             {
                 station.storage[slot].itemId = DrillBitRegistry.BitItemId;
+                StationConfiguredSlots.Invalidate(station.storage);
                 station.storage[slot].localLogic = ELogisticStorage.Demand;
                 changed = true;
             }

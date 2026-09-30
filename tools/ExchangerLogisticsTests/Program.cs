@@ -15,6 +15,7 @@ public struct PowerExchangerComponent {public int id,entityId,emptyId,fullId;pub
 class Program {
  static void Check(bool ok){if(!ok)throw new Exception("exchanger logistics regression");}
  static void Main(){
+  ParallelIndexTests.Run();
   var e=new PowerExchangerComponent{id=1,entityId=1,emptyId=10,fullId=11,targetState=1};
   var power=new PowerSystem{excPool=new[]{default(PowerExchangerComponent),e}};
   var slots=new[]{new StationStore{itemId=10,count=100,inc=400,qua=500,localLogic=ELogisticStorage.Supply},new StationStore{itemId=11,count=100,inc=400,localLogic=ELogisticStorage.Supply},new StationStore{itemId=12,count=100,localLogic=ELogisticStorage.Supply}};
@@ -76,3 +77,6 @@ class Program {
 }
 
 namespace ProjectEden.Patches.Diagnostics { internal static class TransportSplitProbe { internal static void Phase(string name) { } } }
+
+public static class ProjectEdenPlugin {public static Logger Log=new Logger();} public class Logger {public void LogInfo(string s){}public void LogWarning(string s){}}
+namespace ProjectEden.Patches.Diagnostics {internal static class CpuCostProbe {internal static TestConfig Config=new TestConfig();}internal class TestConfig {internal bool parallelExchangerIndex;}}

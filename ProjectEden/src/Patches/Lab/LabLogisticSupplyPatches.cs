@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using HarmonyLib;
@@ -239,6 +239,9 @@ namespace ProjectEden.Patches
         {
             if (transport.stationPool == null) return false;
             var any = false;
+            int remaining = 0;
+            foreach (var pair in Shortfall) if (pair.Value > 0) remaining++;
+            if (remaining == 0) return false;
 
             // **起点每 tick 轮转**，理由和虚拟物流那边一字不差（见
             // MegaVirtualLogisticsPatches.Rotation）：这一趟是「有多少拿多少、
@@ -250,7 +253,7 @@ namespace ProjectEden.Patches
             // 研究站这条是同一个形状的另外两处。
             int start = MegaVirtualLogisticsPatches.Rotation(transport);
 
-            for (var k = 0; k < transport.stationCursor - 1; k++)
+            for (var k = 0; k < transport.stationCursor - 1 && remaining > 0; k++)
             {
                 int i = 1 + (start + k) % (transport.stationCursor - 1);
 
@@ -260,7 +263,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in StationConfiguredSlots.Traverse(station.storage, station.id))
                     {
                         int itemId = station.storage[s].itemId;
 
@@ -287,6 +290,7 @@ namespace ProjectEden.Patches
                         station.storage[s].inc -= incTake;
 
                         Shortfall[itemId] = need - take;
+                        if (take == need) remaining--;
                         Add(Pool, itemId, take);
 
                         any = true;
@@ -439,11 +443,14 @@ namespace ProjectEden.Patches
         {
             if (transport.stationPool == null) return false;
             var any = false;
+            int remaining = 0;
+            foreach (var pair in Output) if (pair.Value > 0) remaining++;
+            if (remaining == 0) return false;
 
             // 同上：这一趟是「有多少给多少」，固定起点会让下标最小的那个站独吞全部出货
             int start = MegaVirtualLogisticsPatches.Rotation(transport);
 
-            for (var k = 0; k < transport.stationCursor - 1; k++)
+            for (var k = 0; k < transport.stationCursor - 1 && remaining > 0; k++)
             {
                 int i = 1 + (start + k) % (transport.stationCursor - 1);
 
@@ -453,7 +460,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in StationConfiguredSlots.Traverse(station.storage, station.id))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Demand) continue;
 
@@ -471,6 +478,7 @@ namespace ProjectEden.Patches
                         station.storage[s].count += (int)give;
 
                         Output[itemId] = available - give;
+                        if (give == available) remaining--;
                         Add(Taken, itemId, give);
 
                         any = true;

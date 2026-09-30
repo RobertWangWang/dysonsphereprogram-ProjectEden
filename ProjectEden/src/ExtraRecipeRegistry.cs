@@ -167,7 +167,7 @@ namespace ProjectEden
             var wantsAdd = entry.add != null && entry.add.Length > 0;
             var wantsSet = entry.setCount != null && entry.setCount.Length > 0;
 
-            if (!wantsAdd && !wantsSet) return;
+            if (!wantsAdd && !wantsSet && entry.timeSpend <= 0 && entry.resultCount <= 0) return;
 
             int resultId = ResolveItem(entry.result, null);
 
@@ -189,6 +189,33 @@ namespace ProjectEden
                     $"改原版配方：配方 {recipe.ID}「{recipe.Name}」的 Items/ItemCounts 形状不对，这条跳过");
 
                 return;
+            }
+
+            // PostAddData 后由 LDBTool 初始化执行数据；读档时制造台重新引用该数据。
+            // 基础耗时与指定产物数量独立配置，不改变物品种类和增产规则。
+            if (entry.timeSpend > 0 && recipe.TimeSpend != entry.timeSpend)
+            {
+                int oldTime = recipe.TimeSpend;
+                recipe.TimeSpend = entry.timeSpend;
+                ProjectEdenPlugin.Log.LogInfo(
+                    $"改原版配方：{recipe.ID}「{recipe.Name}」耗时 {oldTime / 60.0:0.##} 秒 → {recipe.TimeSpend / 60.0:0.##} 秒");
+            }
+
+            // 只修改 result 指定的产物，保留其他产物及数组形状；绝对赋值保证幂等。
+            if (entry.resultCount > 0)
+            {
+                int at = recipe.Results == null ? -1 : Array.IndexOf(recipe.Results, resultId);
+                if (at < 0 || recipe.ResultCounts == null || recipe.ResultCounts.Length != recipe.Results.Length)
+                {
+                    ProjectEdenPlugin.Log.LogError($"改原版配方：{recipe.ID}「{recipe.Name}」产物数组不匹配，跳过产出数量修改");
+                }
+                else if (recipe.ResultCounts[at] != entry.resultCount)
+                {
+                    int oldCount = recipe.ResultCounts[at];
+                    recipe.ResultCounts[at] = entry.resultCount;
+                    ProjectEdenPlugin.Log.LogInfo(
+                        $"改原版配方：{recipe.ID}「{recipe.Name}」产物 {resultId} 每批 {oldCount} → {entry.resultCount}");
+                }
             }
 
             string before = Describe(recipe);
@@ -484,6 +511,12 @@ namespace ProjectEden
         /// 而「改了个不存在的原料」和「改了但没效果」在日志里必须分得开。
         /// </summary>
         public RecipeItemEntry[] setCount;
+
+        /// <summary>result 指定产物的每批数量（绝对值）；小于等于 0 表示不改。</summary>
+        public int resultCount;
+
+        /// <summary>基础配方耗时，60 tick = 1 秒；小于等于 0 表示不改。</summary>
+        public int timeSpend;
     }
 
     [Serializable]

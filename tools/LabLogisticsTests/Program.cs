@@ -1,4 +1,4 @@
-// dotnet run --project tools/LabLogisticsTests
+﻿// dotnet run --project tools/LabLogisticsTests
 // 执行实际补丁源码；桩只提供游戏的数据容器和外部入口，不复制物流算法。
 using System;
 using System.Reflection;
@@ -47,6 +47,55 @@ static class Program
 
     static void Run(PlanetTransport world, long time = 10) => Tick.Invoke(null, new object[] { world, time });
     static LabComponent[] Labs(PlanetTransport world) => world.factory.factorySystem.labPool;
+
+    static PlanetTransport RandomWorld(int seed)
+    {
+        var r = new Random(seed);
+        var world = World(new[] { Consumer(6001,6002), Consumer(6002,6003), Producer(6001,r.Next(100)), Producer(6003,r.Next(100)), Research(r.Next(36000)) });
+        world.stationPool = new StationComponent[21]; world.stationCursor = 21;
+        for (int id = 1; id < 21; id++)
+        {
+            if (r.Next(8) == 0) continue;
+            var stores = new StationStore[id % 5 == 0 ? 40 : 30];
+            for (int j = 0; j < stores.Length; j++)
+                if (r.Next(10) <= seed % 10) stores[j] = Slot(6001 + r.Next(3), r.Next(101), (ELogisticStorage)r.Next(3));
+            world.stationPool[id] = new StationComponent { id = id, storage = stores };
+        }
+        return world;
+    }
+    static void Randomized()
+    {
+        var previous = typeof(LabLogisticReference).GetMethod("PlanetTransport_GameTick", BindingFlags.NonPublic | BindingFlags.Static);
+        for (int seed = 0; seed < 2000; seed++)
+        {
+            var a = RandomWorld(seed); var b = RandomWorld(seed);
+            MegaVirtualLogisticsPatches.Start = seed % 20;
+            GameMain.gameTick = seed * 10;
+            for (int tick = 0; tick < 3; tick++)
+            {
+                previous.Invoke(null, new object[] { b, 10L });
+                LogisticsTickContext.Begin(out var state);
+                try { Run(a); } finally { LogisticsTickContext.Finish(state); }
+                for (int id = 1; id < 21; id++)
+                    if (a.stationPool[id] != null)
+                        for (int j = 0; j < a.stationPool[id].storage.Length; j++)
+                            if (!a.stationPool[id].storage[j].Equals(b.stationPool[id].storage[j])) throw new Exception("研究站随机库存/增产/品质对照失败");
+                for (int id = 1; id < Labs(a).Length; id++)
+                {
+                    var x = Labs(a)[id]; var y = Labs(b)[id];
+                    foreach (var field in new[] { "served", "produced", "incServed", "matrixServed" })
+                    {
+                        var f = typeof(LabComponent).GetField(field);
+                        var u = (int[])f.GetValue(x); var v = (int[])f.GetValue(y);
+                        if (u == null && v == null) continue;
+                        if (u == null || v == null || !System.Linq.Enumerable.SequenceEqual(u,v)) throw new Exception("研究站随机缓冲对照失败");
+                    }
+                }
+            }
+        }
+        MegaVirtualLogisticsPatches.Start = 0;
+        Console.WriteLine("PASS: 研究站2000组世界×3轮与旧版逐字段相同，含稀疏/稠密/40格、供需模式、分配顺序及产物优先补给。");
+    }
 
     static void Main()
     {
@@ -157,6 +206,7 @@ static class Program
             Run(world); Equal(10, Labs(world)[1].served[0], "repeat tick no duplicate");
         }
         MegaVirtualLogisticsPatches.Start = 0;
+        Randomized();
         Console.WriteLine("PASS three stations: distinct matrices, research, pooled shortages and all rotation starts");
     }
 }
@@ -192,4 +242,7 @@ namespace ProjectEden.Patches {
         public static void TakeStationQua(ref StationStore slot, int take) { slot.qua -= (int)((long)slot.qua * take / slot.count); }
     }
 }
-namespace ProjectEden.Diagnostics { public static class TransportSplitProbe { public static void Phase(string name) { } } }
+namespace ProjectEden.Diagnostics { public static class TransportSplitProbe { public static bool Armed = true; public static void Phase(string name) { } } }
+
+public static class GameMain { public static long gameTick; public static object data = new object(); }
+namespace HarmonyLib { public class HarmonyPrefix : Attribute {} public class HarmonyFinalizer : Attribute {} }

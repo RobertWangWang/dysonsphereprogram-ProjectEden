@@ -206,6 +206,7 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance)
         {
+            Diagnostics.TransportSplitProbe.Phase("行星喷涂补给");
             if (Config == null || !Config.enabled) return;
 
             PlanetFactory factory = __instance?.factory;

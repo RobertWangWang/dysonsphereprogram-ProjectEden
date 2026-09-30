@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Threading;
 using HarmonyLib;
@@ -89,10 +89,10 @@ namespace ProjectEden.Patches.Diagnostics
         /// 把每个后置各自的账取出来（取完清零，和外面那两个计数同一个窗口）。
         /// 一个都没有的时候明说，别打一张空表。
         /// </summary>
-        private static string PhaseBreakdown(double freq, float window)
+        private static string PhaseBreakdown(double freq, long logicTicks)
         {
             if (Phases.IsEmpty)
-                return "\n  逐项：**一条打点都没有**——五个后置里没有任何一个调到 Phase()，"
+                return "\n  逐项：**一条打点都没有**——后置没有调到 Phase()，"
                        + "多半是打点那一行漏了，或者它们被别的东西提前 return 掉了";
 
             var rows = new System.Collections.Generic.List<(string Name, double Ms)>();
@@ -108,7 +108,7 @@ namespace ProjectEden.Patches.Diagnostics
             foreach ((string name, double ms) in rows)
                 sb.Append('\n').Append("    ").Append(name).Append('：')
                   .Append(ms.ToString("0")).Append(" ms")
-                  .Append("　每帧 ").Append((ms / (window * 60.0)).ToString("0.000")).Append(" ms");
+                  .Append("　每逻辑 tick 累计 ").Append(logicTicks > 0 ? (ms / logicTicks).ToString("0.000") + " ms" : "不可用");
 
             return sb.ToString();
         }
@@ -118,6 +118,7 @@ namespace ProjectEden.Patches.Diagnostics
         private static long _calls;
 
         private static float _windowStart;
+        private static long _windowGameTick;
         private static int _entered;
 
         internal static bool Armed => CpuCostProbe.Config != null && CpuCostProbe.Config.enabled;
@@ -196,6 +197,17 @@ namespace ProjectEden.Patches.Diagnostics
             if (Interlocked.Exchange(ref _entered, 1) == 0)
             {
                 _windowStart = now;
+                _windowGameTick = GameMain.gameTick;
+                // 第一份报表只建立基线，不能把进入窗口前的累计量算进下一窗口。
+                Interlocked.Exchange(ref _vanillaTicks, 0);
+                Interlocked.Exchange(ref _oursTicks, 0);
+                Interlocked.Exchange(ref _calls, 0);
+                Phases.Clear();
+                TransportBodyProbe.Report(0);
+                NeedsRefreshProbe.Report();
+                LogisticsTickContext.Report();
+                ParallelStationNeedsPatches.Report();
+                StationLoopProbe.Report();
 
                 ProjectEdenPlugin.Log.LogInfo(
                     "物流运输·劈半：哨兵已就位（Priority.First 的前置＋后置夹住原版本体，"
@@ -209,6 +221,8 @@ namespace ProjectEden.Patches.Diagnostics
             long calls = Interlocked.Exchange(ref _calls, 0);
 
             float window = now - _windowStart;
+            long logicTicks = GameMain.gameTick - _windowGameTick;
+            _windowGameTick = GameMain.gameTick;
 
             _windowStart = now;
 
@@ -237,13 +251,17 @@ namespace ProjectEden.Patches.Diagnostics
                 : "";
 
             ProjectEdenPlugin.Log.LogInfo(
-                $"物流运输·劈半（过去 {window:0} 秒，{calls} 次星球 tick）："
-                + $"原版本体 {vanillaMs:0} ms　本 mod 的六个后置 {oursMs:0} ms"
+                $"物流运输·劈半（过去 {window:0} 秒，{logicTicks} 个逻辑 tick，{calls} 次星球 tick）："
+                + $"原版本体及前置 {vanillaMs:0} ms　后置合计 {oursMs:0} ms"
                 + $"　＝ {(total > 0 ? ours / (double)(vanilla + ours) * 100.0 : 0):0.0}% 是我们的。"
                 + $"　折算相当于 {threads:0.0} 个线程满载{warn}"
-                + "\n  **注意 LogisticsGlobalPatches 是前置不是后置**，所以它的开销算在「原版本体」那一半里，"
-                + "后置只有五个。"
-                + PhaseBreakdown(freq, window));
+                + "\n  前半包含 LogisticsGlobalPatches 等前置；后半按打点拆分。每逻辑 tick 为所有星球线程累计，不是主线程帧时，也不能与重叠任务直接相加。"
+                + PhaseBreakdown(freq, logicTicks));
+            TransportBodyProbe.Report(logicTicks);
+            NeedsRefreshProbe.Report();
+            LogisticsTickContext.Report();
+            ParallelStationNeedsPatches.Report();
+            StationLoopProbe.Report();
         }
     }
 }

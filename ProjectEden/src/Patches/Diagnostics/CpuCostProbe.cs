@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Threading;
 using HarmonyLib;
 using UnityEngine;
@@ -362,6 +362,12 @@ namespace ProjectEden.Patches.Diagnostics
     {
         public bool enabled = false;
         public bool systemTiming = false;
+        public bool batchProductionStatistics = true;
+        public bool parallelStationNeeds = false;
+        public bool balanceProductionWorkers = false;
+        public bool parallelExchangerIndex = false;
+        public bool indexedMegaLogistics = false;
+        public bool parallelMegaIndex = false;
         public bool nanoTiming = false;
         public float perfProbeSeconds = 20f;
 

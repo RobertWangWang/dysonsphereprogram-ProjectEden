@@ -40,6 +40,7 @@ namespace ProjectEden.Patches
             }
         }
         [ThreadStatic] private static Index _index;
+        [ThreadStatic] private static List<ParallelExchangerIndex.Candidate> _candidates;
 
         private static void Add(Dictionary<int, Slots> index, int item, StationStore[] storage, int slot)
         {
@@ -49,6 +50,18 @@ namespace ProjectEden.Patches
 
         private static void BuildIndex(PlanetTransport transport, Index index, long time)
         {
+            var candidates = _candidates ?? (_candidates = new List<ParallelExchangerIndex.Candidate>());
+            try
+            {
+                if (ParallelExchangerIndex.TryBuild(transport, index.Wanted, time, candidates))
+                {
+                    foreach (var candidate in candidates)
+                        Add(candidate.Logic == ELogisticStorage.Supply ? index.Supply : index.Demand,
+                            candidate.Item, candidate.Storage, candidate.Slot);
+                    return;
+                }
+            }
+            finally { candidates.Clear(); }
             int stations = Math.Min(transport.stationCursor, transport.stationPool.Length) - 1;
             if (stations <= 0) return;
             int start = (int)(time % stations);

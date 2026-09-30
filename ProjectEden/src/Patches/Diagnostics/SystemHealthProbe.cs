@@ -67,6 +67,11 @@ namespace ProjectEden.Patches.Diagnostics
                     + $"托管堆 {GC.GetTotalMemory(false)/1048576.0:0.0}MiB，工作集 {(process.WorkingSet64 > 0 ? (process.WorkingSet64/1048576.0).ToString("0.0") + "MiB" : "不可用")}，"
                     + $"进程CPU {(cpu-_cpu)/seconds*100/Environment.ProcessorCount:0.0}%（全逻辑核心归一化）。");
             }
+            ProductionStatBatchPatches.Report();
+            ProductionSchedulingPatches.Report();
+            SupplyIndexProbe.Report();
+            ParallelExchangerIndex.Report();
+            MegaCandidateIndex.Report();
             Reset(now);
         }
 

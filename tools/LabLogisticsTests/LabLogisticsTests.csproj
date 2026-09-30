@@ -6,5 +6,5 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(LabPatchSource)" Link="LabLogisticSupplyPatches.cs" />
-  </ItemGroup>
+  <Compile Include="../../ProjectEden/src/Patches/Station/LogisticsTickContext.cs" Link="LogisticsTickContext.cs" /><Compile Include="../../ProjectEden/src/Patches/Station/StationConfiguredSlots.cs" Link="StationConfiguredSlots.cs" /></ItemGroup>
 </Project>

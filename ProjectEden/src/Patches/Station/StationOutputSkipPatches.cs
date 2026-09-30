@@ -51,8 +51,6 @@ namespace ProjectEden.Patches
     [HarmonyPatch]
     internal static class StationOutputSkipPatches
     {
-        private static long _skipped;
-        private static long _ran;
 
         /// <summary>
         /// <b>前置返回 false = 跳过原版。</b>
@@ -61,7 +59,7 @@ namespace ProjectEden.Patches
         /// preloader 加宽是另一回事，而按名字注入是本仓库记过三次的整站崩溃陷阱。
         ///
         /// 这条跑在 <c>_station_output_parallel</c> 上，<b>并行且按星球分线程</b>，
-        /// 所以计数只能用 <c>Interlocked</c>，而且绝不在这里碰 Unity 的任何 API。
+        /// 逐站计数使用线程私有缓冲，阶段结束再用 Interlocked 合并，不在这里碰 Unity API。
         /// </summary>
         [HarmonyPrefix]
         [HarmonyPatch(typeof(StationComponent), nameof(StationComponent.UpdateOutputSlots))]
@@ -72,7 +70,7 @@ namespace ProjectEden.Patches
             // 连槽位数组都没有 → 更没有输出口。原版进去也是一圈空转。
             if (slots == null || slots.Length == 0)
             {
-                System.Threading.Interlocked.Increment(ref _skipped);
+                Diagnostics.StationDiagnosticCounters.Add(Diagnostics.StationDiagnosticCounters.OutputSkipped);
 
                 return false;
             }
@@ -84,12 +82,12 @@ namespace ProjectEden.Patches
                 if (slots[i].dir != IODir.Output) continue;
                 if (slots[i].beltId == 0) continue;
 
-                System.Threading.Interlocked.Increment(ref _ran);
+                Diagnostics.StationDiagnosticCounters.Add(Diagnostics.StationDiagnosticCounters.OutputRan);
 
                 return true;
             }
 
-            System.Threading.Interlocked.Increment(ref _skipped);
+            Diagnostics.StationDiagnosticCounters.Add(Diagnostics.StationDiagnosticCounters.OutputSkipped);
 
             return false;
         }
@@ -122,16 +120,16 @@ namespace ProjectEden.Patches
             if (_nextReport <= 0f)
             {
                 _nextReport = now + 60f;
-                _lastSkipped = System.Threading.Interlocked.Read(ref _skipped);
-                _lastRan = System.Threading.Interlocked.Read(ref _ran);
+                _lastSkipped = Diagnostics.StationDiagnosticCounters.Read(Diagnostics.StationDiagnosticCounters.OutputSkipped);
+                _lastRan = Diagnostics.StationDiagnosticCounters.Read(Diagnostics.StationDiagnosticCounters.OutputRan);
 
                 return;
             }
 
             _nextReport = now + 60f;
 
-            long skipNow = System.Threading.Interlocked.Read(ref _skipped);
-            long ranNow = System.Threading.Interlocked.Read(ref _ran);
+            long skipNow = Diagnostics.StationDiagnosticCounters.Read(Diagnostics.StationDiagnosticCounters.OutputSkipped);
+            long ranNow = Diagnostics.StationDiagnosticCounters.Read(Diagnostics.StationDiagnosticCounters.OutputRan);
 
             long skipped = skipNow - _lastSkipped;
             long ran = ranNow - _lastRan;

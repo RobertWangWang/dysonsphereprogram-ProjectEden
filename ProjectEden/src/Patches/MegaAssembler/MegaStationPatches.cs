@@ -100,8 +100,7 @@ namespace ProjectEden.Patches
             // 「只在真正变化时调用」这条原本的守卫是对的，却不够——新建的巨型建筑在随后几个
             // tick 里布局会反复变，实测 24.5 秒里被调了 42 次、合计 3.7 秒，占 15% 的 CPU。
             // 改成标脏，由 StationTrafficCoalescer 限频冲刷（见那里的说明）。
-            if (SyncStorageLayout(factory, station, requires, products))
-                StationTrafficCoalescer.MarkDirty(factory);
+            bool layoutChanged = false;
 
             // **循环外算一次。** 它读三个配置字段，而这个循环是每台巨型建筑每 tick
             // 每种原料跑一遍——上一版把它写在循环里，等于把三次配置查表乘上了
@@ -110,10 +109,15 @@ namespace ProjectEden.Patches
 
             lock (station.storage)
             {
+                // 在同一库存锁内验证并使用位置；不缓存库存、配方或玩家的物流方向。
+                bool direct = !CatalystBedPatches.IsReactor(factory, station.entityId)
+                    && HasDirectLayout(station.storage, requires, products);
+                if (!direct) layoutChanged = SyncStorageLayout(factory, station, requires, products);
+
                 // 原料：储物格 → served
                 for (var i = 0; i < requires.Length; i++)
                 {
-                    int slot = FindSlot(station, requires[i], ELogisticStorage.Demand);
+                    int slot = direct ? i : FindSlot(station, requires[i], ELogisticStorage.Demand);
 
                     if (slot < 0) continue;
 
@@ -148,7 +152,7 @@ namespace ProjectEden.Patches
 
                     if (produced <= 0) continue;
 
-                    int slot = FindSlot(station, products[i], ELogisticStorage.Supply);
+                    int slot = direct ? requires.Length + i : FindSlot(station, products[i], ELogisticStorage.Supply);
 
                     if (slot < 0) continue;
 
@@ -174,6 +178,27 @@ namespace ProjectEden.Patches
                         component.recipeId, give);
                 }
             }
+            // 配对表通知放在库存锁外，避免扩大锁的依赖范围。
+            if (layoutChanged) StationTrafficCoalescer.MarkDirty(factory);
+        }
+
+        // 常见稳定布局：前面按配方放原料和产物，其余无物品标签。
+        // 同物进出/重复物品走原查找，以保留按方向优先匹配的规则。
+        internal static bool HasDirectLayout(StationStore[] storage, int[] requires, int[] products)
+        {
+            int used = requires.Length + products.Length;
+            if (used >= 63 || used > storage.Length || used > MaxSafeStorageKinds)
+                return false;
+            for (int i = 0; i < used; i++)
+            {
+                int item = i < requires.Length ? requires[i] : products[i - requires.Length];
+                if (item <= 0 || storage[i].itemId != item || storage[i].max <= 0) return false;
+                for (int j = 0; j < i; j++)
+                    if (storage[j].itemId == item) return false;
+            }
+            for (int i = used; i < storage.Length; i++)
+                if (storage[i].itemId != 0) return false;
+            return true;
         }
 
         /// <summary>
@@ -239,7 +264,8 @@ namespace ProjectEden.Patches
         {
             int protoId = factory.entityPool[entityId].protoId;
 
-            if (!Reported.TryAdd(protoId, 0)) return;
+            // 已报告的类型只读查询，避免每台每tick进入TryAdd的写入锁。
+            if (Reported.ContainsKey(protoId) || !Reported.TryAdd(protoId, 0)) return;
 
             int slots = station.storage?.Length ?? 0;
             int droneCapacity = station.workDroneDatas?.Length ?? 0;
@@ -432,6 +458,7 @@ namespace ProjectEden.Patches
                 }
 
                 station.storage[i].itemId = 0;
+                StationConfiguredSlots.Invalidate(station.storage);
                 station.storage[i].localLogic = ELogisticStorage.None;
                 station.storage[i].remoteLogic = ELogisticStorage.None;
                 changed = true;
@@ -501,6 +528,7 @@ namespace ProjectEden.Patches
             bool fresh = station.storage[index].itemId != itemId;
 
             station.storage[index].itemId = itemId;
+            if (fresh) StationConfiguredSlots.Invalidate(station.storage);
 
             if (fresh)
             {

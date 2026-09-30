@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading;
 using HarmonyLib;
@@ -21,7 +21,8 @@ namespace ProjectEden.Patches
     ///
     /// <b>六趟扫描，不是「每个巨型站扫一遍别的站」</b>：后者是 mega × stations × 格位²，
     /// 30 格的站一多就爆了。这里每个方向都是「汇总 → 走一遍站点 → 回填」三趟，
-    /// 整体 O(stations × 格位)，容器全部复用。
+    /// 原扫描整体 O(stations × 格位)，临时容器复用。候选索引开启后，
+    /// 每轮统一校验布局并只更新变化映射，六阶段复用相关站点/格位候选。
     ///
     /// <b>增产点数必须跟着物品一起搬。</b> <c>StationStore.inc</c> 存的是<b>整格</b>的点数总和，
     /// 所以只扣 <c>count</c> 不扣 <c>inc</c> 的话，源头剩下的货就顶着原来整格的点数
@@ -219,9 +220,14 @@ namespace ProjectEden.Patches
             if (factory?.entityPool == null || __instance.stationPool == null) return;
             if (factory.factorySystem?.assemblerPool == null) return;
 
-            Inbound(__instance, factory);
-            FlushSpread();
-            Outbound(__instance, factory);
+            var candidates = MegaCandidateIndex.Prepare(__instance, factory);
+            try
+            {
+                Inbound(__instance, factory, candidates);
+                FlushSpread();
+                Outbound(__instance, factory, candidates);
+            }
+            finally { candidates?.Release(); }
 
             // **一个窗口只报一次，不是每颗星球报一次。**
             //
@@ -239,7 +245,7 @@ namespace ProjectEden.Patches
 
         // ── 入库：别的站的 Supply → 巨型建筑的 Demand ─────────
 
-        private static void Inbound(PlanetTransport transport, PlanetFactory factory)
+        private static void Inbound(PlanetTransport transport, PlanetFactory factory, MegaCandidateIndex.State candidates)
         {
             long target = Config.virtualStockPerSlot > 0 ? Config.virtualStockPerSlot : 100000;
 
@@ -248,7 +254,7 @@ namespace ProjectEden.Patches
             var any = false;
 
             // 一趟：汇总缺口
-            for (var i = 1; i < transport.stationCursor; i++)
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Demand, 1, null, 0))
             {
                 StationComponent station = transport.stationPool[i];
 
@@ -256,7 +262,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Demand))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Demand) continue;
 
@@ -291,10 +297,11 @@ namespace ProjectEden.Patches
             // 玩家报的原话是「很多巨型建筑只找一个大型采矿机取货」。
             // 总量一直是对的，所以它不缺货、不报错，只是分布错了。
             int start = Rotation(transport);
+            int remainingNeeds = Need.Count;
 
-            for (var k = 0; k < transport.stationCursor - 1; k++)
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Supply, 0, Need, start))
             {
-                int i = 1 + (start + k) % (transport.stationCursor - 1);
+                if (remainingNeeds <= 0) break;
 
                 StationComponent station = transport.stationPool[i];
 
@@ -302,7 +309,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Supply))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Supply) continue;
 
@@ -337,6 +344,7 @@ namespace ProjectEden.Patches
                         station.storage[s].inc -= (int)incTake;
 
                         Need[itemId] = need - take;
+                        if (take == need) remainingNeeds--;
                         NoteSupplier(itemId);
                         Add(Pool, itemId, take);
                         Add(PoolInc, itemId, incTake);
@@ -353,9 +361,10 @@ namespace ProjectEden.Patches
             //
             // 同样要轮转：这一趟是「池子里有多少给多少」，固定起点会让下标最小的那座
             // 巨型建筑一直吃到满，后面的要等它满了才分得到。
-            for (var k = 0; k < transport.stationCursor - 1; k++)
+            int remainingPool = Pool.Count;
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Demand, 1, Pool, start))
             {
-                int i = 1 + (start + k) % (transport.stationCursor - 1);
+                if (remainingPool <= 0) break;
 
                 StationComponent station = transport.stationPool[i];
 
@@ -363,7 +372,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Demand))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Demand) continue;
 
@@ -389,6 +398,7 @@ namespace ProjectEden.Patches
                                 (int)(QualityAccess.GetStationQua(ref station.storage[s]) + quaGive));
 
                         Pool[itemId] = available - give;
+                        if (give == available) remainingPool--;
                     }
                 }
             }
@@ -398,7 +408,7 @@ namespace ProjectEden.Patches
 
         // ── 出库：巨型建筑的 Supply → 别的站的 Demand ─────────
 
-        private static void Outbound(PlanetTransport transport, PlanetFactory factory)
+        private static void Outbound(PlanetTransport transport, PlanetFactory factory, MegaCandidateIndex.State candidates)
         {
             Avail.Clear();
             AvailInc.Clear();
@@ -407,7 +417,7 @@ namespace ProjectEden.Patches
             var any = false;
 
             // 一趟：汇总可出货量（先不扣，等对方真收下再扣）
-            for (var i = 1; i < transport.stationCursor; i++)
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Supply, 1, null, 0))
             {
                 StationComponent station = transport.stationPool[i];
 
@@ -415,7 +425,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Supply))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Supply) continue;
 
@@ -450,10 +460,11 @@ namespace ProjectEden.Patches
             // （另外三趟不用动，而这一点是数过的，不是看着像：一趟和这个方法的三趟
             // 都是**求和 / 按记账回扣**，和访问顺序无关。）
             int start = Rotation(transport);
+            int remainingAvail = Avail.Count;
 
-            for (var k = 0; k < transport.stationCursor - 1; k++)
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Demand, 2, Avail, start))
             {
-                int i = 1 + (start + k) % (transport.stationCursor - 1);
+                if (remainingAvail <= 0) break;
 
                 StationComponent station = transport.stationPool[i];
 
@@ -462,7 +473,7 @@ namespace ProjectEden.Patches
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Demand))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Demand) continue;
 
@@ -487,6 +498,7 @@ namespace ProjectEden.Patches
                                 (int)(QualityAccess.GetStationQua(ref station.storage[s]) + quaGive));
 
                         Avail[itemId] = available - give;
+                        if (give == available) remainingAvail--;
                         Add(Taken, itemId, give);
                         Add(TakenInc, itemId, incGive);
                         Add(TakenQua, itemId, quaGive);
@@ -499,15 +511,17 @@ namespace ProjectEden.Patches
             if (!moved) return;
 
             // 三趟：把对方收下的量从巨型建筑的 Supply 格扣掉
-            for (var i = 1; i < transport.stationCursor; i++)
+            int remainingTaken = Taken.Count;
+            foreach (int i in MegaCandidateIndex.Select(candidates, transport, ELogisticStorage.Supply, 1, Taken, 0))
             {
+                if (remainingTaken <= 0) break;
                 StationComponent station = transport.stationPool[i];
 
                 if (!IsMegaStation(station, i, factory)) continue;
 
                 lock (station.storage)
                 {
-                    for (var s = 0; s < station.storage.Length; s++)
+                    foreach (int s in MegaCandidateIndex.Slots(candidates, i, station, ELogisticStorage.Supply))
                     {
                         if (station.storage[s].localLogic != ELogisticStorage.Supply) continue;
 
@@ -539,6 +553,7 @@ namespace ProjectEden.Patches
                         station.storage[s].inc -= (int)incPay;
 
                         Taken[itemId] = owed - pay;
+                        if (pay == owed) remainingTaken--;
                     }
                 }
             }
@@ -607,7 +622,7 @@ namespace ProjectEden.Patches
             if (n <= 1) return 0;
 
             // gameTick 是 long，乘 1009 在十亿量级仍然远不溢出
-            return (int)(GameMain.gameTick * 1009 % n);
+            return (int)(LogisticsTickContext.Tick * 1009 % n);
         }
 
         /// <summary>这个站点是不是挂在巨型建筑上的。</summary>

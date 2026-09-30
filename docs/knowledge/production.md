@@ -38,7 +38,7 @@
 
 全局分频 G 同时乘到周期预算和分频上，因此在上述条件下抵消。它改变批量大小和访问频率，不直接减半产能。对短周期或少量采样窗口，错帧和批量会造成瞬时波动。
 
-反物质四座当前已取消独立节流和黑洞加成，跟随全局 `cyclesPerTick=60`、`globalTickDivider=2`，即轮到时预算120周期。满供料、满供电、出货畅通且无增产时，每逻辑分钟216000周期；末端每周期10个反物质，即2160000个/逻辑分钟。四座主线配比1:1:1:1。视界蒸发炉每周期消耗1只满充电浆蓄能柜，因此供柜速率也是实际瓶颈之一。
+反物质四座当前已取消独立节流和黑洞加成，跟随全局 `cyclesPerTick=60`、`globalTickDivider=2`，即轮到时预算120周期。满供料、满供电、出货畅通且无增产时，每逻辑分钟216000周期；末端每周期50个反物质，即10800000个/逻辑分钟。四座主线配比1:1:1:1。视界蒸发炉每周期消耗1只满充电浆蓄能柜，因此供柜速率也是实际瓶颈之一。
 
 上式是配置理论值。缺料、供电不足、输出满、物流节流、增产、游戏逻辑帧率和其他补丁都需要另行核对。配方显示秒数本身不能代表 mod 运行时产能。
 
@@ -64,3 +64,15 @@ powershell -ExecutionPolicy Bypass -File tools/check_output_gate.ps1
 
 
 旧存档修复：MegaTick 原先在 ApplySpeed 之前按组件速度返回，旧低速字段无法自愈；现在低速组件先核对物品原型的 assemblerSpeed，只有巨型原型才继续 ApplySpeed。AntimatterLineProbe 在 systemTiming 下每20秒输出本地机器库存/供电/实测速率，实际用户瓶颈需结合重启后的日志确认。离线测试覆盖四类配方的旧批量路径满载吞吐及低速入口。
+
+## 巨型建筑储物格同步快速路径
+
+`MegaStationPatches.UpdateStationStorage` 的耗时包括布局管理及双向搬运，并非配方结算本身。常见的连续、唯一物品布局由 `HasDirectLayout` 在库存锁内逐次验证，直接定位输入输出格；后方任何物品标签、容量异常、重复物品或催化反应器均回退原布局逻辑。不延迟旧配方货物取空后的清理，也不缓存库存。`tools/ProductionStorageTests` 保存改动前完整实现，用同一组动态操作逐字段对照。离线微基准不能替代游戏探针。
+
+## 巨型建筑传送带槽位选择
+
+`BeltSlotSelection.Prepare` 每次扫描实时方向和beltId，清理无方向的残留beltId/counter，然后按升序输出有效槽位索引，保持先输出后输入。不改变接带/拆带生效时间，也不缓存科技等级；只在有输出连接时读取集装科技。原有I/O方法体保留，32格以上使用线性选择。`tools/BeltSlotSelectionTests` 对照旧双循环的访问顺序、连接变化与残留清理。
+
+## 组装机并行任务均衡试验
+
+原版 `_assembler_parallel` 已按建筑分散到工作线程，入口批大小为24+线程数、保护范围3、Redispatch尝试上限2。`ScatterTaskContext` 初始按数量分配，Redispatch在锁内拆分剩余区间，因此数量相近不代表巨型建筑计算成本相近。实验开关仅调整为批大小16/尝试8，保持原任务所有权与屏障。`tools/ProductionSchedulingTests` 依赖本机知识库generated中的ScatterTaskContext、ScatterThreadContext、SimpleLock反编译缓存；测试工作体是模拟负载。接手成功不等于FPS提升，需要同时比较实际生产与整体耗时。

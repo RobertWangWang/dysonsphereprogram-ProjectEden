@@ -1,4 +1,4 @@
-{
+﻿{
   "//": "CPU 分项耗时探针。把「统计面板 → 性能测试」那张分项表直接打进日志，省掉人肉抄十行毫秒数再贴回来。",
 
   "//为什么单独一个文件": "JsonHelper 的磁盘覆盖是**整份文件**的。把这个开发开关塞进 stations.json，就意味着为了翻一个 bool 而遮住整份物流配置——槽位容量、充能功率、集装层数全部定格在覆盖那一刻，之后对内嵌那份的每一次修改都静默失效。cargoprobe.json 单开一份就是同一个理由。",
@@ -8,6 +8,18 @@
   "//单位": "timeCostsAve 里存的是「计数器差 ÷ performanceFrequency」（SummarizeCpuStats @0137–013E），而 performanceFrequency = PerformanceCounter.Frequency（BeginRenderingFrame @0000–0006），即每秒计数——所以那个 Double 的单位是**秒**，×1000 才是面板上的毫秒。这一条是从 IL 读出来的，不是推的：本仓库的 MegaTickProfiler 曾经拿 Stopwatch.Frequency 当真，报出过 12 倍的假数。",
 
   "enabled": false,
+  "//batchProductionStatistics": "组装机与研究站并行生产使用线程私有统计增量，方法返回前按原共享锁合并。默认开启，不依赖探针 enabled。设 false 并重启可做性能对照。",
+  "batchProductionStatistics": true,
+  "//parallelStationNeeds": "实验性需求并行，仅运输阶段站点池达到2048时使用最多3个辅助线程，调用线程参与，256站一批；默认关闭。设true并重启试验，false回退串行；不改变入库阶段原有并行。",
+  "parallelStationNeeds": false,
+  "//balanceProductionWorkers": "实验性组装机任务均衡：至少4线程及4096任务，批大小16、接手上限8，复用原版线程；false恢复原参数。",
+  "balanceProductionWorkers": false,
+  "//parallelExchangerIndex": "实验性储能柜索引并行：至少2048站点范围，2辅助线程加调用线程，按轮转顺序合并；实际搬运仍串行，false恢复串行建索引。",
+  "parallelExchangerIndex": false,
+  "//indexedMegaLogistics": "巨型物流按物品/方向复用候选站点，每轮校验布局，仅变更站点更新索引；false回到原六遍扫描。",
+  "indexedMegaLogistics": false,
+  "//parallelMegaIndex": "候选索引校验/快照构建在至少2048站位时使用调用线程和2辅助线程；争用时串行，搬货仍串行。",
+  "parallelMegaIndex": false,
   "//systemTiming": "低频系统报告：FPS、UPS、慢帧、GC、进程 CPU 与内存。每帧只记时间，按 perfProbeSeconds 汇总；不强制 GC。",
   "systemTiming": false,
   "//nanoTiming": "纳秒生产分段：每线程每64台次抽1次，输出实测次数/总计/均值/最大值，不外推。工厂生产和矩阵方法全量计时；记录>=100ms慢调用、>=1s长帧，以及存档/蓝图事件。计时单位ns不代表1ns精度。",

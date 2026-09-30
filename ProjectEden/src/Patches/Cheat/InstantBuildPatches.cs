@@ -47,6 +47,7 @@ namespace ProjectEden.Patches
         private static bool On => Config != null && Config.enabled && Config.instantBuild;
 
         private static int _logged;
+        private static readonly BuildFrameBudget FrameBudget = new BuildFrameBudget();
 
         [HarmonyPostfix]
         [HarmonyPatch(typeof(ConstructionSystem), nameof(ConstructionSystem.ExecuteFastBuild))]
@@ -73,6 +74,10 @@ namespace ProjectEden.Patches
 
             if (player == null || player.package == null) return;
 
+            if (!FrameBudget.Begin(UnityEngine.Time.frameCount, Stopwatch.GetTimestamp(),
+                    Config.instantBuildFrameBudgetMs, Stopwatch.Frequency)) return;
+            try
+            {
             // 品质要按 (星球, 桩号) 记，而 Pay 只拿得到桩号——在这里把星球号放好。
             // 上面那三道判定已经保证了「只处理玩家当前所在、且已加载的那颗星球」，
             // 所以这一局里它不会中途换值。
@@ -84,14 +89,19 @@ namespace ProjectEden.Patches
 
             var built = 0;
             var batching = false;
+            BatchPowerConsumerRefresh.Scope powerRefresh = null;
             var needPay = 0;
             var freeBuilt = 0;
 
             _batchBegan = Stopwatch.GetTimestamp();
 
+            try
+            {
             // 和 FastBuild 一样倒着走：新放下的排在后面，先建新的手感才对
             for (int i = factory.prebuildCursor - 1; i > 0 && built < budget; i--)
             {
+                // 至少允许第一座尝试完成；之后在下一座扣料前检查预算。
+                if (built > 0 && FrameBudget.Expired(Stopwatch.GetTimestamp())) break;
                 if (pool[i].id != i || pool[i].isDestroyed) continue;
 
                 // **「这一座要不要我付账」是本轮唯一还没定的事实，所以数出来。**
@@ -114,6 +124,7 @@ namespace ProjectEden.Patches
                     PlanetFactory.batchBuild = true;
 
                     factory.BeginFlattenTerrain();
+                    powerRefresh = BatchPowerConsumerRefresh.Begin(factory.planet.factoryModel);
 
                     // 已经飞出去的机器人得先召回，否则它们会追着马上就要消失的预建物跑
                     long recycleBegan = Stopwatch.GetTimestamp();
@@ -132,6 +143,9 @@ namespace ProjectEden.Patches
                 built++;
             }
 
+            }
+            finally
+            {
             // <b>收尾整个包在 if 里，而报告放在它后面、无条件跑。</b>
             // 上一版是 `if (!batching) return;` 之后才报，结果玩家那一局「使劲造」了几千次、
             // 日志里一行自测都没有——因为料不够，一座都没建成，方法在这里就返回了。
@@ -143,7 +157,13 @@ namespace ProjectEden.Patches
             {
                 long finishBegan = Stopwatch.GetTimestamp();
 
-                Finish(system, factory);
+                try { powerRefresh?.Dispose(); }
+                finally
+                {
+                    // 在批次回调之前发布完整显示数据，即使建造异常也收尾并恢复batchBuild。
+                    try { Finish(system, factory); }
+                    finally { PlanetFactory.batchBuild = false; }
+                }
 
                 _finishTicks += Stopwatch.GetTimestamp() - finishBegan;
 
@@ -154,7 +174,14 @@ namespace ProjectEden.Patches
                         + "**后一个数不是 0，就说明扣料不在秒完成这条路上**，品质得去扣料的真正那一处接。");
             }
 
+            }
             NoteBatchCost(built, budget, factory.prebuildCount);
+            }
+            finally
+            {
+                // 包括本批收尾和异常耗时；原建造异常继续向上传播。
+                FrameBudget.Finish(Stopwatch.GetTimestamp());
+            }
         }
 
         /// <summary>批量建造的收尾：发布地形（只在真的改了地形时）+ 照抄 FastBuild 的四步。</summary>
@@ -293,7 +320,7 @@ namespace ProjectEden.Patches
                     $"{budget} 个，而付不起料的会原样留着交回给建设机器人——" +
                     "**原版每 tick 都要把这一堆重扫一遍派机器人**，所以性能面板上「建设系统」和" +
                     "「伊卡洛斯」两栏的开销跟这个数成正比（那两栏不是本 mod 的代码）。" +
-                    "堆积不消退就是料不够：先补料，或者别一直点。");
+                    "积压可能来自缺料或每帧时间预算限速；先检查供料，再等待后续帧完成。");
 
             long ticks = Stopwatch.GetTimestamp() - _batchBegan;
 
@@ -339,7 +366,7 @@ namespace ProjectEden.Patches
                 ProjectEdenPlugin.Log.LogInfo(
                     $"作弊·建造秒完成·自测：过去 {wall:0.#} 秒里结算了 {_batchCount} 次、共建 {_batchBuilt} 座，" +
                     $"**最坏的一次 {worstMs:0.##} 毫秒建 {_worstBuilt} 座**（每座约 {each:0.###} 毫秒），" +
-                    $"平均每次 {avgMs:0.##} 毫秒，当前上限 {budget} 座/次。" +
+                    $"平均每次 {avgMs:0.##} 毫秒，当前上限 {budget} 座/次、软预算 {Config.instantBuildFrameBudgetMs:0.##} 毫秒/渲染帧。" +
                     $"预建物积压最多 {_worstPending} 个、料不够而没建成 {_unpayable} 次。" +
                     $"**分段：召回机器人 {_recycleTicks / freq * 1000.0:0.##} 毫秒、" +
                     $"BuildFinally {_buildTicks / freq * 1000.0:0.##} 毫秒、" +

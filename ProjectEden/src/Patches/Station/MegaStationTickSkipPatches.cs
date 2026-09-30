@@ -55,8 +55,6 @@ namespace ProjectEden.Patches
     [HarmonyPatch]
     internal static class MegaStationTickSkipPatches
     {
-        private static long _skipped;
-        private static long _ran;
         private static float _nextReport;
         private static int _logged;
 
@@ -87,21 +85,21 @@ namespace ProjectEden.Patches
             // 天上还有货就照常走原版——@1297 那一段是唯一能把它们送到的地方
             if (__instance.workDroneCount > 0)
             {
-                Interlocked.Increment(ref _ran);
+                Diagnostics.StationDiagnosticCounters.Add(Diagnostics.StationDiagnosticCounters.LocalRan);
 
                 return true;
             }
 
             if (!IsMegaStation(__instance, factory))
             {
-                Interlocked.Increment(ref _ran);
+                Diagnostics.StationDiagnosticCounters.Add(Diagnostics.StationDiagnosticCounters.LocalRan);
 
                 return true;
             }
 
             Charge(__instance, power);
 
-            Interlocked.Increment(ref _skipped);
+            Diagnostics.StationDiagnosticCounters.Add(Diagnostics.StationDiagnosticCounters.LocalSkipped);
 
             return false;
         }
@@ -164,7 +162,7 @@ namespace ProjectEden.Patches
         }
 
         /// <summary>
-        /// 每 60 秒报一次增量。计数发生在 ~31 个工作线程上（所以用 <c>Interlocked</c>），
+        /// 每 60 秒报一次增量。工作线程先私有计数，星球 tick 结束后用 Interlocked 合并，
         /// 报表在主线程。
         /// </summary>
         private static void Tick(float now)
@@ -182,8 +180,8 @@ namespace ProjectEden.Patches
 
             _nextReport = now + 60f;
 
-            long skipped = Interlocked.Exchange(ref _skipped, 0);
-            long ran = Interlocked.Exchange(ref _ran, 0);
+            long skipped = Diagnostics.StationDiagnosticCounters.Take(Diagnostics.StationDiagnosticCounters.LocalSkipped);
+            long ran = Diagnostics.StationDiagnosticCounters.Take(Diagnostics.StationDiagnosticCounters.LocalRan);
 
             ProjectEdenPlugin.Log.LogInfo(
                 $"巨型建筑物流站·跳过空扫：过去 60 秒跳过 {skipped} 次、照常跑 {ran} 次"

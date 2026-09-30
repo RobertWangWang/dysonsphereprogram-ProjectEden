@@ -1,4 +1,4 @@
-﻿// 本文件移植自 ProjectGenesis（创世之书），属于其衍生作品。
+// 本文件移植自 ProjectGenesis（创世之书），属于其衍生作品。
 // Portions of this file are derived from ProjectGenesis (GenesisBook).
 //
 //     Copyright (C) 2022-2026 Awbugl and ProjectGenesis contributors
@@ -876,9 +876,13 @@ namespace ProjectEden.Patches
 
             SlotData[] slots = SlotDataStore.GetSlots(factory.planetId, component.entityId);
 
-            UpdateOutputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool,
-                              GameMain.history.stationPilerLevel);
-            UpdateInputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool);
+            var connected = BeltSlotSelection.Prepare(slots);
+            // 只有实际输出连接才读取集装科技；没有连接时省去两个I/O入口。
+            if (connected.HasOutput)
+                UpdateOutputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool,
+                                  GameMain.history.stationPilerLevel, connected.Outputs);
+            if (connected.HasInput)
+                UpdateInputSlots(ref component, factory.cargoTraffic, slots, factory.entitySignPool, connected.Inputs);
 
             MegaTickProfiler.AddSlots(tSlots);
             Diagnostics.NanosecondProbe.End(2, nanoSlots);
@@ -895,11 +899,11 @@ namespace ProjectEden.Patches
 
         /// <summary>把产物和多余的原料推上输出带。</summary>
         private static void UpdateOutputSlots(ref AssemblerComponent __instance, CargoTraffic traffic, SlotData[] slotdata,
-            SignData[] signPool, int maxPilerCount)
+            SignData[] signPool, int maxPilerCount, BeltSlotSelection.Enumerator connected)
         {
             if (maxPilerCount < 1) maxPilerCount = 1;
 
-            for (var index1 = 0; index1 < slotdata.Length; ++index1)
+            foreach (int index1 in connected)
             {
                 ref SlotData slotData = ref slotdata[index1];
 
@@ -1029,9 +1033,9 @@ namespace ProjectEden.Patches
 
         /// <summary>从输入带取料，填进 served；也接受回流的产物。</summary>
         private static void UpdateInputSlots(ref AssemblerComponent __instance, CargoTraffic traffic, SlotData[] slotdata,
-            SignData[] signPool)
+            SignData[] signPool, BeltSlotSelection.Enumerator connected)
         {
-            for (var index = 0; index < slotdata.Length; ++index)
+            foreach (int index in connected)
             {
                 if (slotdata[index].dir != IODir.Input)
                 {

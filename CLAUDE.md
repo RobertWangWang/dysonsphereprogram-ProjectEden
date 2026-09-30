@@ -4920,6 +4920,9 @@ an owner decision, not an oversight.
 
 ## Known gaps
 
+- **2026-09-30 blueprint placement follow-up:** `CreatePrebuilds` ends with unconditional `GC.Collect()`. `BlueprintPasteGcPatches` now removes only that terminal call, with an exact-shape fallback. Actual game IL and Harmony compilation are verified by `tools/BlueprintGcTests`; the historical ~177 ms floor below remains unproven as a GC measurement, and in-game improvement still requires comparison. This does not fix the separate preview freeze described below.
+
+
 - **Pasting a blueprint of several thousand coincident buildings still freezes, and the
   investigation was stopped rather than finished (owner decision).** Measured on
   `BuildTool_BlueprintPaste.CheckBuildConditions`, three points: 1,840 previews → 109 s,

@@ -284,6 +284,7 @@ namespace ProjectEden.Patches
         [HarmonyPatch(typeof(PlanetTransport), nameof(PlanetTransport.GameTick))]
         private static void PlanetTransport_GameTick(PlanetTransport __instance, long time)
         {
+            Diagnostics.TransportSplitProbe.Phase("物流配对表刷新");
             PlanetFactory factory = __instance?.factory;
 
             if (factory == null) return;
